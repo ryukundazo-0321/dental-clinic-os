@@ -47,7 +47,7 @@ export default function MonitorPage() {
     const { data } = await supabase
       .from("queue")
       .select("*")
-      .gte("checked_in_at", `${todayStr}T00:00:00`)
+      .gte("checked_in_at", `${todayStr}T00:00:00+09:00`)
       .in("status", ["waiting", "in_room"])
       .order("queue_number", { ascending: true });
 
