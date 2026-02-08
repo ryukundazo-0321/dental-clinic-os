@@ -99,8 +99,8 @@ export default function ReservationManagePage() {
       .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id,
         patients ( id, name_kanji, name_kana, phone, date_of_birth, insurance_type, burden_ratio, is_new ),
         medical_records ( id, status, soap_s )`)
-      .gte("scheduled_at", `${selectedDate}T00:00:00`)
-      .lte("scheduled_at", `${selectedDate}T23:59:59`)
+      .gte("scheduled_at", `${selectedDate}T00:00:00+09:00`)
+      .lte("scheduled_at", `${selectedDate}T23:59:59+09:00`)
       .order("scheduled_at", { ascending: true });
     if (data) setAppointments(data as unknown as Appointment[]);
     setLoading(false);
@@ -114,7 +114,7 @@ export default function ReservationManagePage() {
       case "checked_in":
         const today = new Date().toISOString().split("T")[0];
         const { data: maxQueue } = await supabase.from("queue").select("queue_number")
-          .gte("checked_in_at", `${today}T00:00:00`).order("queue_number", { ascending: false }).limit(1);
+          .gte("checked_in_at", `${today}T00:00:00+09:00`).order("queue_number", { ascending: false }).limit(1);
         const nextNumber = (maxQueue && maxQueue.length > 0) ? maxQueue[0].queue_number + 1 : 1;
         await supabase.from("queue").insert({ appointment_id: appointment.id, queue_number: nextNumber, status: "waiting", checked_in_at: new Date().toISOString() });
         break;
@@ -162,7 +162,7 @@ export default function ReservationManagePage() {
         patientId = newPatient.id;
       }
 
-      const scheduledAt = `${selectedDate}T${addForm.time}:00`;
+      const scheduledAt = `${selectedDate}T${addForm.time}:00+09:00`;
       const { data: appointment, error: aptErr } = await supabase.from("appointments").insert({
         patient_id: patientId, clinic_id: config?.clinicId, doctor_id: addForm.doctor_id || null,
         scheduled_at: scheduledAt, patient_type: addForm.patient_type, status: "reserved",
