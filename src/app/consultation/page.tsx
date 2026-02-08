@@ -108,11 +108,13 @@ export default function ConsultationPage() {
   }
 
   function formatTime(dateStr: string) {
-    return new Date(dateStr).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    const d = new Date(dateStr);
+    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
 
   function getAptTime(apt: Appointment) {
-    return new Date(apt.scheduled_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const d = new Date(apt.scheduled_at);
+    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
 
   if (loading || !config) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
@@ -123,10 +125,8 @@ export default function ConsultationPage() {
     ? units.map((u) => ({ id: u.id, label: u.name, sub: u.unit_type === "general" ? "" : u.unit_type }))
     : doctors.map((d) => ({ id: d.id, label: d.name, sub: "", color: d.color }));
 
-  // 未割り当ての予約
-  const unassignedApts = viewMode === "unit"
-    ? appointments.filter((a) => !a.unit_id)
-    : appointments.filter((a) => !a.doctor_id);
+  // 未割り当ての予約（ユニットまたはドクターが未割り当て）
+  const unassignedApts = appointments.filter((a) => !a.unit_id || !a.doctor_id);
 
   // サマリー
   const statusCounts: Record<string, number> = {};
@@ -185,20 +185,30 @@ export default function ConsultationPage() {
             </p>
             <div className="space-y-1.5">
               {unassignedApts.map((apt) => (
-                <div key={apt.id} className="bg-white border border-yellow-200 rounded-lg px-3 py-2 flex items-center gap-3">
+                <div key={apt.id} className="bg-white border border-yellow-200 rounded-lg px-3 py-2 flex items-center gap-3 flex-wrap">
                   <span className="text-xs font-bold text-gray-700 min-w-[120px]">
                     {formatTime(apt.scheduled_at)} {apt.patients?.name_kanji || "未登録"}
+                    <span className={`ml-1 text-[10px] ${STATUS_CONFIG[apt.status]?.color}`}>{STATUS_CONFIG[apt.status]?.icon}{STATUS_CONFIG[apt.status]?.label}</span>
                   </span>
                   <select value={apt.unit_id || ""} onChange={(e) => assignUnit(apt.id, e.target.value)}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1">
-                    <option value="">ユニット未割当</option>
+                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1 min-w-[100px]">
+                    <option value="">ユニット</option>
                     {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
                   <select value={apt.doctor_id || ""} onChange={(e) => assignDoctor(apt.id, e.target.value)}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1">
-                    <option value="">担当医未割当</option>
+                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1 min-w-[100px]">
+                    <option value="">担当医</option>
                     {doctors.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
+                  {apt.status === "checked_in" && (
+                    <a href={`/consultation/session?appointment_id=${apt.id}`}
+                      onClick={() => updateStatus(apt, "in_consultation")}
+                      className="bg-orange-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-orange-600 whitespace-nowrap">🩺 呼び出し</a>
+                  )}
+                  {apt.status === "in_consultation" && (
+                    <a href={`/consultation/session?appointment_id=${apt.id}`}
+                      className="bg-sky-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-sky-600 whitespace-nowrap">📋 診察画面</a>
+                  )}
                   <button onClick={() => setSelectedApt(apt)} className="text-sky-600 text-xs font-bold hover:underline whitespace-nowrap">詳細→</button>
                 </div>
               ))}
@@ -253,7 +263,9 @@ export default function ConsultationPage() {
                         const cellApts = appointments.filter((apt) => {
                           const aptTime = getAptTime(apt);
                           const matchColumn = viewMode === "unit" ? apt.unit_id === col.id : apt.doctor_id === col.id;
-                          return aptTime === slot.time && matchColumn;
+                          // 時刻マッチ: 完全一致 or スロット時間内
+                          const timeMatch = aptTime === slot.time || aptTime === slot.time.replace(/^0/, "");
+                          return timeMatch && matchColumn;
                         });
 
                         return (
