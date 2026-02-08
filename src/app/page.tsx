@@ -27,8 +27,8 @@ export default function Home() {
     const { data } = await supabase
       .from("appointments")
       .select("status")
-      .gte("scheduled_at", `${todayStr}T00:00:00`)
-      .lte("scheduled_at", `${todayStr}T23:59:59`)
+      .gte("scheduled_at", `${todayStr}T00:00:00+09:00`)
+      .lte("scheduled_at", `${todayStr}T23:59:59+09:00`)
       .neq("status", "cancelled");
 
     if (data) {
