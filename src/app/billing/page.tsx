@@ -39,7 +39,7 @@ export default function BillingPage() {
     const { data, error } = await supabase
       .from("billing")
       .select("*, patients(name_kanji, name_kana, insurance_type, burden_ratio)")
-      .gte("created_at", `${todayStr}T00:00:00+09:00`)
+      .gte("created_at", `${todayStr}T00:00:00`)
       .order("created_at", { ascending: false });
 
     if (error) {
