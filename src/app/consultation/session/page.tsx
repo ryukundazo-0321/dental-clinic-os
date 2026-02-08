@@ -187,14 +187,29 @@ function SessionContent() {
 
   async function completeSession() {
     if (!record || !appointmentId) return;
-    if (!confirm("診察を完了してカルテを確定しますか？")) return;
+    if (!confirm("診察を完了してカルテを確定しますか？\n確定後、自動的に点数算定が行われます。")) return;
     setSaving(true);
+
+    // カルテ確定
     await supabase.from("medical_records").update({
       soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p,
       tooth_chart: record.tooth_chart, status: "confirmed", doctor_confirmed: true,
     }).eq("id", record.id);
+
     await supabase.from("appointments").update({ status: "completed" }).eq("id", appointmentId);
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
+
+    // 自動算定API呼び出し
+    try {
+      await fetch("/api/auto-billing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record_id: record.id }),
+      });
+    } catch (e) {
+      console.error("Auto-billing failed:", e);
+    }
+
     if (timerRef.current) clearInterval(timerRef.current);
     setSaving(false);
     router.push("/consultation");
