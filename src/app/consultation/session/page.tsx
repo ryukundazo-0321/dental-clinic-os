@@ -200,6 +200,7 @@ function SessionContent() {
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
 
     // 自動算定API呼び出し
+    let billingResult = "";
     try {
       const res = await fetch("/api/auto-billing", {
         method: "POST",
@@ -208,20 +209,22 @@ function SessionContent() {
       });
       const data = await res.json();
       if (data.success) {
-        setSaveMsg(`✅ 算定完了: ${data.total_points}点 / 負担額¥${data.patient_burden}`);
+        billingResult = `✅ 算定完了: ${data.total_points}点 / 患者負担¥${data.patient_burden}`;
       } else {
-        setSaveMsg(`⚠️ 算定エラー: ${data.error} ${data.detail || ""}`);
-        console.error("Auto-billing error:", data);
+        billingResult = `⚠️ 算定エラー: ${data.error || "不明"} | ${data.detail || ""} | ${data.hint || ""}`;
+        console.error("Auto-billing error:", JSON.stringify(data));
       }
     } catch (e) {
-      setSaveMsg("⚠️ 算定API呼び出し失敗");
+      billingResult = `⚠️ 算定API呼び出し失敗: ${e instanceof Error ? e.message : "不明"}`;
       console.error("Auto-billing failed:", e);
     }
 
     if (timerRef.current) clearInterval(timerRef.current);
     setSaving(false);
-    // 2秒後に遷移（算定結果を見れるように）
-    setTimeout(() => router.push("/consultation"), 2000);
+
+    // 結果をalertで表示（確実に見える）
+    alert(`カルテ確定しました。\n\n${billingResult}\n\n会計画面（/billing）で確認してください。`);
+    router.push("/consultation");
   }
 
   function getAge(dob: string) {
