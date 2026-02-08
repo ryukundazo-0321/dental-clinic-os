@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { getClinicConfig, generateTimeSlots, getDoctors, type ClinicConfig, type DoctorOption } from "@/lib/reservation-utils";
+import { getClinicConfig, getDoctors, type ClinicConfig, type DoctorOption } from "@/lib/reservation-utils";
 
 type Unit = { id: string; unit_number: number; name: string; unit_type: string; is_active: boolean };
 
@@ -18,8 +18,6 @@ type Appointment = {
   patients: { id: string; name_kanji: string; name_kana: string; phone: string; is_new: boolean } | null;
   medical_records: { id: string; status: string }[] | null;
 };
-
-type ViewMode = "unit" | "doctor";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
   reserved:        { label: "予約済",     color: "text-blue-700",   bg: "bg-blue-50",    border: "border-blue-300",   icon: "📅" },
@@ -36,11 +34,9 @@ export default function ConsultationPage() {
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [viewMode, setViewMode] = useState<ViewMode>("unit");
   const [loading, setLoading] = useState(true);
   const [selectedApt, setSelectedApt] = useState<Appointment | null>(null);
 
-  // 初期化
   useEffect(() => {
     async function init() {
       const c = await getClinicConfig();
@@ -48,15 +44,14 @@ export default function ConsultationPage() {
       if (c) {
         const docs = await getDoctors(c.clinicId);
         setDoctors(docs);
-        const { data: unitsData } = await supabase.from("units").select("*").eq("clinic_id", c.clinicId).eq("is_active", true).order("sort_order");
-        if (unitsData) setUnits(unitsData);
+        const { data: u } = await supabase.from("units").select("*").eq("is_active", true).order("unit_number");
+        if (u) setUnits(u as Unit[]);
       }
       setLoading(false);
     }
     init();
   }, []);
 
-  // 予約データ取得
   useEffect(() => {
     fetchAppointments();
     const channel = supabase.channel("consultation-realtime")
@@ -78,7 +73,6 @@ export default function ConsultationPage() {
     if (data) setAppointments(data as unknown as Appointment[]);
   }
 
-  // ステータス変更
   async function updateStatus(apt: Appointment, newStatus: string) {
     await supabase.from("appointments").update({ status: newStatus }).eq("id", apt.id);
     if (newStatus === "in_consultation") {
@@ -93,42 +87,25 @@ export default function ConsultationPage() {
     if (selectedApt?.id === apt.id) setSelectedApt((prev) => prev ? { ...prev, status: newStatus } : null);
   }
 
-  // ユニット割り当て
   async function assignUnit(aptId: string, unitId: string) {
     await supabase.from("appointments").update({ unit_id: unitId || null }).eq("id", aptId);
     setAppointments((prev) => prev.map((a) => a.id === aptId ? { ...a, unit_id: unitId || null } : a));
     if (selectedApt?.id === aptId) setSelectedApt((prev) => prev ? { ...prev, unit_id: unitId || null } : null);
   }
 
-  // ドクター割り当て
   async function assignDoctor(aptId: string, doctorId: string) {
     await supabase.from("appointments").update({ doctor_id: doctorId || null }).eq("id", aptId);
     setAppointments((prev) => prev.map((a) => a.id === aptId ? { ...a, doctor_id: doctorId || null } : a));
     if (selectedApt?.id === aptId) setSelectedApt((prev) => prev ? { ...prev, doctor_id: doctorId || null } : null);
   }
 
-  function formatTime(dateStr: string) {
-    const d = new Date(dateStr);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
-  }
-
   function getAptTime(apt: Appointment) {
     const d = new Date(apt.scheduled_at);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+    return d.getHours().toString().padStart(2, "0") + ":" + d.getMinutes().toString().padStart(2, "0");
   }
 
   if (loading || !config) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
 
-  // タイムスロット生成
-  const timeSlots = generateTimeSlots(config);
-  const columns: { id: string; label: string; sub: string; color?: string }[] = viewMode === "unit"
-    ? units.map((u) => ({ id: u.id, label: u.name, sub: u.unit_type === "general" ? "" : u.unit_type }))
-    : doctors.map((d) => ({ id: d.id, label: d.name, sub: "", color: d.color }));
-
-  // 未割り当ての予約（ユニットまたはドクターが未割り当て）
-  const unassignedApts = appointments.filter((a) => !a.unit_id || !a.doctor_id);
-
-  // サマリー
   const statusCounts: Record<string, number> = {};
   appointments.forEach((a) => { statusCounts[a.status] = (statusCounts[a.status] || 0) + 1; });
 
@@ -140,25 +117,19 @@ export default function ConsultationPage() {
             <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← 戻る</Link>
             <h1 className="text-lg font-bold text-gray-900">🩺 診察カレンダー</h1>
           </div>
-          <div className="flex items-center gap-3">
-            {/* 表示切り替え */}
-            <div className="flex bg-gray-100 rounded-lg p-0.5">
-              <button onClick={() => setViewMode("unit")}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${viewMode === "unit" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
-                🪥 ユニット別
-              </button>
-              <button onClick={() => setViewMode("doctor")}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${viewMode === "doctor" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>
-                👨‍⚕️ ドクター別
-              </button>
-            </div>
+          <div className="flex gap-2">
+            {["reserved", "checked_in", "in_consultation", "completed", "billing_done"].map((s) => (
+              <span key={s} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${STATUS_CONFIG[s].bg} ${STATUS_CONFIG[s].color}`}>
+                {STATUS_CONFIG[s].icon} {statusCounts[s] || 0}
+              </span>
+            ))}
           </div>
         </div>
       </header>
 
       <main className="max-w-full mx-auto px-4 py-3">
-        {/* 日付 + サマリー */}
-        <div className="flex items-center gap-3 mb-3 flex-wrap">
+        {/* 日付ナビ */}
+        <div className="flex items-center gap-3 mb-3">
           <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split("T")[0]); }}
             className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">◀</button>
           <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
@@ -167,160 +138,88 @@ export default function ConsultationPage() {
             className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">▶</button>
           <button onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
             className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 text-xs text-gray-500">今日</button>
-
-          <div className="flex gap-2 ml-auto">
-            {["reserved", "checked_in", "in_consultation", "completed", "billing_done"].map((s) => (
-              <span key={s} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${STATUS_CONFIG[s].bg} ${STATUS_CONFIG[s].color}`}>
-                {STATUS_CONFIG[s].icon} {statusCounts[s] || 0}
-              </span>
-            ))}
-          </div>
+          <span className="text-xs text-gray-400 ml-2">本日の予約: {appointments.length}件</span>
         </div>
 
-        {/* 未割り当て警告 */}
-        {unassignedApts.length > 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3">
-            <p className="text-sm text-yellow-700 font-bold mb-2">
-              ⚠ {viewMode === "unit" ? "ユニット" : "ドクター"}未割り当ての予約が {unassignedApts.length} 件あります
-            </p>
-            <div className="space-y-1.5">
-              {unassignedApts.map((apt) => (
-                <div key={apt.id} className="bg-white border border-yellow-200 rounded-lg px-3 py-2 flex items-center gap-3 flex-wrap">
-                  <span className="text-xs font-bold text-gray-700 min-w-[120px]">
-                    {formatTime(apt.scheduled_at)} {apt.patients?.name_kanji || "未登録"}
-                    <span className={`ml-1 text-[10px] ${STATUS_CONFIG[apt.status]?.color}`}>{STATUS_CONFIG[apt.status]?.icon}{STATUS_CONFIG[apt.status]?.label}</span>
-                  </span>
-                  <select value={apt.unit_id || ""} onChange={(e) => assignUnit(apt.id, e.target.value)}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1 min-w-[100px]">
-                    <option value="">ユニット</option>
-                    {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
-                  <select value={apt.doctor_id || ""} onChange={(e) => assignDoctor(apt.id, e.target.value)}
-                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1 min-w-[100px]">
-                    <option value="">担当医</option>
-                    {doctors.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                  {apt.status === "checked_in" && (
-                    <a href={`/consultation/session?appointment_id=${apt.id}`}
-                      onClick={() => updateStatus(apt, "in_consultation")}
-                      className="bg-orange-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-orange-600 whitespace-nowrap">🩺 呼び出し</a>
-                  )}
-                  {apt.status === "in_consultation" && (
-                    <a href={`/consultation/session?appointment_id=${apt.id}`}
-                      className="bg-sky-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-sky-600 whitespace-nowrap">📋 診察画面</a>
-                  )}
-                  <button onClick={() => setSelectedApt(apt)} className="text-sky-600 text-xs font-bold hover:underline whitespace-nowrap">詳細→</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         <div className="flex gap-3">
-          {/* タイムテーブル */}
-          <div className="flex-1 overflow-x-auto">
-            <div className="min-w-[600px]">
-              {/* ヘッダー（列名） */}
-              <div className="flex sticky top-0 z-10 bg-gray-50">
-                <div className="w-16 flex-shrink-0 border-r border-gray-200 bg-gray-100 rounded-tl-lg p-2">
-                  <p className="text-[10px] text-gray-400 font-bold text-center">時間</p>
-                </div>
-                {columns.length > 0 ? columns.map((col, idx) => (
-                  <div key={col.id} className={`flex-1 min-w-[140px] p-2 text-center border-r border-gray-200 bg-gray-100 ${idx === columns.length - 1 ? "rounded-tr-lg" : ""}`}>
-                    <p className="text-sm font-bold text-gray-900" style={viewMode === "doctor" && col.color ? { color: col.color } : {}}>
-                      {col.label}
-                    </p>
-                    {col.sub && <p className="text-[10px] text-gray-400">{col.sub}</p>}
-                  </div>
-                )) : (
-                  <div className="flex-1 p-2 text-center bg-gray-100 rounded-tr-lg">
-                    <p className="text-sm text-gray-400">{viewMode === "unit" ? "ユニットを設定画面で追加してください" : "ドクターを設定画面で追加してください"}</p>
-                  </div>
-                )}
+          {/* 左: 予約リスト */}
+          <div className="flex-1 overflow-auto">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              {/* テーブルヘッダー */}
+              <div className="grid grid-cols-[70px_1fr_130px_130px_90px] bg-gray-50 border-b border-gray-200 px-3 py-2">
+                <p className="text-[10px] font-bold text-gray-500">時間</p>
+                <p className="text-[10px] font-bold text-gray-500">患者名</p>
+                <p className="text-[10px] font-bold text-gray-500">ユニット</p>
+                <p className="text-[10px] font-bold text-gray-500">担当医</p>
+                <p className="text-[10px] font-bold text-gray-500">状態</p>
               </div>
 
-              {/* タイムテーブル本体 */}
-              {columns.length > 0 && timeSlots.map((slot, slotIdx) => {
-                const isHourStart = slot.time.endsWith(":00");
-                const isPeriodBreak = slotIdx > 0 && timeSlots[slotIdx - 1].period !== slot.period;
-
-                return (
-                  <div key={slot.time}>
-                    {isPeriodBreak && (
-                      <div className="flex bg-gray-200/50">
-                        <div className="w-16 flex-shrink-0 p-1 text-center"><p className="text-[10px] text-gray-400 font-bold">休憩</p></div>
-                        {columns.map((col) => <div key={col.id} className="flex-1 min-w-[140px] border-r border-gray-200" />)}
+              {appointments.length === 0 ? (
+                <div className="text-center py-16">
+                  <p className="text-gray-300 text-4xl mb-2">📅</p>
+                  <p className="text-gray-400 text-sm">本日の予約はありません</p>
+                </div>
+              ) : (
+                appointments.map((apt) => {
+                  const status = STATUS_CONFIG[apt.status] || STATUS_CONFIG.reserved;
+                  const isSelected = selectedApt?.id === apt.id;
+                  return (
+                    <button key={apt.id} onClick={() => setSelectedApt(apt)}
+                      className={`w-full grid grid-cols-[70px_1fr_130px_130px_90px] items-center px-3 py-3 border-b border-gray-100 text-left hover:bg-sky-50 transition-colors ${isSelected ? "bg-sky-50 ring-inset ring-2 ring-sky-400" : ""}`}>
+                      <p className="text-sm font-bold text-gray-800">{getAptTime(apt)}</p>
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">{apt.patients?.name_kanji || "未登録"}</p>
+                        <p className="text-[10px] text-gray-400">{apt.patients?.name_kana} / {apt.patient_type === "new" ? "初診" : "再診"}</p>
                       </div>
-                    )}
-                    <div className={`flex ${isHourStart ? "border-t border-gray-300" : "border-t border-gray-100"}`}>
-                      {/* 時間ラベル */}
-                      <div className="w-16 flex-shrink-0 border-r border-gray-200 p-1 flex items-start justify-center">
-                        <p className={`text-xs ${isHourStart ? "font-bold text-gray-700" : "text-gray-400"}`}>{slot.time}</p>
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <select value={apt.unit_id || ""} onChange={(e) => assignUnit(apt.id, e.target.value)}
+                          className="border border-gray-200 rounded px-1.5 py-1 text-xs bg-white w-full focus:border-sky-400 focus:outline-none">
+                          <option value="">未割当</option>
+                          {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
                       </div>
-
-                      {/* 各列 */}
-                      {columns.map((col) => {
-                        const cellApts = appointments.filter((apt) => {
-                          const aptTime = getAptTime(apt);
-                          const matchColumn = viewMode === "unit" ? apt.unit_id === col.id : apt.doctor_id === col.id;
-                          // 時刻マッチ: 完全一致 or スロット時間内
-                          const timeMatch = aptTime === slot.time || aptTime === slot.time.replace(/^0/, "");
-                          return timeMatch && matchColumn;
-                        });
-
-                        return (
-                          <div key={col.id} className="flex-1 min-w-[140px] border-r border-gray-100 p-0.5 min-h-[48px]">
-                            {cellApts.map((apt) => {
-                              const status = STATUS_CONFIG[apt.status] || STATUS_CONFIG.reserved;
-                              return (
-                                <button key={apt.id} onClick={() => setSelectedApt(apt)}
-                                  className={`w-full text-left rounded-lg border-l-4 px-2 py-1.5 mb-0.5 transition-all hover:shadow-sm ${status.bg} ${status.border} ${selectedApt?.id === apt.id ? "ring-2 ring-sky-400" : ""}`}>
-                                  <div className="flex items-center justify-between">
-                                    <p className="text-xs font-bold text-gray-900 truncate">
-                                      {apt.patients?.name_kanji || "未登録"}
-                                    </p>
-                                    <span className={`text-[9px] font-bold ${status.color}`}>{status.icon}</span>
-                                  </div>
-                                  <p className="text-[10px] text-gray-400 truncate">
-                                    {apt.patient_type === "new" ? "初診" : "再診"}
-                                    {viewMode === "unit" && apt.doctor_id ? ` / ${doctors.find(d => d.id === apt.doctor_id)?.name || ""}` : ""}
-                                    {viewMode === "doctor" && apt.unit_id ? ` / ${units.find(u => u.id === apt.unit_id)?.name || ""}` : ""}
-                                    {apt.duration_min ? ` / ${apt.duration_min}分` : ""}
-                                  </p>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <select value={apt.doctor_id || ""} onChange={(e) => assignDoctor(apt.id, e.target.value)}
+                          className="border border-gray-200 rounded px-1.5 py-1 text-xs bg-white w-full focus:border-purple-400 focus:outline-none">
+                          <option value="">未割当</option>
+                          {doctors.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        </select>
+                      </div>
+                      <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-1 rounded-full ${status.bg} ${status.color}`}>
+                        {status.icon} {status.label}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
-          {/* 詳細パネル */}
+          {/* 右: 詳細パネル */}
           {selectedApt && (
-            <div className="w-72 flex-shrink-0 hidden lg:block">
+            <div className="w-80 flex-shrink-0 hidden lg:block">
               <div className="bg-white rounded-xl border border-gray-200 p-4 sticky top-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-bold text-gray-900 text-sm">詳細</h3>
                   <button onClick={() => setSelectedApt(null)} className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
                 </div>
                 <div className="space-y-3">
-                  <div>
-                    <p className="text-xs text-gray-400">患者名</p>
-                    <p className="font-bold text-gray-900">{selectedApt.patients?.name_kanji || "未登録"}</p>
-                    <p className="text-xs text-gray-400">{selectedApt.patients?.name_kana}</p>
+                  <div className="flex items-center gap-3">
+                    <div className="bg-sky-100 text-sky-700 w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold">
+                      {(selectedApt.patients?.name_kanji || "?").charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-900 text-base">{selectedApt.patients?.name_kanji || "未登録"}</p>
+                      <p className="text-xs text-gray-400">{selectedApt.patients?.name_kana}</p>
+                    </div>
                   </div>
+
                   <div className="grid grid-cols-2 gap-2">
-                    <div><p className="text-xs text-gray-400">時間</p><p className="text-sm font-bold">{formatTime(selectedApt.scheduled_at)}</p></div>
+                    <div><p className="text-xs text-gray-400">時間</p><p className="text-sm font-bold">{getAptTime(selectedApt)}</p></div>
                     <div><p className="text-xs text-gray-400">区分</p><p className="text-sm font-bold">{selectedApt.patient_type === "new" ? "初診" : "再診"}</p></div>
                   </div>
                   <div><p className="text-xs text-gray-400">電話</p><p className="text-sm">{selectedApt.patients?.phone || "-"}</p></div>
 
-                  {/* ユニット割り当て */}
                   <div>
                     <p className="text-xs text-gray-400 mb-1">ユニット</p>
                     <select value={selectedApt.unit_id || ""} onChange={(e) => assignUnit(selectedApt.id, e.target.value)}
@@ -330,7 +229,6 @@ export default function ConsultationPage() {
                     </select>
                   </div>
 
-                  {/* ドクター割り当て */}
                   <div>
                     <p className="text-xs text-gray-400 mb-1">担当医</p>
                     <select value={selectedApt.doctor_id || ""} onChange={(e) => assignDoctor(selectedApt.id, e.target.value)}
@@ -340,7 +238,6 @@ export default function ConsultationPage() {
                     </select>
                   </div>
 
-                  {/* カルテ */}
                   <div className="border-t border-gray-100 pt-2">
                     <p className="text-xs text-gray-400 mb-1">カルテ</p>
                     {selectedApt.medical_records?.length ? (
@@ -348,7 +245,6 @@ export default function ConsultationPage() {
                     ) : <p className="text-xs text-gray-400">未作成</p>}
                   </div>
 
-                  {/* ステータス */}
                   <div className="border-t border-gray-100 pt-2">
                     <p className="text-xs text-gray-400 mb-1">ステータス</p>
                     <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${STATUS_CONFIG[selectedApt.status]?.bg} ${STATUS_CONFIG[selectedApt.status]?.color}`}>
@@ -357,27 +253,27 @@ export default function ConsultationPage() {
                   </div>
 
                   {/* アクションボタン */}
-                  <div className="border-t border-gray-100 pt-2 space-y-1.5">
+                  <div className="border-t border-gray-100 pt-3 space-y-2">
                     {selectedApt.status === "reserved" && (
                       <button onClick={() => updateStatus(selectedApt, "checked_in")}
-                        className="w-full py-2 rounded-lg text-xs font-bold bg-green-100 text-green-700 hover:bg-green-200">📱 来院済にする</button>
+                        className="w-full py-2.5 rounded-lg text-sm font-bold bg-green-500 text-white hover:bg-green-600 shadow-lg shadow-green-200">📱 来院済にする</button>
                     )}
                     {selectedApt.status === "checked_in" && (
                       <a href={`/consultation/session?appointment_id=${selectedApt.id}`}
                         onClick={() => updateStatus(selectedApt, "in_consultation")}
-                        className="block w-full py-2 rounded-lg text-xs font-bold bg-orange-100 text-orange-700 hover:bg-orange-200 text-center">🩺 呼び出し（診察開始）→</a>
+                        className="block w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 呼び出し（診察開始）→</a>
                     )}
                     {selectedApt.status === "in_consultation" && (
                       <>
                         <a href={`/consultation/session?appointment_id=${selectedApt.id}`}
-                          className="block w-full py-2 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 hover:bg-sky-200 text-center">📋 診察画面を開く →</a>
+                          className="block w-full py-3 rounded-lg text-sm font-bold bg-sky-500 text-white hover:bg-sky-600 text-center shadow-lg shadow-sky-200">📋 診察画面を開く →</a>
                         <button onClick={() => updateStatus(selectedApt, "completed")}
                           className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
                       </>
                     )}
                     {selectedApt.status === "completed" && (
                       <button onClick={() => updateStatus(selectedApt, "billing_done")}
-                        className="w-full py-2 rounded-lg text-xs font-bold bg-gray-100 text-gray-700 hover:bg-gray-200">💰 会計済にする</button>
+                        className="w-full py-2.5 rounded-lg text-sm font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">💰 会計済にする</button>
                     )}
                   </div>
                 </div>
