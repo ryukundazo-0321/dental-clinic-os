@@ -193,6 +193,23 @@ export default function ChartPage() {
     setSaving(false);
   }
 
+  // カルテ確定を解除して再編集可能にする
+  async function unlockRecord() {
+    if (!selectedRecord) return;
+    if (!confirm("確定を解除して再編集しますか？")) return;
+    setSaving(true);
+
+    await supabase
+      .from("medical_records")
+      .update({ status: "soap_complete", doctor_confirmed: false })
+      .eq("id", selectedRecord.id);
+
+    setSelectedRecord({ ...selectedRecord, status: "soap_complete", doctor_confirmed: false });
+    setSaveMsg("編集可能にしました ✅");
+    setTimeout(() => setSaveMsg(""), 2000);
+    setSaving(false);
+  }
+
   // 歯式の状態変更
   function setToothStatus(toothNum: string, status: string) {
     if (!selectedRecord) return;
@@ -424,7 +441,12 @@ export default function ChartPage() {
                           className="bg-sky-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-sky-700 disabled:opacity-50">
                           {saving ? "保存中..." : "一時保存"}
                         </button>
-                        {selectedRecord.status !== "confirmed" && (
+                        {selectedRecord.status === "confirmed" ? (
+                          <button onClick={unlockRecord} disabled={saving}
+                            className="bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-yellow-600 disabled:opacity-50">
+                            🔓 編集する
+                          </button>
+                        ) : (
                           <button onClick={confirmRecord} disabled={saving}
                             className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700 disabled:opacity-50">
                             カルテ確定
