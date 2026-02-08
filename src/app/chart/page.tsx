@@ -83,8 +83,8 @@ export default function ChartPage() {
         patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio, is_new ),
         medical_records ( id )
       `)
-      .gte("scheduled_at", `${today}T00:00:00+09:00`)
-      .lte("scheduled_at", `${today}T23:59:59+09:00`)
+      .gte("scheduled_at", `${today}T00:00:00`)
+      .lte("scheduled_at", `${today}T23:59:59`)
       .in("status", ["checked_in", "in_consultation", "completed"])
       .order("scheduled_at", { ascending: true });
 
