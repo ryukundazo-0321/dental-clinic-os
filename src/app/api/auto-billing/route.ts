@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
     const selectedItems: { code: string; name: string; points: number; category: string; count: number; note: string }[] = [];
 
-    function addItem(code: string, count = 1) {
+    const addItem = (code: string, count = 1) => {
       const fee = feeMap.get(code);
       if (fee) {
         selectedItems.push({
