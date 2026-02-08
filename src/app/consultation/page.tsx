@@ -273,8 +273,7 @@ export default function ConsultationPage() {
                                     {apt.patient_type === "new" ? "初診" : "再診"}
                                     {viewMode === "unit" && apt.doctor_id ? ` / ${doctors.find(d => d.id === apt.doctor_id)?.name || ""}` : ""}
                                     {viewMode === "doctor" && apt.unit_id ? ` / ${units.find(u => u.id === apt.unit_id)?.name || ""}` : ""}
-                                  </p>
-                                    {apt.duration_min && ` / ${apt.duration_min}分`}
+                                    {apt.duration_min ? ` / ${apt.duration_min}分` : ""}
                                   </p>
                                 </button>
                               );
