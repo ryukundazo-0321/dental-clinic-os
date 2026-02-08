@@ -54,7 +54,7 @@ export default function SelfCheckinPage() {
       return;
     }
 
-    // 今日の予約を検索
+    // 今日の予約を検索（最新の予約を優先）
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
@@ -62,7 +62,7 @@ export default function SelfCheckinPage() {
       .gte("scheduled_at", `${todayStr}T00:00:00`)
       .lte("scheduled_at", `${todayStr}T23:59:59`)
       .in("status", ["reserved"])
-      .order("scheduled_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(1);
 
     if (!appointments || appointments.length === 0) {
