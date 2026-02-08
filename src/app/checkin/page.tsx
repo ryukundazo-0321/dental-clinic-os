@@ -55,8 +55,8 @@ export default function CheckinPage() {
       .from("appointments")
       .select(`id, scheduled_at, patient_type, status, doctor_id,
         patients ( id, name_kanji, name_kana, phone )`)
-      .gte("scheduled_at", `${todayStr}T00:00:00+09:00`)
-      .lte("scheduled_at", `${todayStr}T23:59:59+09:00`)
+      .gte("scheduled_at", `${todayStr}T00:00:00`)
+      .lte("scheduled_at", `${todayStr}T23:59:59`)
       .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true });
 
@@ -66,7 +66,7 @@ export default function CheckinPage() {
     const { data: queueData } = await supabase
       .from("queue")
       .select("*")
-      .gte("checked_in_at", `${todayStr}T00:00:00+09:00`)
+      .gte("checked_in_at", `${todayStr}T00:00:00`)
       .order("queue_number", { ascending: true });
 
     if (queueData) setQueue(queueData);
@@ -103,7 +103,7 @@ export default function CheckinPage() {
   }
 
   function formatTime(dateStr: string) {
-    return new Date(dateStr).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    const d = new Date(dateStr); return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
   }
 
   const reservedApts = appointments.filter((a) => a.status === "reserved");
