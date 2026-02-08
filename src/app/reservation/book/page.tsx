@@ -56,6 +56,7 @@ export default function PatientBookingPage() {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
 
     // 2ヶ月先まで予約可能
     const maxDate = new Date();
