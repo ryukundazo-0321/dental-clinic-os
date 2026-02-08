@@ -59,8 +59,8 @@ export default function SelfCheckinPage() {
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
       .eq("patient_id", patient.id)
-      .gte("scheduled_at", `${todayStr}T00:00:00`)
-      .lte("scheduled_at", `${todayStr}T23:59:59`)
+      .gte("scheduled_at", `${todayStr}T00:00:00+09:00`)
+      .lte("scheduled_at", `${todayStr}T23:59:59+09:00`)
       .in("status", ["reserved"])
       .order("scheduled_at", { ascending: true })
       .limit(1);
@@ -71,8 +71,8 @@ export default function SelfCheckinPage() {
         .from("appointments")
         .select("id")
         .eq("patient_id", patient.id)
-        .gte("scheduled_at", `${todayStr}T00:00:00`)
-        .lte("scheduled_at", `${todayStr}T23:59:59`)
+        .gte("scheduled_at", `${todayStr}T00:00:00+09:00`)
+        .lte("scheduled_at", `${todayStr}T23:59:59+09:00`)
         .in("status", ["checked_in", "in_consultation", "completed", "billing_done"])
         .limit(1);
 
@@ -108,7 +108,7 @@ export default function SelfCheckinPage() {
     const { data: maxQueue } = await supabase
       .from("queue")
       .select("queue_number")
-      .gte("checked_in_at", `${todayStr}T00:00:00`)
+      .gte("checked_in_at", `${todayStr}T00:00:00+09:00`)
       .order("queue_number", { ascending: false })
       .limit(1);
 
