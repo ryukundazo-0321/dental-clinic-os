@@ -129,7 +129,8 @@ export default function ConsultationPage() {
     : appointments.filter((a) => !a.doctor_id);
 
   // サマリー
-  const statusCounts = appointments.reduce((acc, a) => { acc[a.status] = (acc[a.status] || 0) + 1; return acc; }, {} as Record<string, number>);
+  const statusCounts: Record<string, number> = {};
+  appointments.forEach((a) => { statusCounts[a.status] = (statusCounts[a.status] || 0) + 1; });
 
   return (
     <div className="min-h-screen bg-gray-50">
