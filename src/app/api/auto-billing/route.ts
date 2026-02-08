@@ -136,8 +136,8 @@ export async function POST(request: NextRequest) {
     if (isNew) warnings.push("歯科疾患管理料の算定には管理計画書の文書提供が必要です。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
 
-    // 6. billingテーブルに保存
-    const { data: billing, error: billErr } = await supabase.from("billing").upsert({
+    // 6. billingテーブルに保存（既存チェック→INSERT or UPDATE）
+    const billingData = {
       record_id: recordId,
       patient_id: patientId,
       total_points: totalPoints,
@@ -148,15 +148,36 @@ export async function POST(request: NextRequest) {
       ai_check_warnings: warnings,
       claim_status: "pending",
       payment_status: "unpaid",
-    }, { onConflict: "record_id" }).select().single();
+    };
+
+    // 既存レコードがあるかチェック
+    const { data: existing } = await supabase.from("billing").select("id").eq("record_id", recordId).limit(1);
+
+    let billing = null;
+    let billErr = null;
+
+    if (existing && existing.length > 0) {
+      // UPDATE
+      const res = await supabase.from("billing").update(billingData).eq("record_id", recordId).select().single();
+      billing = res.data;
+      billErr = res.error;
+    } else {
+      // INSERT
+      const res = await supabase.from("billing").insert(billingData).select().single();
+      billing = res.data;
+      billErr = res.error;
+    }
 
     if (billErr) {
       return NextResponse.json({
         error: "billing保存失敗",
         detail: billErr.message,
         hint: billErr.hint || "",
+        code: billErr.code || "",
         items: selectedItems,
         totalPoints,
+        patientId,
+        recordId,
       }, { status: 500 });
     }
 
