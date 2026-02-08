@@ -152,7 +152,7 @@ export default function PatientBookingPage() {
         if (patientErr || !newPatient) { setError("登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
         patientId = newPatient.id;
       }
-      const scheduledAt = `${selectedDate}T${selectedTime}:00+09:00`;
+      const scheduledAt = `${selectedDate}T${selectedTime}:00`;
       const { data: appointment, error: aptErr } = await supabase.from("appointments").insert({
         patient_id: patientId, clinic_id: config?.clinicId, doctor_id: selectedDoctor || null,
         scheduled_at: scheduledAt, patient_type: patientType === "new" ? "new" : "returning",
