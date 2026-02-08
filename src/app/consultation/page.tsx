@@ -179,15 +179,27 @@ export default function ConsultationPage() {
         {/* 未割り当て警告 */}
         {unassignedApts.length > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-3">
-            <p className="text-sm text-yellow-700 font-bold">
+            <p className="text-sm text-yellow-700 font-bold mb-2">
               ⚠ {viewMode === "unit" ? "ユニット" : "ドクター"}未割り当ての予約が {unassignedApts.length} 件あります
             </p>
-            <div className="flex flex-wrap gap-2 mt-2">
+            <div className="space-y-1.5">
               {unassignedApts.map((apt) => (
-                <button key={apt.id} onClick={() => setSelectedApt(apt)}
-                  className="bg-white border border-yellow-300 rounded-lg px-3 py-1.5 text-xs font-bold text-gray-700 hover:bg-yellow-100">
-                  {formatTime(apt.scheduled_at)} {apt.patients?.name_kanji || "未登録"}
-                </button>
+                <div key={apt.id} className="bg-white border border-yellow-200 rounded-lg px-3 py-2 flex items-center gap-3">
+                  <span className="text-xs font-bold text-gray-700 min-w-[120px]">
+                    {formatTime(apt.scheduled_at)} {apt.patients?.name_kanji || "未登録"}
+                  </span>
+                  <select value={apt.unit_id || ""} onChange={(e) => assignUnit(apt.id, e.target.value)}
+                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1">
+                    <option value="">ユニット未割当</option>
+                    {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                  <select value={apt.doctor_id || ""} onChange={(e) => assignDoctor(apt.id, e.target.value)}
+                    className="border border-gray-200 rounded px-2 py-1 text-xs bg-white flex-1">
+                    <option value="">担当医未割当</option>
+                    {doctors.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                  <button onClick={() => setSelectedApt(apt)} className="text-sky-600 text-xs font-bold hover:underline whitespace-nowrap">詳細→</button>
+                </div>
               ))}
             </div>
           </div>
@@ -258,6 +270,9 @@ export default function ConsultationPage() {
                                   </div>
                                   <p className="text-[10px] text-gray-400 truncate">
                                     {apt.patient_type === "new" ? "初診" : "再診"}
+                                    {viewMode === "unit" && apt.doctor_id ? ` / ${doctors.find(d => d.id === apt.doctor_id)?.name || ""}` : ""}
+                                    {viewMode === "doctor" && apt.unit_id ? ` / ${units.find(u => u.id === apt.unit_id)?.name || ""}` : ""}
+                                  </p>
                                     {apt.duration_min && ` / ${apt.duration_min}分`}
                                   </p>
                                 </button>
