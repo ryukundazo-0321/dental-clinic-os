@@ -119,7 +119,7 @@ export default function ConsultationPage() {
 
   // タイムスロット生成
   const timeSlots = generateTimeSlots(config);
-  const columns = viewMode === "unit"
+  const columns: { id: string; label: string; sub: string; color?: string }[] = viewMode === "unit"
     ? units.map((u) => ({ id: u.id, label: u.name, sub: u.unit_type === "general" ? "" : u.unit_type }))
     : doctors.map((d) => ({ id: d.id, label: d.name, sub: "", color: d.color }));
 
@@ -204,7 +204,7 @@ export default function ConsultationPage() {
                 </div>
                 {columns.length > 0 ? columns.map((col, idx) => (
                   <div key={col.id} className={`flex-1 min-w-[140px] p-2 text-center border-r border-gray-200 bg-gray-100 ${idx === columns.length - 1 ? "rounded-tr-lg" : ""}`}>
-                    <p className="text-sm font-bold text-gray-900" style={viewMode === "doctor" && (col as { color?: string }).color ? { color: (col as { color: string }).color } : {}}>
+                    <p className="text-sm font-bold text-gray-900" style={viewMode === "doctor" && col.color ? { color: col.color } : {}}>
                       {col.label}
                     </p>
                     {col.sub && <p className="text-[10px] text-gray-400">{col.sub}</p>}
