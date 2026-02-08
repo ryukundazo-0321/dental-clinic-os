@@ -31,6 +31,11 @@ export default function CheckinPage() {
   // 手動チェックイン用
   const [searchQuery, setSearchQuery] = useState("");
 
+  const [showQR, setShowQR] = useState(false);
+  const selfCheckinUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/checkin/self`
+    : "/checkin/self";
+
   const todayStr = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
@@ -122,9 +127,14 @@ export default function CheckinPage() {
             <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← 戻る</Link>
             <h1 className="text-lg font-bold text-gray-900">📱 受付</h1>
           </div>
-          <Link href="/monitor" target="_blank" className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-teal-700">
-            🖥️ 待合モニターを開く
-          </Link>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowQR(true)} className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-200">
+              📱 QRコード表示
+            </button>
+            <Link href="/monitor" target="_blank" className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-teal-700">
+              🖥️ 待合モニターを開く
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -274,6 +284,41 @@ export default function CheckinPage() {
           </div>
         </div>
       </main>
+
+      {/* QRコード表示モーダル */}
+      {showQR && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowQR(false)}>
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">📱 セルフチェックイン用QRコード</h3>
+            <p className="text-sm text-gray-500 mb-6">このQRコードを受付に掲示してください。<br />患者さんがスマホで読み取ってチェックインできます。</p>
+
+            {/* QRコード（Google Charts API使用） */}
+            <div className="bg-white p-4 inline-block rounded-xl border-2 border-gray-200 mb-4">
+              <img
+                src={`https://chart.googleapis.com/chart?cht=qr&chs=250x250&chl=${encodeURIComponent(selfCheckinUrl)}&choe=UTF-8`}
+                alt="QRコード"
+                width={250}
+                height={250}
+              />
+            </div>
+
+            <p className="text-xs text-gray-400 mb-4 break-all">{selfCheckinUrl}</p>
+
+            <div className="space-y-2">
+              <button onClick={() => { navigator.clipboard.writeText(selfCheckinUrl); }}
+                className="w-full bg-sky-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-sky-700">
+                📋 URLをコピー
+              </button>
+              <a href={selfCheckinUrl} target="_blank"
+                className="block w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-sm hover:bg-gray-200 text-center">
+                プレビューを開く →
+              </a>
+              <button onClick={() => setShowQR(false)}
+                className="w-full text-gray-400 py-2 text-sm">閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
