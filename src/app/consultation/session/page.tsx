@@ -175,9 +175,13 @@ function SessionContent() {
           procedures: data.procedures,
         });
         setShowAiPreview(true);
-        setSaveMsg("✅ AI分析完了！内容を確認してください");
+        if (data.warning) {
+          setSaveMsg(`⚠️ ${data.warning}`);
+        } else {
+          setSaveMsg("✅ AI分析完了！内容を確認してください");
+        }
       } else {
-        setSaveMsg(`❌ ${data.error}`);
+        setSaveMsg(`❌ ${data.error || "分析に失敗しました"}`);
         if (data.transcript) setTranscript(data.transcript);
       }
     } catch (err) {
@@ -464,25 +468,27 @@ function SessionContent() {
         </div>
       </main>
 
-      {/* AI結果プレビューモーダル */}
+      {/* AI結果プレビューモーダル - 設計書3.3.2「この処置内容であっていますか？」 */}
       {showAiPreview && aiResult && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <h3 className="text-lg font-bold mb-4">🤖 AI分析結果 — この内容であっていますか？</h3>
+            <div className="text-center mb-4">
+              <span className="text-4xl">🤖</span>
+              <h3 className="text-xl font-bold mt-2">この処置内容であっていますか？</h3>
+              <p className="text-sm text-gray-400 mt-1">AI分析結果を確認して、問題なければ反映してください</p>
+            </div>
 
             <div className="space-y-3 mb-6">
               {[
-                { label: "S（主観）", value: aiResult.soap.s, color: "border-red-500" },
-                { label: "O（客観）", value: aiResult.soap.o, color: "border-blue-500" },
-                { label: "A（評価）", value: aiResult.soap.a, color: "border-yellow-500" },
-                { label: "P（計画）", value: aiResult.soap.p, color: "border-green-500" },
+                { label: "S 主観（患者の訴え）", value: aiResult.soap.s, color: "border-red-500", bg: "bg-red-500/10" },
+                { label: "O 客観（検査所見）", value: aiResult.soap.o, color: "border-blue-500", bg: "bg-blue-500/10" },
+                { label: "A 評価（診断名）", value: aiResult.soap.a, color: "border-yellow-500", bg: "bg-yellow-500/10" },
+                { label: "P 計画（処置・次回予定）", value: aiResult.soap.p, color: "border-green-500", bg: "bg-green-500/10" },
               ].map((item) => (
-                item.value && (
-                  <div key={item.label} className={`border-l-4 ${item.color} bg-gray-700/50 rounded-r-lg p-3`}>
-                    <p className="text-xs text-gray-400 font-bold mb-1">{item.label}</p>
-                    <p className="text-sm text-gray-200 whitespace-pre-wrap">{item.value}</p>
-                  </div>
-                )
+                <div key={item.label} className={`border-l-4 ${item.color} ${item.bg} rounded-r-lg p-3`}>
+                  <p className="text-xs text-gray-400 font-bold mb-1">{item.label}</p>
+                  <p className="text-sm text-gray-200 whitespace-pre-wrap">{item.value || "（該当なし）"}</p>
+                </div>
               ))}
 
               {aiResult.tooth_updates && Object.keys(aiResult.tooth_updates).length > 0 && (
@@ -500,20 +506,24 @@ function SessionContent() {
 
               {aiResult.procedures.length > 0 && (
                 <div className="bg-gray-700/50 rounded-lg p-3">
-                  <p className="text-xs text-gray-400 font-bold mb-1">🔧 処置内容</p>
-                  <p className="text-sm text-gray-200">{aiResult.procedures.join("、")}</p>
+                  <p className="text-xs text-gray-400 font-bold mb-1">🔧 本日の処置</p>
+                  <div className="flex flex-wrap gap-2">
+                    {aiResult.procedures.map((p, i) => (
+                      <span key={i} className="bg-green-600/30 text-green-300 px-3 py-1 rounded-full text-sm font-bold">{p}</span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
 
             <div className="flex gap-3">
               <button onClick={applyAiResult}
-                className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700">
-                ✅ この内容で反映する
+                className="flex-1 bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 active:scale-[0.98]">
+                ✅ OKです！反映する
               </button>
-              <button onClick={() => setShowAiPreview(false)}
-                className="flex-1 bg-gray-600 text-white py-3 rounded-xl font-bold hover:bg-gray-500">
-                ✏️ 手動で修正する
+              <button onClick={() => { setShowAiPreview(false); setSaveMsg("手動で修正してください"); setTimeout(() => setSaveMsg(""), 3000); }}
+                className="flex-1 bg-gray-600 text-white py-4 rounded-xl font-bold hover:bg-gray-500">
+                ✏️ 修正が必要
               </button>
             </div>
           </div>
