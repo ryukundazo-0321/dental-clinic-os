@@ -43,12 +43,17 @@ function SessionContent() {
   const [saveMsg, setSaveMsg] = useState("");
 
   // 診察タイマー
-  const [isRecording, setIsRecording] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [timerRunning, setTimerRunning] = useState(false);
 
-  // 音声メモ（将来AI連携のプレースホルダー）
-  const [voiceMemo, setVoiceMemo] = useState("");
+  // 音声録音
+  const [isRecording, setIsRecording] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // 歯式ポップアップ
   const [editingTooth, setEditingTooth] = useState<string | null>(null);
@@ -56,13 +61,23 @@ function SessionContent() {
   // SOAPタブ
   const [activeSOAP, setActiveSOAP] = useState<"s" | "o" | "a" | "p">("s");
 
+  // AI結果プレビュー
+  const [aiResult, setAiResult] = useState<{
+    soap: { s: string; o: string; a: string; p: string };
+    tooth_updates: Record<string, string>;
+    procedures: string[];
+  } | null>(null);
+  const [showAiPreview, setShowAiPreview] = useState(false);
+
   useEffect(() => {
     if (appointmentId) loadSession();
   }, [appointmentId]);
 
-  // タイマーのクリーンアップ
   useEffect(() => {
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
   }, []);
 
   async function loadSession() {
@@ -75,37 +90,131 @@ function SessionContent() {
 
     if (apt) {
       setPatient(apt.patients as unknown as Patient);
-
       const { data: rec } = await supabase
         .from("medical_records")
         .select("*")
         .eq("appointment_id", appointmentId)
         .limit(1)
         .single();
-
       if (rec) setRecord(rec as unknown as MedicalRecord);
     }
     setLoading(false);
   }
 
-  // タイマー開始/停止
-  function toggleRecording() {
-    if (isRecording) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = null;
-      setIsRecording(false);
-    } else {
-      setIsRecording(true);
-      timerRef.current = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
-      }, 1000);
-    }
+  // タイマー
+  function startTimer() {
+    if (timerRunning) return;
+    setTimerRunning(true);
+    timerRef.current = setInterval(() => setElapsedSeconds(prev => prev + 1), 1000);
   }
 
   function formatTimer(seconds: number) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+
+  // ===== 音声録音 =====
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+        stream.getTracks().forEach(t => t.stop());
+        await analyzeAudio(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      startTimer();
+    } catch (err) {
+      setSaveMsg("マイクへのアクセスが拒否されました");
+      setTimeout(() => setSaveMsg(""), 3000);
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }
+
+  // ===== AI分析 =====
+  async function analyzeAudio(audioBlob: Blob) {
+    setAnalyzing(true);
+    setSaveMsg("🤖 AI分析中...");
+
+    try {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "recording.webm");
+      formData.append("existing_soap_s", record?.soap_s || "");
+
+      const response = await fetch("/api/voice-analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setTranscript(data.transcript);
+        setAiResult({
+          soap: data.soap,
+          tooth_updates: data.tooth_updates,
+          procedures: data.procedures,
+        });
+        setShowAiPreview(true);
+        setSaveMsg("✅ AI分析完了！内容を確認してください");
+      } else {
+        setSaveMsg(`❌ ${data.error}`);
+        if (data.transcript) setTranscript(data.transcript);
+      }
+    } catch (err) {
+      setSaveMsg("❌ AI分析に失敗しました");
+    }
+
+    setAnalyzing(false);
+    setTimeout(() => setSaveMsg(""), 5000);
+  }
+
+  // AI結果を反映
+  function applyAiResult() {
+    if (!record || !aiResult) return;
+    const updatedChart = { ...(record.tooth_chart || {}) };
+
+    // 歯式更新
+    if (aiResult.tooth_updates) {
+      Object.entries(aiResult.tooth_updates).forEach(([tooth, status]) => {
+        const num = tooth.replace("#", "");
+        if (TOOTH_STATUS[status]) {
+          updatedChart[num] = status;
+        }
+      });
+    }
+
+    setRecord({
+      ...record,
+      soap_s: aiResult.soap.s || record.soap_s,
+      soap_o: aiResult.soap.o || record.soap_o,
+      soap_a: aiResult.soap.a || record.soap_a,
+      soap_p: aiResult.soap.p || record.soap_p,
+      tooth_chart: updatedChart,
+    });
+
+    setShowAiPreview(false);
+    setSaveMsg("✅ AI結果を反映しました");
+    setTimeout(() => setSaveMsg(""), 3000);
   }
 
   // SOAP更新
@@ -119,17 +228,6 @@ function SessionContent() {
     const chart = { ...(record.tooth_chart || {}) };
     if (status === "normal") { delete chart[toothNum]; } else { chart[toothNum] = status; }
     setRecord({ ...record, tooth_chart: chart });
-  }
-
-  // 音声メモをSOAP-Sに追加
-  function appendMemoToSOAP() {
-    if (!record || !voiceMemo.trim()) return;
-    const current = record.soap_s || "";
-    const updated = current ? `${current}\n\n【音声メモ】${voiceMemo}` : `【音声メモ】${voiceMemo}`;
-    setRecord({ ...record, soap_s: updated });
-    setVoiceMemo("");
-    setSaveMsg("メモをSOAP-Sに追加しました");
-    setTimeout(() => setSaveMsg(""), 2000);
   }
 
   // 一時保存
@@ -146,13 +244,12 @@ function SessionContent() {
     setSaving(false);
   }
 
-  // 診察完了（カルテ確定 + ステータス遷移）
+  // 診察完了
   async function completeSession() {
     if (!record || !appointmentId) return;
     if (!confirm("診察を完了してカルテを確定しますか？")) return;
     setSaving(true);
 
-    // カルテ確定
     await supabase.from("medical_records").update({
       soap_s: record.soap_s, soap_o: record.soap_o,
       soap_a: record.soap_a, soap_p: record.soap_p,
@@ -160,16 +257,10 @@ function SessionContent() {
       status: "confirmed", doctor_confirmed: true,
     }).eq("id", record.id);
 
-    // 予約ステータスを完了に
     await supabase.from("appointments").update({ status: "completed" }).eq("id", appointmentId);
-
-    // キューを完了に
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
 
-    // タイマー停止
     if (timerRef.current) clearInterval(timerRef.current);
-    setIsRecording(false);
-
     setSaving(false);
     router.push("/consultation");
   }
@@ -237,47 +328,48 @@ function SessionContent() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {saveMsg && <span className="text-green-400 text-sm">{saveMsg}</span>}
+            {saveMsg && <span className="text-green-400 text-sm font-bold">{saveMsg}</span>}
+
             {/* タイマー */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isRecording ? "bg-red-600/20 border border-red-500" : "bg-gray-700"}`}>
               {isRecording && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
               <span className="font-mono text-lg font-bold">{formatTimer(elapsedSeconds)}</span>
             </div>
-            <button onClick={toggleRecording}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
-                isRecording ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"
-              }`}>
-              {isRecording ? "⏸ 記録停止" : "🎙️ 記録開始"}
-            </button>
+
+            {/* 録音ボタン */}
+            {analyzing ? (
+              <div className="bg-yellow-600 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                <span className="animate-spin">⚙️</span> AI分析中...
+              </div>
+            ) : isRecording ? (
+              <button onClick={stopRecording}
+                className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 animate-pulse">
+                ⏹️ 記録停止（AI分析へ）
+              </button>
+            ) : (
+              <button onClick={startRecording}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                🎙️ 記録開始
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="max-w-full mx-auto px-4 py-3">
         <div className="flex gap-3 h-[calc(100vh-120px)]">
-          {/* 左: SOAP + 音声メモ */}
+          {/* 左: SOAP + 文字起こし */}
           <div className="flex-1 flex flex-col">
-            {/* 音声メモ（将来AI連携） */}
-            <div className="bg-gray-800 rounded-xl p-3 mb-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-bold text-gray-300">🎙️ 音声メモ</span>
-                {isRecording && <span className="text-xs text-red-400 animate-pulse">録音中...</span>}
-                <span className="text-xs text-gray-500 ml-auto">※ 将来: 音声AIが自動でSOAPに変換します</span>
+            {/* 文字起こし結果 */}
+            {transcript && (
+              <div className="bg-gray-800 rounded-xl p-3 mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-gray-400">📝 音声文字起こし結果</span>
+                  <button onClick={() => setTranscript("")} className="text-xs text-gray-500 hover:text-gray-300">✕</button>
+                </div>
+                <p className="text-sm text-gray-300 leading-relaxed max-h-24 overflow-y-auto">{transcript}</p>
               </div>
-              <div className="flex gap-2">
-                <textarea
-                  value={voiceMemo}
-                  onChange={(e) => setVoiceMemo(e.target.value)}
-                  placeholder="診察中のメモをここに入力（音声AI連携後は自動入力されます）"
-                  rows={2}
-                  className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500 resize-none"
-                />
-                <button onClick={appendMemoToSOAP} disabled={!voiceMemo.trim()}
-                  className="bg-sky-600 text-white px-3 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-30 whitespace-nowrap">
-                  S に追加
-                </button>
-              </div>
-            </div>
+            )}
 
             {/* SOAPタブ */}
             <div className="flex gap-1 mb-2">
@@ -288,6 +380,7 @@ function SessionContent() {
                   }`}>
                   <span className={`w-5 h-5 rounded text-[10px] flex items-center justify-center text-white ${tab.color}`}>{tab.label}</span>
                   {tab.title}
+                  {record[tab.field] && <span className="w-1.5 h-1.5 rounded-full bg-green-400 ml-1" />}
                 </button>
               ))}
             </div>
@@ -316,19 +409,19 @@ function SessionContent() {
               <div className="flex flex-col items-center gap-0.5">
                 <div className="flex gap-0.5">
                   <div className="flex gap-0.5 border-r-2 border-gray-500 pr-0.5">
-                    {UPPER_RIGHT.map((t) => renderTooth(t))}
+                    {UPPER_RIGHT.map(t => renderTooth(t))}
                   </div>
                   <div className="flex gap-0.5 pl-0.5">
-                    {UPPER_LEFT.map((t) => renderTooth(t))}
+                    {UPPER_LEFT.map(t => renderTooth(t))}
                   </div>
                 </div>
                 <div className="w-full border-t-2 border-gray-500 my-0.5" />
                 <div className="flex gap-0.5">
                   <div className="flex gap-0.5 border-r-2 border-gray-500 pr-0.5">
-                    {LOWER_RIGHT.map((t) => renderTooth(t))}
+                    {LOWER_RIGHT.map(t => renderTooth(t))}
                   </div>
                   <div className="flex gap-0.5 pl-0.5">
-                    {LOWER_LEFT.map((t) => renderTooth(t))}
+                    {LOWER_LEFT.map(t => renderTooth(t))}
                   </div>
                 </div>
               </div>
@@ -349,6 +442,13 @@ function SessionContent() {
               </div>
             </div>
 
+            {/* 使い方ガイド */}
+            <div className="bg-gray-800/50 rounded-xl p-3">
+              <p className="text-[10px] text-gray-500 leading-relaxed">
+                💡 <strong>使い方:</strong> 「記録開始」→ 診察中の会話を録音 → 「記録停止」→ AIがSOAP+歯式を自動入力 → 内容確認 → 確定
+              </p>
+            </div>
+
             {/* アクションボタン */}
             <div className="space-y-2 mt-auto">
               <button onClick={saveRecord} disabled={saving}
@@ -363,6 +463,62 @@ function SessionContent() {
           </div>
         </div>
       </main>
+
+      {/* AI結果プレビューモーダル */}
+      {showAiPreview && aiResult && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <h3 className="text-lg font-bold mb-4">🤖 AI分析結果 — この内容であっていますか？</h3>
+
+            <div className="space-y-3 mb-6">
+              {[
+                { label: "S（主観）", value: aiResult.soap.s, color: "border-red-500" },
+                { label: "O（客観）", value: aiResult.soap.o, color: "border-blue-500" },
+                { label: "A（評価）", value: aiResult.soap.a, color: "border-yellow-500" },
+                { label: "P（計画）", value: aiResult.soap.p, color: "border-green-500" },
+              ].map((item) => (
+                item.value && (
+                  <div key={item.label} className={`border-l-4 ${item.color} bg-gray-700/50 rounded-r-lg p-3`}>
+                    <p className="text-xs text-gray-400 font-bold mb-1">{item.label}</p>
+                    <p className="text-sm text-gray-200 whitespace-pre-wrap">{item.value}</p>
+                  </div>
+                )
+              ))}
+
+              {aiResult.tooth_updates && Object.keys(aiResult.tooth_updates).length > 0 && (
+                <div className="bg-gray-700/50 rounded-lg p-3">
+                  <p className="text-xs text-gray-400 font-bold mb-1">🦷 歯式更新</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(aiResult.tooth_updates).map(([tooth, status]) => (
+                      <span key={tooth} className="bg-gray-600 px-2 py-1 rounded text-xs">
+                        #{tooth.replace("#", "")}: {TOOTH_STATUS[status]?.label || status}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {aiResult.procedures.length > 0 && (
+                <div className="bg-gray-700/50 rounded-lg p-3">
+                  <p className="text-xs text-gray-400 font-bold mb-1">🔧 処置内容</p>
+                  <p className="text-sm text-gray-200">{aiResult.procedures.join("、")}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={applyAiResult}
+                className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700">
+                ✅ この内容で反映する
+              </button>
+              <button onClick={() => setShowAiPreview(false)}
+                className="flex-1 bg-gray-600 text-white py-3 rounded-xl font-bold hover:bg-gray-500">
+                ✏️ 手動で修正する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingTooth && <div className="fixed inset-0 z-10" onClick={() => setEditingTooth(null)} />}
     </div>
