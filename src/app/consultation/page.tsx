@@ -66,8 +66,8 @@ export default function ConsultationPage() {
       .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, unit_id,
         patients ( id, name_kanji, name_kana, phone, is_new ),
         medical_records ( id, status )`)
-      .gte("scheduled_at", `${selectedDate}T00:00:00+09:00`)
-      .lte("scheduled_at", `${selectedDate}T23:59:59+09:00`)
+      .gte("scheduled_at", `${selectedDate}T00:00:00`)
+      .lte("scheduled_at", `${selectedDate}T23:59:59`)
       .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true });
     if (data) setAppointments(data as unknown as Appointment[]);
@@ -101,7 +101,7 @@ export default function ConsultationPage() {
 
   function getAptTime(apt: Appointment) {
     const d = new Date(apt.scheduled_at);
-    return d.getHours().toString().padStart(2, "0") + ":" + d.getMinutes().toString().padStart(2, "0");
+    return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
   }
 
   if (loading || !config) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
