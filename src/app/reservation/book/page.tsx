@@ -81,7 +81,7 @@ export default function PatientBookingPage() {
       const date = new Date(year, month, d);
       const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const isToday = date.getTime() === today.getTime();
-      const isPast = date <= today;
+      const isPast = date < today;
       const isClosed = config ? config.closedDays.includes(date.getDay()) : false;
       const isBeyondMax = date > maxDate;
 
