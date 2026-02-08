@@ -201,18 +201,27 @@ function SessionContent() {
 
     // 自動算定API呼び出し
     try {
-      await fetch("/api/auto-billing", {
+      const res = await fetch("/api/auto-billing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ record_id: record.id }),
       });
+      const data = await res.json();
+      if (data.success) {
+        setSaveMsg(`✅ 算定完了: ${data.total_points}点 / 負担額¥${data.patient_burden}`);
+      } else {
+        setSaveMsg(`⚠️ 算定エラー: ${data.error} ${data.detail || ""}`);
+        console.error("Auto-billing error:", data);
+      }
     } catch (e) {
+      setSaveMsg("⚠️ 算定API呼び出し失敗");
       console.error("Auto-billing failed:", e);
     }
 
     if (timerRef.current) clearInterval(timerRef.current);
     setSaving(false);
-    router.push("/consultation");
+    // 2秒後に遷移（算定結果を見れるように）
+    setTimeout(() => router.push("/consultation"), 2000);
   }
 
   function getAge(dob: string) {
