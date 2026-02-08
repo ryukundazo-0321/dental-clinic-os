@@ -336,12 +336,17 @@ export default function ConsultationPage() {
                         className="w-full py-2 rounded-lg text-xs font-bold bg-green-100 text-green-700 hover:bg-green-200">📱 来院済にする</button>
                     )}
                     {selectedApt.status === "checked_in" && (
-                      <button onClick={() => updateStatus(selectedApt, "in_consultation")}
-                        className="w-full py-2 rounded-lg text-xs font-bold bg-orange-100 text-orange-700 hover:bg-orange-200">🩺 呼び出し（診察開始）</button>
+                      <a href={`/consultation/session?appointment_id=${selectedApt.id}`}
+                        onClick={() => updateStatus(selectedApt, "in_consultation")}
+                        className="block w-full py-2 rounded-lg text-xs font-bold bg-orange-100 text-orange-700 hover:bg-orange-200 text-center">🩺 呼び出し（診察開始）→</a>
                     )}
                     {selectedApt.status === "in_consultation" && (
-                      <button onClick={() => updateStatus(selectedApt, "completed")}
-                        className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
+                      <>
+                        <a href={`/consultation/session?appointment_id=${selectedApt.id}`}
+                          className="block w-full py-2 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 hover:bg-sky-200 text-center">📋 診察画面を開く →</a>
+                        <button onClick={() => updateStatus(selectedApt, "completed")}
+                          className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
+                      </>
                     )}
                     {selectedApt.status === "completed" && (
                       <button onClick={() => updateStatus(selectedApt, "billing_done")}
