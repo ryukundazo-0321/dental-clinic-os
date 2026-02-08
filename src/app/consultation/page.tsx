@@ -66,8 +66,8 @@ export default function ConsultationPage() {
       .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, unit_id,
         patients ( id, name_kanji, name_kana, phone, is_new ),
         medical_records ( id, status )`)
-      .gte("scheduled_at", `${selectedDate}T00:00:00`)
-      .lte("scheduled_at", `${selectedDate}T23:59:59`)
+      .gte("scheduled_at", `${selectedDate}T00:00:00+09:00`)
+      .lte("scheduled_at", `${selectedDate}T23:59:59+09:00`)
       .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true });
     if (data) setAppointments(data as unknown as Appointment[]);
