@@ -20,31 +20,40 @@ type Appointment = {
     burden_ratio: number;
     is_new: boolean;
   } | null;
+  medical_records: {
+    id: string;
+    status: string;
+    soap_s: string | null;
+  }[] | null;
 };
 
-// ステータス定義
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  reserved: { label: "予約済", color: "text-blue-700", bg: "bg-blue-100" },
-  checked_in: { label: "来院済", color: "text-green-700", bg: "bg-green-100" },
-  in_consultation: { label: "診察中", color: "text-orange-700", bg: "bg-orange-100" },
-  completed: { label: "完了", color: "text-gray-500", bg: "bg-gray-100" },
-  cancelled: { label: "キャンセル", color: "text-red-700", bg: "bg-red-100" },
+// ===== ステータス定義（会計済を追加） =====
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  reserved:         { label: "予約済",   color: "text-blue-700",   bg: "bg-blue-100",   icon: "📅" },
+  checked_in:       { label: "来院済",   color: "text-green-700",  bg: "bg-green-100",  icon: "📱" },
+  in_consultation:  { label: "診察中",   color: "text-orange-700", bg: "bg-orange-100", icon: "🩺" },
+  completed:        { label: "完了",     color: "text-purple-700", bg: "bg-purple-100", icon: "✅" },
+  billing_done:     { label: "会計済",   color: "text-gray-500",   bg: "bg-gray-100",   icon: "💰" },
+  cancelled:        { label: "キャンセル", color: "text-red-700",  bg: "bg-red-100",    icon: "❌" },
 };
 
-// ステータス遷移の選択肢
-const STATUS_TRANSITIONS: Record<string, string[]> = {
-  reserved: ["checked_in", "cancelled"],
-  checked_in: ["in_consultation", "cancelled"],
-  in_consultation: ["completed"],
-  completed: [],
-  cancelled: ["reserved"],
+// ===== ステータス遷移（イベント駆動） =====
+// 予約済 → 来院済（QRチェックイン） → 診察中（呼び出し） → 完了（カルテ確定） → 会計済（会計完了）
+const STATUS_TRANSITIONS: Record<string, { next: string; label: string }[]> = {
+  reserved:        [{ next: "checked_in", label: "来院済にする（チェックイン）" }, { next: "cancelled", label: "キャンセル" }],
+  checked_in:      [{ next: "in_consultation", label: "診察中にする（呼び出し）" }, { next: "cancelled", label: "キャンセル" }],
+  in_consultation: [{ next: "completed", label: "完了にする（カルテ確定）" }],
+  completed:       [{ next: "billing_done", label: "会計済にする" }],
+  billing_done:    [],
+  cancelled:       [{ next: "reserved", label: "予約を復活" }],
 };
+
+// ステータスの流れ順
+const STATUS_ORDER = ["reserved", "checked_in", "in_consultation", "completed", "billing_done", "cancelled"];
 
 export default function ReservationManagePage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(true);
   const [selectedApt, setSelectedApt] = useState<Appointment | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -52,37 +61,27 @@ export default function ReservationManagePage() {
 
   // 手動追加フォーム
   const [addForm, setAddForm] = useState({
-    name_kanji: "",
-    name_kana: "",
-    date_of_birth: "",
-    phone: "",
-    time: "09:00",
-    insurance_type: "社保",
-    burden_ratio: "0.3",
+    name_kanji: "", name_kana: "", date_of_birth: "", phone: "",
+    time: "09:00", insurance_type: "社保", burden_ratio: "0.3",
     patient_type: "new" as "new" | "returning",
   });
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState("");
 
-  // 予約データ取得
+  // ===== データ取得 =====
   useEffect(() => {
     fetchAppointments();
 
-    // Realtimeでリアルタイム更新（設計書: イベント駆動）
+    // Realtime購読（イベント駆動: 予約・カルテの変更を自動反映）
     const channel = supabase
-      .channel("appointments-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "appointments" },
-        () => {
-          fetchAppointments();
-        }
-      )
+      .channel("reservation-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => fetchAppointments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "medical_records" }, () => fetchAppointments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "queue" }, () => fetchAppointments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "billing" }, () => fetchAppointments())
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [selectedDate]);
 
   async function fetchAppointments() {
@@ -94,10 +93,8 @@ export default function ReservationManagePage() {
       .from("appointments")
       .select(`
         id, scheduled_at, patient_type, status, duration_min,
-        patients (
-          id, name_kanji, name_kana, phone, date_of_birth,
-          insurance_type, burden_ratio, is_new
-        )
+        patients ( id, name_kanji, name_kana, phone, date_of_birth, insurance_type, burden_ratio, is_new ),
+        medical_records ( id, status, soap_s )
       `)
       .gte("scheduled_at", startOfDay)
       .lte("scheduled_at", endOfDay)
@@ -109,23 +106,78 @@ export default function ReservationManagePage() {
     setLoading(false);
   }
 
-  // ステータス変更
-  async function updateStatus(appointmentId: string, newStatus: string) {
-    await supabase
-      .from("appointments")
-      .update({ status: newStatus })
-      .eq("id", appointmentId);
+  // ===== ステータス変更 + イベント発火 =====
+  async function updateStatus(appointment: Appointment, newStatus: string) {
+    // 1. 予約ステータス更新
+    await supabase.from("appointments").update({ status: newStatus }).eq("id", appointment.id);
 
-    // ローカル状態も更新
+    // 2. イベントに応じた追加処理
+    switch (newStatus) {
+      case "checked_in":
+        // QRチェックイン相当: 受付キュー作成
+        const today = new Date().toISOString().split("T")[0];
+        const { data: maxQueue } = await supabase
+          .from("queue")
+          .select("queue_number")
+          .eq("clinic_id", appointment.patients?.id) // 簡易的に
+          .gte("checked_in_at", `${today}T00:00:00`)
+          .order("queue_number", { ascending: false })
+          .limit(1);
+
+        const nextNumber = (maxQueue && maxQueue.length > 0) ? maxQueue[0].queue_number + 1 : 1;
+
+        await supabase.from("queue").insert({
+          appointment_id: appointment.id,
+          queue_number: nextNumber,
+          status: "waiting",
+          checked_in_at: new Date().toISOString(),
+        });
+        break;
+
+      case "in_consultation":
+        // 呼び出し: キューステータスを更新
+        await supabase
+          .from("queue")
+          .update({ status: "in_room", called_at: new Date().toISOString() })
+          .eq("appointment_id", appointment.id);
+        break;
+
+      case "completed":
+        // カルテ確定: medical_recordsのstatusを更新
+        if (appointment.medical_records && appointment.medical_records.length > 0) {
+          await supabase
+            .from("medical_records")
+            .update({ status: "confirmed", doctor_confirmed: true })
+            .eq("appointment_id", appointment.id);
+        }
+        // キュー完了
+        await supabase
+          .from("queue")
+          .update({ status: "done" })
+          .eq("appointment_id", appointment.id);
+        break;
+
+      case "billing_done":
+        // 会計完了: billingのpayment_statusを更新
+        if (appointment.medical_records && appointment.medical_records.length > 0) {
+          await supabase
+            .from("billing")
+            .update({ payment_status: "paid" })
+            .eq("record_id", appointment.medical_records[0].id);
+        }
+        break;
+    }
+
+    // 3. ローカル状態更新
     setAppointments((prev) =>
-      prev.map((a) => (a.id === appointmentId ? { ...a, status: newStatus } : a))
+      prev.map((a) => (a.id === appointment.id ? { ...a, status: newStatus } : a))
     );
-    if (selectedApt?.id === appointmentId) {
+    if (selectedApt?.id === appointment.id) {
       setSelectedApt((prev) => (prev ? { ...prev, status: newStatus } : null));
     }
   }
 
-  // 手動予約追加
+  // ===== 手動予約追加（カルテ自動作成つき） =====
   async function handleAddAppointment() {
     setAddLoading(true);
     setAddError("");
@@ -137,33 +189,57 @@ export default function ReservationManagePage() {
     }
 
     try {
-      // 患者登録
-      const { data: patient, error: patientErr } = await supabase
-        .from("patients")
-        .insert({
-          name_kanji: addForm.name_kanji,
-          name_kana: addForm.name_kana,
-          date_of_birth: addForm.date_of_birth,
-          phone: addForm.phone,
-          insurance_type: addForm.insurance_type,
-          burden_ratio: parseFloat(addForm.burden_ratio),
-          is_new: addForm.patient_type === "new",
-        })
-        .select("id")
-        .single();
+      let patientId: string;
 
-      if (patientErr || !patient) {
-        setAddError("患者登録に失敗しました");
-        setAddLoading(false);
-        return;
+      if (addForm.patient_type === "returning") {
+        // 通院患者: 既存の患者を照合
+        const { data: existing } = await supabase
+          .from("patients")
+          .select("id")
+          .eq("name_kanji", addForm.name_kanji)
+          .eq("date_of_birth", addForm.date_of_birth)
+          .eq("phone", addForm.phone)
+          .single();
+
+        if (existing) {
+          patientId = existing.id;
+          // is_newをfalseに更新
+          await supabase.from("patients").update({ is_new: false }).eq("id", patientId);
+        } else {
+          setAddError("患者情報が見つかりません。初診として登録するか、入力内容を確認してください。");
+          setAddLoading(false);
+          return;
+        }
+      } else {
+        // 新規患者: 患者レコード作成
+        const { data: newPatient, error: patientErr } = await supabase
+          .from("patients")
+          .insert({
+            name_kanji: addForm.name_kanji,
+            name_kana: addForm.name_kana,
+            date_of_birth: addForm.date_of_birth,
+            phone: addForm.phone,
+            insurance_type: addForm.insurance_type,
+            burden_ratio: parseFloat(addForm.burden_ratio),
+            is_new: true,
+          })
+          .select("id")
+          .single();
+
+        if (patientErr || !newPatient) {
+          setAddError("患者登録に失敗しました");
+          setAddLoading(false);
+          return;
+        }
+        patientId = newPatient.id;
       }
 
-      // 予約登録
+      // 予約レコード作成
       const scheduledAt = `${selectedDate}T${addForm.time}:00`;
       const { data: appointment, error: aptErr } = await supabase
         .from("appointments")
         .insert({
-          patient_id: patient.id,
+          patient_id: patientId,
           scheduled_at: scheduledAt,
           patient_type: addForm.patient_type,
           status: "reserved",
@@ -178,10 +254,12 @@ export default function ReservationManagePage() {
         return;
       }
 
-      // カルテ自動作成
+      // ===== カルテ自動作成（設計書 3.1.2） =====
+      // 新規: 新しいカルテを作成
+      // 通院: 同じ患者の新しいカルテを作成（既存カルテとpatient_idで紐付け）
       await supabase.from("medical_records").insert({
         appointment_id: appointment.id,
-        patient_id: patient.id,
+        patient_id: patientId,
         status: "draft",
       });
 
@@ -200,25 +278,19 @@ export default function ReservationManagePage() {
 
   // 時間フォーマット
   function formatTime(dateStr: string) {
-    return new Date(dateStr).toLocaleTimeString("ja-JP", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return new Date(dateStr).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
   }
 
   // フィルタリング
   const filteredAppointments =
-    filterStatus === "all"
-      ? appointments
-      : appointments.filter((a) => a.status === filterStatus);
+    filterStatus === "all" ? appointments : appointments.filter((a) => a.status === filterStatus);
 
-  // ステータス別の件数
+  // ステータス別件数
   const statusCounts = appointments.reduce((acc, a) => {
     acc[a.status] = (acc[a.status] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
-  // 時間枠
   const timeSlots = [
     "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
     "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
@@ -231,9 +303,7 @@ export default function ReservationManagePage() {
       <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">
-              ← 戻る
-            </Link>
+            <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← 戻る</Link>
             <h1 className="text-lg font-bold text-gray-900">📅 予約管理</h1>
           </div>
           <button
@@ -246,90 +316,95 @@ export default function ReservationManagePage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-4">
-        {/* 日付選択 + サマリー */}
+        {/* 日付選択 */}
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <button
             onClick={() => {
-              const d = new Date(selectedDate);
-              d.setDate(d.getDate() - 1);
+              const d = new Date(selectedDate); d.setDate(d.getDate() - 1);
               setSelectedDate(d.toISOString().split("T")[0]);
             }}
             className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm"
-          >
-            ◀
-          </button>
+          >◀</button>
           <input
-            type="date"
-            value={selectedDate}
+            type="date" value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 font-bold text-sm"
           />
           <button
             onClick={() => {
-              const d = new Date(selectedDate);
-              d.setDate(d.getDate() + 1);
+              const d = new Date(selectedDate); d.setDate(d.getDate() + 1);
               setSelectedDate(d.toISOString().split("T")[0]);
             }}
             className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm"
-          >
-            ▶
-          </button>
+          >▶</button>
           <button
             onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
             className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 text-xs text-gray-500"
-          >
-            今日
-          </button>
-          <span className="text-sm text-gray-400 ml-auto">
-            全 {appointments.length} 件
-          </span>
+          >今日</button>
+          <span className="text-sm text-gray-400 ml-auto">全 {appointments.length} 件</span>
         </div>
 
-        {/* フィルタータブ */}
-        <div className="flex gap-2 mb-4 overflow-x-auto">
+        {/* ステータスフィルター */}
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           <button
             onClick={() => setFilterStatus("all")}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
-              filterStatus === "all"
-                ? "bg-gray-900 text-white"
-                : "bg-white border border-gray-200 text-gray-500 hover:bg-gray-50"
+              filterStatus === "all" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-500 hover:bg-gray-50"
             }`}
           >
             すべて ({appointments.length})
           </button>
-          {Object.entries(STATUS_CONFIG).map(([key, config]) => (
-            <button
-              key={key}
-              onClick={() => setFilterStatus(key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
-                filterStatus === key
-                  ? `${config.bg} ${config.color}`
-                  : "bg-white border border-gray-200 text-gray-500 hover:bg-gray-50"
-              }`}
-            >
-              {config.label} ({statusCounts[key] || 0})
-            </button>
-          ))}
+          {STATUS_ORDER.map((key) => {
+            const config = STATUS_CONFIG[key];
+            return (
+              <button
+                key={key}
+                onClick={() => setFilterStatus(key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
+                  filterStatus === key ? `${config.bg} ${config.color}` : "bg-white border border-gray-200 text-gray-500 hover:bg-gray-50"
+                }`}
+              >
+                {config.icon} {config.label} ({statusCounts[key] || 0})
+              </button>
+            );
+          })}
         </div>
 
-        {/* 予約一覧 */}
+        {/* ステータスフローの可視化 */}
+        <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4 overflow-x-auto">
+          <div className="flex items-center gap-1 min-w-max justify-center">
+            {STATUS_ORDER.filter(s => s !== "cancelled").map((key, idx, arr) => (
+              <div key={key} className="flex items-center gap-1">
+                <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${STATUS_CONFIG[key].bg} ${STATUS_CONFIG[key].color}`}>
+                  <span>{STATUS_CONFIG[key].icon}</span>
+                  <span>{STATUS_CONFIG[key].label}</span>
+                  <span className="ml-1 bg-white/50 px-1.5 rounded-full">{statusCounts[key] || 0}</span>
+                </div>
+                {idx < arr.length - 1 && <span className="text-gray-300 text-xs">→</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* メインコンテンツ */}
         <div className="flex gap-4">
-          {/* リスト */}
+          {/* 予約リスト */}
           <div className="flex-1">
             {loading ? (
               <div className="text-center py-12 text-gray-400">読み込み中...</div>
             ) : filteredAppointments.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
                 <p className="text-gray-400 mb-1">予約はありません</p>
-                <p className="text-gray-300 text-sm">
-                  「＋ 予約追加」または患者さんのWeb予約をお待ちください
-                </p>
+                <p className="text-gray-300 text-sm">「＋ 予約追加」または患者さんのWeb予約をお待ちください</p>
               </div>
             ) : (
               <div className="space-y-2">
                 {filteredAppointments.map((apt) => {
                   const status = STATUS_CONFIG[apt.status] || STATUS_CONFIG.reserved;
                   const isSelected = selectedApt?.id === apt.id;
+                  const hasRecord = apt.medical_records && apt.medical_records.length > 0;
+                  const recordStatus = hasRecord ? apt.medical_records![0].status : null;
+
                   return (
                     <button
                       key={apt.id}
@@ -341,30 +416,31 @@ export default function ReservationManagePage() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="text-center min-w-[50px]">
-                            <p className="text-base font-bold text-gray-900">
-                              {formatTime(apt.scheduled_at)}
-                            </p>
+                            <p className="text-base font-bold text-gray-900">{formatTime(apt.scheduled_at)}</p>
                             <p className="text-xs text-gray-400">{apt.duration_min}分</p>
                           </div>
                           <div className="w-px h-10 bg-gray-200" />
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-bold text-gray-900 text-sm">
-                                {apt.patients?.name_kanji || "未登録"}
-                              </p>
+                              <p className="font-bold text-gray-900 text-sm">{apt.patients?.name_kanji || "未登録"}</p>
                               {apt.patient_type === "new" && (
-                                <span className="bg-red-100 text-red-600 text-[10px] px-1.5 py-0.5 rounded font-bold">
-                                  初診
+                                <span className="bg-red-100 text-red-600 text-[10px] px-1.5 py-0.5 rounded font-bold">初診</span>
+                              )}
+                              {hasRecord && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  recordStatus === "confirmed" ? "bg-green-100 text-green-600"
+                                  : recordStatus === "soap_complete" ? "bg-yellow-100 text-yellow-600"
+                                  : "bg-gray-100 text-gray-400"
+                                }`}>
+                                  {recordStatus === "confirmed" ? "カルテ確定" : recordStatus === "soap_complete" ? "SOAP完了" : "カルテ作成済"}
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-gray-400">
-                              {apt.patients?.name_kana}
-                            </p>
+                            <p className="text-xs text-gray-400">{apt.patients?.name_kana}</p>
                           </div>
                         </div>
                         <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${status.bg} ${status.color}`}>
-                          {status.label}
+                          {status.icon} {status.label}
                         </span>
                       </div>
                     </button>
@@ -380,107 +456,100 @@ export default function ReservationManagePage() {
               <div className="bg-white rounded-xl border border-gray-200 p-5 sticky top-4">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-gray-900">予約詳細</h3>
-                  <button
-                    onClick={() => setSelectedApt(null)}
-                    className="text-gray-400 hover:text-gray-600 text-sm"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => setSelectedApt(null)} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
                 </div>
 
                 <div className="space-y-4">
+                  {/* 患者情報 */}
                   <div>
                     <p className="text-xs text-gray-400 mb-0.5">患者名</p>
-                    <p className="font-bold text-gray-900 text-lg">
-                      {selectedApt.patients?.name_kanji || "未登録"}
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      {selectedApt.patients?.name_kana}
-                    </p>
+                    <p className="font-bold text-gray-900 text-lg">{selectedApt.patients?.name_kanji || "未登録"}</p>
+                    <p className="text-sm text-gray-400">{selectedApt.patients?.name_kana}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">予約時間</p>
-                      <p className="font-bold text-gray-900">
-                        {formatTime(selectedApt.scheduled_at)}
-                      </p>
+                      <p className="font-bold text-gray-900">{formatTime(selectedApt.scheduled_at)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">区分</p>
-                      <p className="font-bold text-gray-900">
-                        {selectedApt.patient_type === "new" ? "初診" : "再診"}
-                      </p>
+                      <p className="font-bold text-gray-900">{selectedApt.patient_type === "new" ? "初診" : "再診"}</p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">電話番号</p>
-                      <p className="text-sm text-gray-900">
-                        {selectedApt.patients?.phone || "-"}
-                      </p>
+                      <p className="text-sm text-gray-900">{selectedApt.patients?.phone || "-"}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">生年月日</p>
-                      <p className="text-sm text-gray-900">
-                        {selectedApt.patients?.date_of_birth || "-"}
-                      </p>
+                      <p className="text-sm text-gray-900">{selectedApt.patients?.date_of_birth || "-"}</p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">保険種別</p>
-                      <p className="text-sm text-gray-900">
-                        {selectedApt.patients?.insurance_type || "-"}
-                      </p>
+                      <p className="text-sm text-gray-900">{selectedApt.patients?.insurance_type || "-"}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-400 mb-0.5">負担割合</p>
                       <p className="text-sm text-gray-900">
-                        {selectedApt.patients?.burden_ratio
-                          ? `${selectedApt.patients.burden_ratio * 10}割`
-                          : "-"}
+                        {selectedApt.patients?.burden_ratio ? `${selectedApt.patients.burden_ratio * 10}割` : "-"}
                       </p>
                     </div>
                   </div>
 
+                  {/* カルテ状況 */}
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs text-gray-400 mb-1.5">カルテ</p>
+                    {selectedApt.medical_records && selectedApt.medical_records.length > 0 ? (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-2.5">
+                        <p className="text-sm text-green-700 font-bold">
+                          ✅ カルテ作成済
+                        </p>
+                        <p className="text-xs text-green-600 mt-0.5">
+                          ステータス: {selectedApt.medical_records[0].status}
+                          {selectedApt.medical_records[0].soap_s && " / SOAP-S入力済"}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">カルテ未作成</p>
+                    )}
+                  </div>
+
                   {/* ステータス */}
-                  <div>
-                    <p className="text-xs text-gray-400 mb-1.5">ステータス</p>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span
-                        className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-                          STATUS_CONFIG[selectedApt.status]?.bg
-                        } ${STATUS_CONFIG[selectedApt.status]?.color}`}
-                      >
-                        {STATUS_CONFIG[selectedApt.status]?.label}
-                      </span>
-                    </div>
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs text-gray-400 mb-1.5">現在のステータス</p>
+                    <span className={`inline-flex items-center gap-1 text-sm font-bold px-3 py-1.5 rounded-full ${STATUS_CONFIG[selectedApt.status]?.bg} ${STATUS_CONFIG[selectedApt.status]?.color}`}>
+                      {STATUS_CONFIG[selectedApt.status]?.icon} {STATUS_CONFIG[selectedApt.status]?.label}
+                    </span>
                   </div>
 
                   {/* ステータス変更ボタン */}
                   {STATUS_TRANSITIONS[selectedApt.status]?.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1.5">操作</p>
+                    <div className="border-t border-gray-100 pt-3">
+                      <p className="text-xs text-gray-400 mb-2">次のアクション</p>
                       <div className="space-y-2">
-                        {STATUS_TRANSITIONS[selectedApt.status].map(
-                          (nextStatus) => {
-                            const config = STATUS_CONFIG[nextStatus];
-                            return (
-                              <button
-                                key={nextStatus}
-                                onClick={() =>
-                                  updateStatus(selectedApt.id, nextStatus)
-                                }
-                                className={`w-full py-2 rounded-lg text-sm font-bold transition-colors ${config.bg} ${config.color} hover:opacity-80`}
-                              >
-                                → {config.label} にする
-                              </button>
-                            );
-                          }
-                        )}
+                        {STATUS_TRANSITIONS[selectedApt.status].map(({ next, label }) => {
+                          const config = STATUS_CONFIG[next];
+                          const isPrimary = next !== "cancelled";
+                          return (
+                            <button
+                              key={next}
+                              onClick={() => updateStatus(selectedApt, next)}
+                              className={`w-full py-2.5 rounded-lg text-sm font-bold transition-colors ${
+                                isPrimary
+                                  ? "bg-sky-600 text-white hover:bg-sky-700"
+                                  : "bg-red-50 text-red-600 hover:bg-red-100"
+                              }`}
+                            >
+                              {config.icon} {label}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -497,132 +566,106 @@ export default function ReservationManagePage() {
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between">
               <h3 className="font-bold text-gray-900 text-lg">予約を追加</h3>
-              <button
-                onClick={() => { setShowAddModal(false); setAddError(""); }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                ✕
-              </button>
+              <button onClick={() => { setShowAddModal(false); setAddError(""); }} className="text-gray-400 hover:text-gray-600">✕</button>
             </div>
 
             <div className="p-5 space-y-4">
-              {/* 患者区分 */}
+              {/* 初診/再診 切り替え */}
               <div className="flex gap-2">
                 <button
                   onClick={() => setAddForm({ ...addForm, patient_type: "new" })}
-                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${
-                    addForm.patient_type === "new"
-                      ? "bg-sky-600 text-white"
-                      : "bg-gray-100 text-gray-500"
+                  className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+                    addForm.patient_type === "new" ? "bg-sky-600 text-white" : "bg-gray-100 text-gray-500"
                   }`}
                 >
-                  初診
+                  🆕 初診（はじめて）
                 </button>
                 <button
                   onClick={() => setAddForm({ ...addForm, patient_type: "returning" })}
-                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${
-                    addForm.patient_type === "returning"
-                      ? "bg-sky-600 text-white"
-                      : "bg-gray-100 text-gray-500"
+                  className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-colors ${
+                    addForm.patient_type === "returning" ? "bg-sky-600 text-white" : "bg-gray-100 text-gray-500"
                   }`}
                 >
-                  再診
+                  🔄 再診（通院中）
                 </button>
               </div>
 
+              {addForm.patient_type === "returning" && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5">
+                  <p className="text-xs text-blue-700">
+                    💡 再診の場合、氏名・生年月日・電話番号で既存の患者情報を照合します。
+                    既存カルテに紐付けて新しいカルテが作成されます。
+                  </p>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  氏名（漢字）<span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={addForm.name_kanji}
+                <label className="block text-sm font-bold text-gray-700 mb-1">氏名（漢字）<span className="text-red-500">*</span></label>
+                <input type="text" value={addForm.name_kanji}
                   onChange={(e) => setAddForm({ ...addForm, name_kanji: e.target.value })}
                   placeholder="山田 太郎"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
               </div>
 
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  氏名（カナ）<span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={addForm.name_kana}
-                  onChange={(e) => setAddForm({ ...addForm, name_kana: e.target.value })}
-                  placeholder="ヤマダ タロウ"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                />
-              </div>
+              {addForm.patient_type === "new" && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">氏名（カナ）<span className="text-red-500">*</span></label>
+                  <input type="text" value={addForm.name_kana}
+                    onChange={(e) => setAddForm({ ...addForm, name_kana: e.target.value })}
+                    placeholder="ヤマダ タロウ"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                </div>
+              )}
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  生年月日 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={addForm.date_of_birth}
+                <label className="block text-sm font-bold text-gray-700 mb-1">生年月日<span className="text-red-500">*</span></label>
+                <input type="date" value={addForm.date_of_birth}
                   onChange={(e) => setAddForm({ ...addForm, date_of_birth: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  電話番号 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="tel"
-                  value={addForm.phone}
+                <label className="block text-sm font-bold text-gray-700 mb-1">電話番号<span className="text-red-500">*</span></label>
+                <input type="tel" value={addForm.phone}
                   onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
                   placeholder="09012345678"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  予約時間 <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={addForm.time}
+                <label className="block text-sm font-bold text-gray-700 mb-1">予約時間<span className="text-red-500">*</span></label>
+                <select value={addForm.time}
                   onChange={(e) => setAddForm({ ...addForm, time: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white"
-                >
-                  {timeSlots.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white">
+                  {timeSlots.map((t) => (<option key={t} value={t}>{t}</option>))}
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">保険種別</label>
-                  <select
-                    value={addForm.insurance_type}
-                    onChange={(e) => setAddForm({ ...addForm, insurance_type: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white"
-                  >
-                    <option value="社保">社保</option>
-                    <option value="国保">国保</option>
-                    <option value="後期高齢">後期高齢</option>
-                    <option value="自費">自費</option>
-                  </select>
+              {addForm.patient_type === "new" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">保険種別</label>
+                    <select value={addForm.insurance_type}
+                      onChange={(e) => setAddForm({ ...addForm, insurance_type: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white">
+                      <option value="社保">社保</option>
+                      <option value="国保">国保</option>
+                      <option value="後期高齢">後期高齢</option>
+                      <option value="自費">自費</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">負担割合</label>
+                    <select value={addForm.burden_ratio}
+                      onChange={(e) => setAddForm({ ...addForm, burden_ratio: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white">
+                      <option value="0.3">3割</option>
+                      <option value="0.2">2割</option>
+                      <option value="0.1">1割</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">負担割合</label>
-                  <select
-                    value={addForm.burden_ratio}
-                    onChange={(e) => setAddForm({ ...addForm, burden_ratio: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white"
-                  >
-                    <option value="0.3">3割</option>
-                    <option value="0.2">2割</option>
-                    <option value="0.1">1割</option>
-                  </select>
-                </div>
-              </div>
+              )}
 
               {addError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-2.5">
@@ -634,16 +677,12 @@ export default function ReservationManagePage() {
                 <button
                   onClick={() => { setShowAddModal(false); setAddError(""); }}
                   className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-lg font-bold hover:bg-gray-200 transition-colors"
-                >
-                  キャンセル
-                </button>
+                >キャンセル</button>
                 <button
                   onClick={handleAddAppointment}
                   disabled={addLoading}
                   className="flex-1 bg-sky-600 text-white py-3 rounded-lg font-bold hover:bg-sky-700 transition-colors disabled:opacity-50"
-                >
-                  {addLoading ? "登録中..." : "予約を登録"}
-                </button>
+                >{addLoading ? "登録中..." : "予約を登録"}</button>
               </div>
             </div>
           </div>
