@@ -259,9 +259,11 @@ export default function ConsultationPage() {
                         className="w-full py-2.5 rounded-lg text-sm font-bold bg-green-500 text-white hover:bg-green-600 shadow-lg shadow-green-200">📱 来院済にする</button>
                     )}
                     {selectedApt.status === "checked_in" && (
-                      <a href={`/consultation/session?appointment_id=${selectedApt.id}`}
-                        onClick={() => updateStatus(selectedApt, "in_consultation")}
-                        className="block w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 呼び出し（診察開始）→</a>
+                      <button onClick={async () => {
+                        await updateStatus(selectedApt, "in_consultation");
+                        window.location.href = `/consultation/session?appointment_id=${selectedApt.id}`;
+                      }}
+                        className="w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 呼び出し（診察開始）→</button>
                     )}
                     {selectedApt.status === "in_consultation" && (
                       <>
