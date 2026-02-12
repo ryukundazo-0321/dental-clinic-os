@@ -82,7 +82,18 @@ export async function POST(request: NextRequest) {
         lines.push(`KO,${pat.public_insurer},${pat.public_recipient || ""},,1,${patientTotalPoints},,,,`);
       }
 
-      lines.push(`SN,1,01,,,,01,,`);
+      // SNレコード（傷病名 - patient_diagnosesから取得）
+      const { data: diagData } = await supabase.from("patient_diagnoses").select("*").eq("patient_id", patientKeys[ki]);
+      if (diagData && diagData.length > 0) {
+        for (let di = 0; di < diagData.length; di++) {
+          const d = diagData[di];
+          const outcomeCode = d.outcome === "cured" ? "01" : d.outcome === "suspended" ? "03" : d.outcome === "died" ? "02" : "";
+          const startYM = d.start_date ? d.start_date.replace(/-/g, "").substring(0, 6) : yearMonth;
+          lines.push(`SN,${di + 1},${outcomeCode || ""},${d.diagnosis_code || ""},${d.diagnosis_name || ""},${startYM},${outcomeCode || ""},,`);
+        }
+      } else {
+        lines.push(`SN,1,01,,,,01,,`);
+      }
       lines.push(`JD,1,,,,,,1,,,,,,,,,,,,,,,,,,,,,,,,,`);
       lines.push(`MF,00,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,`);
 
