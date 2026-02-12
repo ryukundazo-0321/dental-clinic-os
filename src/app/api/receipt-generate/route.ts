@@ -19,7 +19,8 @@ export async function POST(request: NextRequest) {
     const year = yearMonth.substring(0, 4);
     const month = yearMonth.substring(4, 6);
     const startDate = `${year}-${month}-01`;
-    const endDate = `${year}-${month}-31`;
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    const endDate = `${year}-${month}-${String(lastDay).padStart(2, "0")}`;
 
     const { data: billings, error: bErr } = await supabase.from("billing")
       .select("*")
