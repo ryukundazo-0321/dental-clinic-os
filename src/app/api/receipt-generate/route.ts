@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     if (!billings || billings.length === 0) return NextResponse.json({ error: "該当月の精算済みデータがありません" }, { status: 404 });
 
     // 患者情報を個別取得
-    const patientIds = [...new Set(billings.map((b: { patient_id: string }) => b.patient_id))];
+    const patientIds = Array.from(new Set(billings.map((b: { patient_id: string }) => b.patient_id)));
     const { data: patientsData } = await supabase.from("patients").select("*").in("id", patientIds);
     const patientLookup = new Map((patientsData || []).map((p: { id: string }) => [p.id, p]));
 
