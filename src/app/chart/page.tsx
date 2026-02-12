@@ -8,6 +8,9 @@ type Patient = {
   id: string; name_kanji: string; name_kana: string;
   date_of_birth: string; phone: string; insurance_type: string;
   burden_ratio: number; is_new: boolean; created_at?: string;
+  sex?: string; insurer_number?: string; insured_symbol?: string;
+  insured_number?: string; insured_branch?: string;
+  public_insurer?: string; public_recipient?: string;
 };
 
 type MedicalRecord = {
@@ -46,13 +49,14 @@ export default function ChartPage() {
   const [saveMsg, setSaveMsg] = useState("");
   const [editingTooth, setEditingTooth] = useState<string | null>(null);
   const [todayPatients, setTodayPatients] = useState<{ patient: Patient; appointment_status: string; record_id: string | null }[]>([]);
-
+  const [showInsurance, setShowInsurance] = useState(false);
+  const [insForm, setInsForm] = useState({ sex: "2", insurer_number: "", insured_symbol: "", insured_number: "", insured_branch: "", public_insurer: "", public_recipient: "" });
   useEffect(() => { loadTodayPatients(); loadAllPatients(); }, []);
 
   async function loadTodayPatients() {
     const today = new Date().toISOString().split("T")[0];
     const { data } = await supabase.from("appointments")
-      .select("status, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio, is_new ), medical_records ( id )")
+      .select("status, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio, is_new, sex, insurer_number, insured_symbol, insured_number, insured_branch, public_insurer, public_recipient ), medical_records ( id )")
       .gte("scheduled_at", `${today}T00:00:00`).lte("scheduled_at", `${today}T23:59:59`)
       .in("status", ["checked_in", "in_consultation", "completed", "billing_done"])
       .order("scheduled_at", { ascending: true });
@@ -81,6 +85,8 @@ export default function ChartPage() {
 
   async function selectPatient(patient: Patient) {
     setSelectedPatient(patient);
+    setInsForm({ sex: patient.sex || "2", insurer_number: patient.insurer_number || "", insured_symbol: patient.insured_symbol || "", insured_number: patient.insured_number || "", insured_branch: patient.insured_branch || "", public_insurer: patient.public_insurer || "", public_recipient: patient.public_recipient || "" });
+    setShowInsurance(false);
     const { data } = await supabase.from("medical_records")
       .select("id, appointment_id, patient_id, status, soap_s, soap_o, soap_a, soap_p, tooth_chart, doctor_confirmed, created_at, appointments ( scheduled_at, patient_type, status, doctor_id )")
       .eq("patient_id", patient.id).order("created_at", { ascending: false });
@@ -125,6 +131,15 @@ export default function ChartPage() {
     setRecords(newRecords);
     setSelectedRecord(newRecords.length > 0 ? newRecords[0] : null);
     setSaveMsg("カルテを削除しました 🗑️"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false);
+  }
+
+  async function saveInsurance() {
+    if (!selectedPatient) return; setSaving(true);
+    await supabase.from("patients").update(insForm).eq("id", selectedPatient.id);
+    setSelectedPatient({ ...selectedPatient, ...insForm });
+    // allPatientsも更新
+    setAllPatients(allPatients.map(p => p.id === selectedPatient.id ? { ...p, ...insForm } : p));
+    setSaveMsg("保険情報を保存しました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false); setShowInsurance(false);
   }
 
   // 患者削除（関連データ全て）
@@ -277,12 +292,36 @@ export default function ChartPage() {
                       <p className="text-sm text-gray-400">{selectedPatient.date_of_birth} ({getAge(selectedPatient.date_of_birth)}歳) / {selectedPatient.phone} / {selectedPatient.insurance_type} {selectedPatient.burden_ratio * 10}割</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
                     <div className="text-center"><p className="text-2xl font-bold text-sky-600">{records.length}</p><p className="text-[10px] text-gray-400">来院回数</p></div>
-                    <button onClick={deletePatient} disabled={saving}
-                      className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50">🗑️ 患者削除</button>
+                    <button onClick={() => setShowInsurance(!showInsurance)} className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors ${showInsurance ? "bg-sky-100 text-sky-700" : "text-sky-500 hover:bg-sky-50"}`}>🏥 保険証情報</button>
+                    <button onClick={deletePatient} disabled={saving} className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50">🗑️ 患者削除</button>
                   </div>
                 </div>
+                {/* 保険証情報パネル */}
+                {showInsurance && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div><label className="text-[10px] text-gray-400 block mb-1">性別</label>
+                        <select value={insForm.sex} onChange={e => setInsForm({...insForm, sex: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="1">男</option><option value="2">女</option></select></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">保険者番号（8桁）</label>
+                        <input value={insForm.insurer_number} onChange={e => setInsForm({...insForm, insurer_number: e.target.value})} placeholder="01130012" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者記号</label>
+                        <input value={insForm.insured_symbol} onChange={e => setInsForm({...insForm, insured_symbol: e.target.value})} placeholder="751-743" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者番号</label>
+                        <input value={insForm.insured_number} onChange={e => setInsForm({...insForm, insured_number: e.target.value})} placeholder="1045" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">枝番</label>
+                        <input value={insForm.insured_branch} onChange={e => setInsForm({...insForm, insured_branch: e.target.value})} placeholder="01" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label>
+                        <input value={insForm.public_insurer} onChange={e => setInsForm({...insForm, public_insurer: e.target.value})} placeholder="82230004" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">公費受給者番号</label>
+                        <input value={insForm.public_recipient} onChange={e => setInsForm({...insForm, public_recipient: e.target.value})} placeholder="9999996" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div className="flex items-end">
+                        <button onClick={saveInsurance} disabled={saving} className="w-full bg-sky-600 text-white py-1.5 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">💾 保存</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-4">
