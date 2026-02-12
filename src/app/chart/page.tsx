@@ -111,6 +111,52 @@ export default function ChartPage() {
     setSaveMsg("編集可能にしました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false);
   }
 
+  // カルテ1件削除
+  async function deleteRecord() {
+    if (!selectedRecord || !selectedPatient) return;
+    if (!confirm(`このカルテ（${selectedRecord.appointments?.scheduled_at ? formatDate(selectedRecord.appointments.scheduled_at) : formatDate(selectedRecord.created_at)}）を削除しますか？\nこの操作は取り消せません。`)) return;
+    setSaving(true);
+    // billing削除
+    await supabase.from("billing").delete().eq("record_id", selectedRecord.id);
+    // カルテ削除
+    await supabase.from("medical_records").delete().eq("id", selectedRecord.id);
+    // リスト更新
+    const newRecords = records.filter(r => r.id !== selectedRecord.id);
+    setRecords(newRecords);
+    setSelectedRecord(newRecords.length > 0 ? newRecords[0] : null);
+    setSaveMsg("カルテを削除しました 🗑️"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false);
+  }
+
+  // 患者削除（関連データ全て）
+  async function deletePatient() {
+    if (!selectedPatient) return;
+    if (!confirm(`⚠️ 「${selectedPatient.name_kanji}」さんの患者データを完全に削除しますか？\n\n関連するカルテ・予約・会計データも全て削除されます。\nこの操作は取り消せません。`)) return;
+    if (!confirm(`本当に削除してよろしいですか？\n\n患者名: ${selectedPatient.name_kanji}\nこの操作は元に戻せません。`)) return;
+    setSaving(true);
+    const pid = selectedPatient.id;
+    // billing削除（medical_records経由）
+    const { data: recs } = await supabase.from("medical_records").select("id").eq("patient_id", pid);
+    if (recs) {
+      for (const r of recs) { await supabase.from("billing").delete().eq("record_id", r.id); }
+    }
+    // queue削除（appointments経由）
+    const { data: apts } = await supabase.from("appointments").select("id").eq("patient_id", pid);
+    if (apts) {
+      for (const a of apts) { await supabase.from("queue").delete().eq("appointment_id", a.id); }
+    }
+    // medical_records削除
+    await supabase.from("medical_records").delete().eq("patient_id", pid);
+    // appointments削除
+    await supabase.from("appointments").delete().eq("patient_id", pid);
+    // 患者削除
+    await supabase.from("patients").delete().eq("id", pid);
+    // UI更新
+    setSelectedPatient(null); setSelectedRecord(null); setRecords([]);
+    setAllPatients(allPatients.filter(p => p.id !== pid));
+    setTodayPatients(todayPatients.filter(tp => tp.patient.id !== pid));
+    setSaveMsg("患者データを削除しました 🗑️"); setTimeout(() => setSaveMsg(""), 3000); setSaving(false);
+  }
+
   function setToothStatus(toothNum: string, status: string) {
     if (!selectedRecord) return;
     const chart = { ...(selectedRecord.tooth_chart || {}) };
@@ -231,7 +277,11 @@ export default function ChartPage() {
                       <p className="text-sm text-gray-400">{selectedPatient.date_of_birth} ({getAge(selectedPatient.date_of_birth)}歳) / {selectedPatient.phone} / {selectedPatient.insurance_type} {selectedPatient.burden_ratio * 10}割</p>
                     </div>
                   </div>
-                  <div className="text-center"><p className="text-2xl font-bold text-sky-600">{records.length}</p><p className="text-[10px] text-gray-400">来院回数</p></div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-center"><p className="text-2xl font-bold text-sky-600">{records.length}</p><p className="text-[10px] text-gray-400">来院回数</p></div>
+                    <button onClick={deletePatient} disabled={saving}
+                      className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50">🗑️ 患者削除</button>
+                  </div>
                 </div>
               </div>
 
@@ -257,7 +307,11 @@ export default function ChartPage() {
                   {selectedRecord ? (
                     <div className="space-y-4">
                       <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 px-4 py-3">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${selectedRecord.status === "confirmed" ? "bg-green-100 text-green-700" : selectedRecord.status === "soap_complete" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>{selectedRecord.status === "confirmed" ? "✅ 確定済み" : selectedRecord.status === "soap_complete" ? "📝 SOAP入力済み" : "📋 下書き"}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${selectedRecord.status === "confirmed" ? "bg-green-100 text-green-700" : selectedRecord.status === "soap_complete" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>{selectedRecord.status === "confirmed" ? "✅ 確定済み" : selectedRecord.status === "soap_complete" ? "📝 SOAP入力済み" : "📋 下書き"}</span>
+                          <button onClick={deleteRecord} disabled={saving}
+                            className="text-[10px] text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors disabled:opacity-50">🗑️ このカルテを削除</button>
+                        </div>
                         <div className="flex gap-2">
                           <button onClick={saveSOAP} disabled={saving || selectedRecord.status === "confirmed"} className="bg-sky-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">{saving ? "保存中..." : "一時保存"}</button>
                           {selectedRecord.status === "confirmed" ? <button onClick={unlockRecord} disabled={saving} className="bg-yellow-500 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-yellow-600 disabled:opacity-50">🔓 編集する</button> : <button onClick={confirmRecord} disabled={saving} className="bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700 disabled:opacity-50">カルテ確定</button>}
