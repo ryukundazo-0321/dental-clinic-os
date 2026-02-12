@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { parseReceiptCSV, type ReceiptFile, type ReceiptPatient } from "@/lib/receipt-parser";
 
 type BillingRow = {
   id: string; record_id: string; patient_id: string;
@@ -22,10 +21,9 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<BillingRow | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [receiptData, setReceiptData] = useState<ReceiptFile | null>(null);
-  const [selectedReceipt, setSelectedReceipt] = useState<ReceiptPatient | null>(null);
-  const [receiptError, setReceiptError] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [receiptMonth, setReceiptMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+  const [receiptStatus, setReceiptStatus] = useState<string>("");
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     loadBillings();
@@ -59,21 +57,22 @@ export default function BillingPage() {
     return g;
   }
 
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setReceiptError("");
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const text = ev.target?.result as string;
-        const data = parseReceiptCSV(text);
-        setReceiptData(data);
-        setSelectedReceipt(data.patients.length > 0 ? data.patients[0] : null);
-      } catch (err) { setReceiptError(`パースエラー: ${err instanceof Error ? err.message : "不明"}`); }
-    };
-    reader.onerror = () => setReceiptError("ファイル読み込みに失敗しました");
-    reader.readAsText(file, "Shift_JIS");
+  async function generateReceipt() {
+    setGenerating(true); setReceiptStatus("");
+    try {
+      const ym = receiptMonth.replace("-", "");
+      const res = await fetch("/api/receipt-generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ yearMonth: ym }) });
+      const data = await res.json();
+      if (!res.ok) { setReceiptStatus(`❌ ${data.error}`); setGenerating(false); return; }
+      // CSVダウンロード
+      const blob = new Blob([data.csv], { type: "text/csv;charset=Shift_JIS" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `receipt_${ym}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      setReceiptStatus(`✅ ${data.receiptCount}件 / ${data.totalPoints.toLocaleString()}点 ダウンロード完了`);
+    } catch (e) { setReceiptStatus(`❌ ${e instanceof Error ? e.message : "エラー"}`); }
+    setGenerating(false);
   }
 
   const unpaid = billings.filter(b => b.payment_status === "unpaid");
@@ -91,11 +90,11 @@ export default function BillingPage() {
           </div>
           <div className="flex items-center gap-3">
             {mainTab === "billing" && (<><span className="bg-red-50 text-red-700 px-3 py-1 rounded-full text-xs font-bold">未精算 {unpaid.length}件</span><span className="bg-green-50 text-green-700 px-3 py-1 rounded-full text-xs font-bold">精算済 {paid.length}件</span></>)}
-            {mainTab === "receipt" && receiptData && <span className="bg-sky-50 text-sky-700 px-3 py-1 rounded-full text-xs font-bold">{receiptData.patients.length}件のレセプト</span>}
+            {mainTab === "receipt" && receiptStatus && <span className="bg-sky-50 text-sky-700 px-3 py-1 rounded-full text-xs font-bold">レセ電生成</span>}
           </div>
         </div>
         <div className="max-w-full mx-auto px-4 flex gap-0 border-t border-gray-100">
-          {([{ key: "billing" as MainTab, label: "💰 本日の会計" }, { key: "receipt" as MainTab, label: "📄 レセ電ビューア" }]).map(t => (
+          {([{ key: "billing" as MainTab, label: "💰 本日の会計" }, { key: "receipt" as MainTab, label: "📄 レセ電ダウンロード" }]).map(t => (
             <button key={t.key} onClick={() => setMainTab(t.key)} className={`px-5 py-2.5 text-sm font-bold border-b-2 transition-colors ${mainTab === t.key ? "border-sky-500 text-sky-600" : "border-transparent text-gray-400 hover:text-gray-600"}`}>{t.label}</button>
           ))}
         </div>
@@ -123,72 +122,37 @@ export default function BillingPage() {
         )}
 
         {mainTab === "receipt" && (
-          <div>
-            {!receiptData && (
-              <div className="max-w-2xl mx-auto py-12">
-                <div onClick={() => fileRef.current?.click()} className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center cursor-pointer hover:border-sky-400 hover:bg-sky-50/30 transition-all">
-                  <p className="text-5xl mb-4">📄</p>
-                  <p className="text-lg font-bold text-gray-700">レセ電ファイルをアップロード</p>
-                  <p className="text-sm text-gray-400 mt-2">CSV形式のレセプト電算ファイルを選択してください</p>
-                  <p className="text-xs text-gray-300 mt-1">（UKE, CSV形式対応 / Shift_JIS, UTF-8対応）</p>
-                  <input ref={fileRef} type="file" accept=".csv,.uke,.txt" onChange={handleFileUpload} className="hidden" />
-                </div>
-                {receiptError && <p className="text-red-600 text-sm mt-4 text-center">{receiptError}</p>}
+          <div className="max-w-2xl mx-auto py-8">
+            <div className="bg-white rounded-2xl border border-gray-200 p-8">
+              <div className="text-center mb-6">
+                <p className="text-5xl mb-3">📄</p>
+                <h2 className="text-xl font-bold text-gray-900">レセ電ファイル生成</h2>
+                <p className="text-sm text-gray-400 mt-1">指定月の精算済みデータからレセ電CSVを生成・ダウンロードします</p>
               </div>
-            )}
-            {receiptData && (
-              <div className="flex gap-4">
-                <div className="w-[380px] flex-shrink-0 space-y-3">
-                  <div className="bg-white rounded-xl border border-gray-200 p-4">
-                    <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-bold text-gray-700">🏥 医療機関情報</h3><button onClick={() => { setReceiptData(null); setSelectedReceipt(null); if (fileRef.current) fileRef.current.value = ""; }} className="text-xs text-gray-400 hover:text-red-500">✕ 閉じる</button></div>
-                    <div className="space-y-1.5 text-xs">
-                      <div className="flex justify-between"><span className="text-gray-400">医療機関名</span><span className="font-bold text-gray-700">{receiptData.clinicName || "不明"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-400">コード</span><span className="font-bold text-gray-700">{receiptData.clinicCode}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-400">請求年月</span><span className="font-bold text-gray-700">{receiptData.claimYearMonth}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-400">電話</span><span className="font-bold text-gray-700">{receiptData.phone}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-400">件数</span><span className="font-bold text-sky-600">{receiptData.patients.length}件</span></div>
-                    </div>
-                  </div>
-                  <div><h3 className="text-xs font-bold text-gray-400 mb-2 px-1">患者一覧</h3>
-                    <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
-                      {receiptData.patients.map((p, idx) => (
-                        <button key={idx} onClick={() => setSelectedReceipt(p)} className={`w-full text-left bg-white rounded-xl border p-3.5 transition-all hover:border-sky-300 hover:shadow-md ${selectedReceipt === p ? "border-sky-400 shadow-md bg-sky-50/30" : "border-gray-200"}`}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3"><div className="bg-gradient-to-br from-sky-100 to-sky-200 text-sky-700 w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0">{p.name.charAt(0)}</div><div><p className="font-bold text-gray-900 text-sm">{p.name}</p><p className="text-[10px] text-gray-400">{p.sex} / {p.birthDate}</p></div></div>
-                            <div className="text-right"><p className="font-bold text-gray-900 text-sm">{p.totalPoints.toLocaleString()}<span className="text-[10px] text-gray-400 ml-0.5">点</span></p><p className="text-[10px] text-gray-400">{p.insuranceType}</p></div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div className="flex items-center gap-4 justify-center mb-6">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">請求年月</label>
+                  <input type="month" value={receiptMonth} onChange={e => setReceiptMonth(e.target.value)} className="border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
                 </div>
-                <div className="flex-1">
-                  {selectedReceipt ? (
-                    <div className="space-y-4">
-                      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                        <div className="bg-gray-900 text-white p-4"><div className="flex items-center justify-between"><div><p className="text-xs text-gray-400">患者名</p><p className="text-xl font-bold">{selectedReceipt.name}</p><p className="text-xs text-gray-400">{selectedReceipt.nameKana}</p></div><div className="text-right"><p className="text-xs text-gray-400">合計点数</p><p className="text-3xl font-bold text-sky-400">{selectedReceipt.totalPoints.toLocaleString()}<span className="text-sm ml-1">点</span></p></div></div></div>
-                        <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <div><p className="text-[10px] text-gray-400">性別</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.sex}</p></div>
-                          <div><p className="text-[10px] text-gray-400">生年月日</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.birthDate}</p></div>
-                          <div><p className="text-[10px] text-gray-400">保険種別</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.insuranceType}</p></div>
-                          <div><p className="text-[10px] text-gray-400">初診日</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.firstVisitDate}</p></div>
-                          <div><p className="text-[10px] text-gray-400">保険者番号</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.insurerNumber || "—"}</p></div>
-                          <div><p className="text-[10px] text-gray-400">記号</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.insuredSymbol || "—"}</p></div>
-                          <div><p className="text-[10px] text-gray-400">番号</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.insuredNumber || "—"}</p></div>
-                          {selectedReceipt.publicInsurer && <div><p className="text-[10px] text-gray-400">公費</p><p className="text-sm font-bold text-gray-700">{selectedReceipt.publicInsurer}</p></div>}
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-xl border border-gray-200 p-4"><h3 className="text-sm font-bold text-gray-700 mb-3">🔧 診療行為</h3>
-                        {(() => { const g: Record<string, typeof selectedReceipt.procedures> = {}; selectedReceipt.procedures.forEach(p => { if (!g[p.categoryName]) g[p.categoryName] = []; g[p.categoryName].push(p); }); return Object.entries(g).map(([cat, procs]) => (<div key={cat} className="mb-4"><p className="text-xs font-bold text-sky-600 mb-2 border-b border-gray-100 pb-1">{cat}</p><div className="space-y-1">{procs.map((p, i) => (<div key={i} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50"><div className="flex-1"><div className="flex items-center gap-2"><span className="text-xs font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{p.code}</span>{p.details.length > 0 && <span className="text-[10px] text-gray-400">{p.details.join(", ")}</span>}</div></div><div className="text-right ml-3"><span className="text-sm font-bold text-gray-900">{p.points.toLocaleString()}</span><span className="text-[10px] text-gray-400 ml-0.5">点</span>{p.count > 1 && <span className="text-[10px] text-gray-400 ml-1">×{p.count}</span>}</div></div>))}</div></div>)); })()}
-                        {selectedReceipt.procedures.length === 0 && <p className="text-gray-400 text-sm text-center py-4">診療行為データなし</p>}
-                      </div>
-                      {selectedReceipt.comments.length > 0 && (<div className="bg-white rounded-xl border border-gray-200 p-4"><h3 className="text-sm font-bold text-gray-700 mb-3">💬 コメント</h3><div className="space-y-2">{selectedReceipt.comments.map((c, i) => (<div key={i} className="bg-gray-50 rounded-lg p-3"><span className="text-xs font-mono text-gray-400 mr-2">{c.code}</span><span className="text-sm text-gray-700">{c.text}</span></div>))}</div></div>)}
-                      {selectedReceipt.returns.length > 0 && (<div className="bg-red-50 rounded-xl border border-red-200 p-4"><h3 className="text-sm font-bold text-red-700 mb-3">⚠️ 返戻情報</h3><div className="space-y-2">{selectedReceipt.returns.map((r, i) => (<div key={i} className="bg-white rounded-lg p-3 border border-red-100"><p className="text-xs text-red-400 mb-1">請求年月: {r.yearMonth}</p><p className="text-sm text-red-700">{r.reason}</p></div>))}</div></div>)}
-                    </div>
-                  ) : <div className="h-full flex items-center justify-center py-20"><div className="text-center"><p className="text-5xl mb-3">📄</p><p className="text-gray-400">左から患者を選択してください</p></div></div>}
+                <div className="pt-5">
+                  <button onClick={generateReceipt} disabled={generating} className="bg-sky-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-sky-700 disabled:opacity-50 shadow-lg shadow-sky-200">
+                    {generating ? "⏳ 生成中..." : "📄 レセ電CSV生成・ダウンロード"}
+                  </button>
                 </div>
               </div>
-            )}
+              {receiptStatus && (
+                <div className={`text-center p-4 rounded-xl text-sm font-bold ${receiptStatus.startsWith("✅") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{receiptStatus}</div>
+              )}
+              <div className="mt-6 bg-gray-50 rounded-xl p-4">
+                <h3 className="text-xs font-bold text-gray-500 mb-2">📋 生成されるファイルについて</h3>
+                <div className="space-y-1 text-xs text-gray-400">
+                  <p>• 厚労省レセプト電算処理フォーマット（CSV）で出力されます</p>
+                  <p>• 対象: 指定月の「精算済み」会計データのみ</p>
+                  <p>• IR, RE, HO, KO, SN, JD, MF, SS, GO レコードを生成</p>
+                  <p>• 患者の保険証情報は電子カルテの「🏥 保険証情報」で登録してください</p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
