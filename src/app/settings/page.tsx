@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -28,6 +29,8 @@ type ClinicSettings = {
   slot_duration_min: number;
   closed_days: number[];
   max_patients_per_slot: number;
+  clinic_code?: string;
+  prefecture_code?: string;
 };
 
 type Unit = {
@@ -154,6 +157,8 @@ export default function SettingsPage() {
       slot_duration_min: settings.slot_duration_min,
       closed_days: settings.closed_days,
       max_patients_per_slot: settings.max_patients_per_slot,
+      clinic_code: settings.clinic_code || "",
+      prefecture_code: settings.prefecture_code || "",
     }).eq("clinic_id", clinicId);
 
     setSaveMsg("保存しました ✅");
@@ -307,6 +312,18 @@ export default function SettingsPage() {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Webサイト</label>
                     <input type="url" value={clinic.website || ""} onChange={(e) => setClinic({ ...clinic, website: e.target.value })}
                       placeholder="https://clinic.com" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">医療機関コード <span className="text-xs text-gray-400">（レセ電用）</span></label>
+                    <input type="text" value={settings.clinic_code || ""} onChange={(e) => setSettings({ ...settings, clinic_code: e.target.value })}
+                      placeholder="3101471" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">都道府県コード <span className="text-xs text-gray-400">（レセ電用）</span></label>
+                    <input type="text" value={settings.prefecture_code || ""} onChange={(e) => setSettings({ ...settings, prefecture_code: e.target.value })}
+                      placeholder="23" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
                   </div>
                 </div>
               </div>
