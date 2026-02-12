@@ -37,6 +37,14 @@ const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string }>
 
 type Tab = "today" | "all" | "search";
 
+type Diagnosis = {
+  id: string; patient_id: string; diagnosis_code: string; diagnosis_name: string;
+  tooth_number: string; start_date: string; end_date: string | null;
+  outcome: string; is_primary: boolean; notes: string;
+};
+
+type DiagnosisMaster = { code: string; name: string; category: string };
+
 export default function ChartPage() {
   const [tab, setTab] = useState<Tab>("today");
   const [searchQuery, setSearchQuery] = useState("");
@@ -51,7 +59,23 @@ export default function ChartPage() {
   const [todayPatients, setTodayPatients] = useState<{ patient: Patient; appointment_status: string; record_id: string | null }[]>([]);
   const [showInsurance, setShowInsurance] = useState(false);
   const [insForm, setInsForm] = useState({ sex: "2", insurer_number: "", insured_symbol: "", insured_number: "", insured_branch: "", public_insurer: "", public_recipient: "" });
-  useEffect(() => { loadTodayPatients(); loadAllPatients(); }, []);
+  // 傷病名
+  const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
+  const [diagMaster, setDiagMaster] = useState<DiagnosisMaster[]>([]);
+  const [showDiagForm, setShowDiagForm] = useState(false);
+  const [diagSearch, setDiagSearch] = useState("");
+  const [newDiag, setNewDiag] = useState({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false, notes: "" });
+  useEffect(() => { loadTodayPatients(); loadAllPatients(); loadDiagMaster(); }, []);
+
+  async function loadDiagMaster() {
+    const { data } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
+    if (data) setDiagMaster(data);
+  }
+
+  async function loadDiagnoses(patientId: string) {
+    const { data } = await supabase.from("patient_diagnoses").select("*").eq("patient_id", patientId).order("start_date", { ascending: false });
+    if (data) setDiagnoses(data as Diagnosis[]);
+  }
 
   async function loadTodayPatients() {
     const today = new Date().toISOString().split("T")[0];
@@ -87,6 +111,8 @@ export default function ChartPage() {
     setSelectedPatient(patient);
     setInsForm({ sex: patient.sex || "2", insurer_number: patient.insurer_number || "", insured_symbol: patient.insured_symbol || "", insured_number: patient.insured_number || "", insured_branch: patient.insured_branch || "", public_insurer: patient.public_insurer || "", public_recipient: patient.public_recipient || "" });
     setShowInsurance(false);
+    setShowDiagForm(false);
+    loadDiagnoses(patient.id);
     const { data } = await supabase.from("medical_records")
       .select("id, appointment_id, patient_id, status, soap_s, soap_o, soap_a, soap_p, tooth_chart, doctor_confirmed, created_at, appointments ( scheduled_at, patient_type, status, doctor_id )")
       .eq("patient_id", patient.id).order("created_at", { ascending: false });
@@ -141,6 +167,32 @@ export default function ChartPage() {
     setAllPatients(allPatients.map(p => p.id === selectedPatient.id ? { ...p, ...insForm } : p));
     setSaveMsg("保険情報を保存しました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false); setShowInsurance(false);
   }
+
+  async function addDiagnosis() {
+    if (!selectedPatient || !newDiag.diagnosis_name) return;
+    setSaving(true);
+    await supabase.from("patient_diagnoses").insert({ patient_id: selectedPatient.id, ...newDiag });
+    await loadDiagnoses(selectedPatient.id);
+    setNewDiag({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false, notes: "" });
+    setShowDiagForm(false); setDiagSearch("");
+    setSaveMsg("傷病名を追加しました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false);
+  }
+
+  async function deleteDiagnosis(id: string) {
+    if (!selectedPatient || !confirm("この傷病名を削除しますか？")) return;
+    await supabase.from("patient_diagnoses").delete().eq("id", id);
+    await loadDiagnoses(selectedPatient.id);
+  }
+
+  async function updateOutcome(id: string, outcome: string) {
+    if (!selectedPatient) return;
+    const endDate = outcome !== "continuing" ? new Date().toISOString().split("T")[0] : null;
+    await supabase.from("patient_diagnoses").update({ outcome, end_date: endDate }).eq("id", id);
+    await loadDiagnoses(selectedPatient.id);
+  }
+
+  const filteredDiagMaster = diagSearch.length > 0 ? diagMaster.filter(d => d.name.includes(diagSearch) || d.code.includes(diagSearch)) : diagMaster;
+  const OUTCOME_LABEL: Record<string, { text: string; color: string }> = { continuing: { text: "継続", color: "bg-blue-100 text-blue-700" }, cured: { text: "治癒", color: "bg-green-100 text-green-700" }, suspended: { text: "中止", color: "bg-yellow-100 text-yellow-700" }, died: { text: "死亡", color: "bg-gray-200 text-gray-600" } };
 
   // 患者削除（関連データ全て）
   async function deletePatient() {
@@ -363,6 +415,77 @@ export default function ChartPage() {
                             <textarea value={selectedRecord[s.key] || ""} onChange={(e) => setSelectedRecord({ ...selectedRecord, [s.key]: e.target.value })} disabled={selectedRecord.status === "confirmed"} placeholder={s.p} rows={4} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none disabled:bg-gray-50" />
                           </div>
                         ))}
+                      </div>
+                      {/* 傷病名セクション */}
+                      <div className="bg-white rounded-xl border border-gray-200 p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-bold text-gray-900">🏷️ 傷病名</h4>
+                          <button onClick={() => setShowDiagForm(!showDiagForm)} className={`text-xs px-3 py-1 rounded-lg font-bold transition-colors ${showDiagForm ? "bg-gray-200 text-gray-600" : "bg-sky-100 text-sky-700 hover:bg-sky-200"}`}>{showDiagForm ? "✕ 閉じる" : "＋ 追加"}</button>
+                        </div>
+                        {/* 追加フォーム */}
+                        {showDiagForm && (
+                          <div className="mb-4 bg-sky-50 rounded-xl p-3 border border-sky-200">
+                            <div className="mb-2">
+                              <input value={diagSearch} onChange={e => setDiagSearch(e.target.value)} placeholder="傷病名を検索（例: う蝕、歯周炎）" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" />
+                            </div>
+                            {diagSearch.length > 0 && (
+                              <div className="max-h-32 overflow-y-auto mb-2 bg-white rounded-lg border border-gray-200">
+                                {filteredDiagMaster.map(d => (
+                                  <button key={d.code} onClick={() => { setNewDiag({ ...newDiag, diagnosis_code: d.code, diagnosis_name: d.name }); setDiagSearch(""); }}
+                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-sky-50 border-b border-gray-50 last:border-0">
+                                    <span className="text-xs text-gray-400 mr-2">{d.code}</span><span className="font-bold text-gray-700">{d.name}</span>
+                                    <span className="text-[10px] text-gray-300 ml-2">{d.category}</span>
+                                  </button>
+                                ))}
+                                {filteredDiagMaster.length === 0 && <p className="text-xs text-gray-400 p-2 text-center">該当なし</p>}
+                              </div>
+                            )}
+                            {newDiag.diagnosis_name && (
+                              <div className="space-y-2">
+                                <div className="bg-white rounded-lg p-2 border border-sky-200">
+                                  <p className="text-sm font-bold text-sky-700">{newDiag.diagnosis_name} <span className="text-xs text-gray-400">({newDiag.diagnosis_code})</span></p>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div><label className="text-[10px] text-gray-400 block mb-0.5">歯番</label>
+                                    <input value={newDiag.tooth_number} onChange={e => setNewDiag({...newDiag, tooth_number: e.target.value})} placeholder="#46" className="w-full border border-gray-200 rounded px-2 py-1 text-xs" /></div>
+                                  <div><label className="text-[10px] text-gray-400 block mb-0.5">開始日</label>
+                                    <input type="date" value={newDiag.start_date} onChange={e => setNewDiag({...newDiag, start_date: e.target.value})} className="w-full border border-gray-200 rounded px-2 py-1 text-xs" /></div>
+                                  <div className="flex items-end">
+                                    <button onClick={addDiagnosis} disabled={saving} className="w-full bg-sky-600 text-white py-1 rounded text-xs font-bold hover:bg-sky-700 disabled:opacity-50">追加</button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* 傷病名一覧 */}
+                        {diagnoses.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {diagnoses.map(d => {
+                              const oc = OUTCOME_LABEL[d.outcome] || OUTCOME_LABEL.continuing;
+                              return (
+                                <div key={d.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                                  <div className="flex items-center gap-2 flex-1">
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${oc.color}`}>{oc.text}</span>
+                                    <span className="text-sm font-bold text-gray-800">{d.diagnosis_name}</span>
+                                    {d.tooth_number && <span className="text-xs text-sky-600 font-bold">{d.tooth_number}</span>}
+                                    <span className="text-[10px] text-gray-400">{d.start_date}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <select value={d.outcome} onChange={e => updateOutcome(d.id, e.target.value)} className="text-[10px] border border-gray-200 rounded px-1 py-0.5">
+                                      <option value="continuing">継続</option>
+                                      <option value="cured">治癒</option>
+                                      <option value="suspended">中止</option>
+                                    </select>
+                                    <button onClick={() => deleteDiagnosis(d.id)} className="text-[10px] text-red-400 hover:text-red-600 px-1">✕</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-400 text-center py-2">傷病名が登録されていません</p>
+                        )}
                       </div>
                       <div className="bg-white rounded-xl border border-gray-200 p-4">
                         <div className="flex items-center justify-between mb-3"><h4 className="text-sm font-bold text-gray-900">🦷 歯式チャート</h4><p className="text-xs text-gray-400">タップで状態変更</p></div>
