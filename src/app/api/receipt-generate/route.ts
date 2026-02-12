@@ -54,7 +54,9 @@ export async function POST(request: NextRequest) {
     let receiptNo = 0;
     let totalPointsAll = 0;
 
-    for (const [, pBillings] of patientMap) {
+    const patientKeys = Array.from(patientMap.keys());
+    for (let ki = 0; ki < patientKeys.length; ki++) {
+      const pBillings = patientMap.get(patientKeys[ki])!;
       receiptNo++;
       const firstB = pBillings[0];
       const pat = patientLookup.get(firstB.patient_id) as Record<string, unknown> | undefined;
