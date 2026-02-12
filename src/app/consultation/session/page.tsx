@@ -321,7 +321,7 @@ function SessionContent() {
 
       <main className="max-w-full mx-auto px-4 py-4">
         <div className="flex gap-4">
-          {/* 左: SOAP */}
+          {/* 左: SOAP + 歯式 */}
           <div className="flex-1 space-y-3">
             {/* 文字起こし */}
             {transcript && (
@@ -353,57 +353,58 @@ function SessionContent() {
                 </div>
               ))}
             </div>
-          </div>
 
-          {/* 右: 歯式 + 情報 + ボタン */}
-          <div className="w-[340px] flex-shrink-0 space-y-3">
-            {/* 歯式チャート */}
+            {/* 歯式チャート（SOAP下に全幅配置） */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-gray-700">🦷 歯式チャート</h3>
                 <span className="text-[10px] text-gray-400">タップで状態変更</span>
               </div>
-              <div className="flex flex-col items-center gap-1">
-                {/* 上顎 */}
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[9px] text-gray-300 w-6 text-right mr-1">右</span>
-                  <div className="flex gap-0.5">
-                    {UPPER_RIGHT.map(t => renderTooth(t))}
+              <div className="flex justify-center">
+                <div className="flex flex-col items-center gap-1">
+                  {/* 上顎 */}
+                  <div className="flex items-center gap-0.5">
+                    <span className="text-[9px] text-gray-300 w-6 text-right mr-1">右</span>
+                    <div className="flex gap-1">
+                      {UPPER_RIGHT.map(t => renderTooth(t))}
+                    </div>
+                    <div className="w-px h-10 bg-gray-300 mx-2" />
+                    <div className="flex gap-1">
+                      {UPPER_LEFT.map(t => renderTooth(t))}
+                    </div>
+                    <span className="text-[9px] text-gray-300 w-6 ml-1">左</span>
                   </div>
-                  <div className="w-px h-8 bg-gray-300 mx-1" />
-                  <div className="flex gap-0.5">
-                    {UPPER_LEFT.map(t => renderTooth(t))}
+                  {/* 区切り線 */}
+                  <div className="flex items-center gap-1 my-1" style={{ width: "100%" }}>
+                    <span className="text-[9px] text-gray-300 w-6 text-right mr-1" />
+                    <div className="flex-1 border-t-2 border-gray-400" />
+                    <span className="text-[9px] text-gray-300 w-6 ml-1" />
                   </div>
-                  <span className="text-[9px] text-gray-300 w-6 ml-1">左</span>
-                </div>
-                {/* 区切り線 */}
-                <div className="w-full flex items-center gap-1 my-0.5">
-                  <span className="text-[9px] text-gray-300 w-6 text-right mr-1">右</span>
-                  <div className="flex-1 border-t-2 border-gray-300" />
-                  <span className="text-[9px] text-gray-300 w-6 ml-1">左</span>
-                </div>
-                {/* 下顎 */}
-                <div className="flex items-center gap-0.5">
-                  <span className="text-[9px] text-gray-300 w-6 text-right mr-1" />
-                  <div className="flex gap-0.5">
-                    {LOWER_RIGHT.map(t => renderTooth(t))}
+                  {/* 下顎 */}
+                  <div className="flex items-center gap-0.5">
+                    <span className="text-[9px] text-gray-300 w-6 text-right mr-1">右</span>
+                    <div className="flex gap-1">
+                      {LOWER_RIGHT.map(t => renderTooth(t))}
+                    </div>
+                    <div className="w-px h-10 bg-gray-300 mx-2" />
+                    <div className="flex gap-1">
+                      {LOWER_LEFT.map(t => renderTooth(t))}
+                    </div>
+                    <span className="text-[9px] text-gray-300 w-6 ml-1">左</span>
                   </div>
-                  <div className="w-px h-8 bg-gray-300 mx-1" />
-                  <div className="flex gap-0.5">
-                    {LOWER_LEFT.map(t => renderTooth(t))}
-                  </div>
-                  <span className="text-[9px] text-gray-300 w-6 ml-1" />
                 </div>
               </div>
               {/* 凡例 */}
-              <div className="flex flex-wrap gap-1.5 mt-3 justify-center">
+              <div className="flex flex-wrap gap-2 mt-4 justify-center">
                 {Object.entries(TOOTH_STATUS).map(([k, v]) => (
-                  <span key={k} className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${v.border} ${v.bg} ${v.color}`}>{v.label}</span>
+                  <span key={k} className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${v.border} ${v.bg} ${v.color}`}>{v.label}</span>
                 ))}
               </div>
             </div>
+          </div>
 
-            {/* 患者情報 */}
+          {/* 右: 患者情報 + ボタン */}
+          <div className="w-[220px] flex-shrink-0 space-y-3">
             <div className="bg-white rounded-xl border border-gray-200 p-3">
               <h3 className="text-xs font-bold text-gray-400 mb-2">患者情報</h3>
               <div className="space-y-1.5 text-xs">
