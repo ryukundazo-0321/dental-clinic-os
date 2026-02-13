@@ -82,9 +82,14 @@ ${transcript}
   "soap_a": "診断名",
   "soap_p": "治療計画・本日の処置・次回予定",
   "tooth_updates": {"46": "treated"},
-  "procedures": ["CR充填"]
+  "procedures": ["CR充填"],
+  "diagnoses": [
+    {"name": "う蝕（C2）", "tooth": "#46", "code": "K022"},
+    {"name": "歯周炎（P）", "tooth": "", "code": "K051"}
+  ]
 }
 
+diagnoses: 会話から推定される傷病名のリスト。各項目にname（傷病名）、tooth（対象歯番、なければ空）、code（歯科病名コード K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K045=Per, K050=G, K051=P, K081=Perico, K076=TMD, K120=Hys 等）を含める。
 tooth_updatesの値: caries / treated / crown / missing / implant / bridge`;
 
       // まずGPT-4oで試行
@@ -142,6 +147,7 @@ tooth_updatesの値: caries / treated / crown / missing / implant / bridge`;
           },
           tooth_updates: {},
           procedures: [],
+          diagnoses: [],
           warning: "AI SOAP変換に失敗しました。文字起こしテキストをS欄に追加しました。手動で編集してください。"
         });
       }
@@ -153,6 +159,7 @@ tooth_updatesの値: caries / treated / crown / missing / implant / bridge`;
         soap: { s: transcript, o: "", a: "", p: "" },
         tooth_updates: {},
         procedures: [],
+        diagnoses: [],
         warning: "SOAP変換でエラーが発生しました"
       });
     }
@@ -168,6 +175,7 @@ tooth_updatesの値: caries / treated / crown / missing / implant / bridge`;
       },
       tooth_updates: soapData.tooth_updates || {},
       procedures: soapData.procedures || [],
+      diagnoses: soapData.diagnoses || [],
     });
 
   } catch (error) {
