@@ -60,24 +60,35 @@ export async function POST(request: NextRequest) {
       .join(" ")
       .toLowerCase();
 
-    const selectedItems: { code: string; name: string; points: number; category: string; count: number; note: string }[] = [];
+    // 歯番抽出（#11〜#48, 11番〜48番 等）
+    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, record.soap_p].filter(Boolean).join(" ");
+    const toothPattern = /[#＃]?\s*([1-4][1-8])\s*(?:番)?/g;
+    const extractedTeeth: string[] = [];
+    let toothMatch;
+    while ((toothMatch = toothPattern.exec(soapRaw)) !== null) {
+      const num = toothMatch[1];
+      if (!extractedTeeth.includes(num)) extractedTeeth.push(num);
+    }
 
-    const addItem = (code: string, count = 1) => {
+    const selectedItems: { code: string; name: string; points: number; category: string; count: number; note: string; tooth_numbers: string[] }[] = [];
+
+    const addItem = (code: string, count = 1, teeth: string[] = []) => {
       const fee = feeMap.get(code) as { code: string; name: string; points: number; category: string; conditions: { note?: string } } | undefined;
       if (fee) {
         selectedItems.push({
           code: fee.code, name: fee.name, points: fee.points,
           category: fee.category, count, note: fee.conditions?.note || "",
+          tooth_numbers: teeth,
         });
       }
     };
 
     // === 自動算定ロジック ===
-    // 基本診療料
+    // 基本診療料（歯番紐づけなし）
     if (isNew) { addItem("A000"); addItem("A001-a"); }
     else { addItem("A002"); addItem("A001-b"); }
 
-    // 画像診断
+    // 画像診断（歯番紐づけなし）
     if (soapAll.includes("パノラマ") || soapAll.includes("panorama")) {
       addItem("E100-pan"); addItem("E-diag");
     }
@@ -85,44 +96,44 @@ export async function POST(request: NextRequest) {
       addItem("E100-1"); addItem("E100-1-diag");
     }
 
-    // 検査
+    // 検査（歯番紐づけなし）
     if (soapAll.includes("歯周") && (soapAll.includes("検査") || soapAll.includes("ポケット"))) {
       addItem("D002-1");
     }
 
-    // 麻酔
+    // 麻酔（歯番あり）
     if (soapAll.includes("麻酔") || soapAll.includes("浸潤") || soapAll.includes("浸麻")) {
-      addItem(soapAll.includes("伝達") ? "K001-2" : "K001-1");
+      addItem(soapAll.includes("伝達") ? "K001-2" : "K001-1", 1, extractedTeeth);
     }
 
-    // CR充填
+    // CR充填（歯番あり）
     if (soapAll.includes("cr") || soapAll.includes("充填") || soapAll.includes("レジン") || soapAll.includes("光重合")) {
-      if (soapAll.includes("複雑")) { addItem("M001-fuku"); addItem("M009-CR-fuku"); }
-      else { addItem("M001-sho"); addItem("M009-CR"); }
+      if (soapAll.includes("複雑")) { addItem("M001-fuku", 1, extractedTeeth); addItem("M009-CR-fuku", 1, extractedTeeth); }
+      else { addItem("M001-sho", 1, extractedTeeth); addItem("M009-CR", 1, extractedTeeth); }
     }
 
-    // 歯内治療
+    // 歯内治療（歯番あり）
     if (soapAll.includes("抜髄")) {
-      if (soapAll.includes("3根")) addItem("I001-3");
-      else if (soapAll.includes("2根")) addItem("I001-2");
-      else addItem("I001-1");
+      if (soapAll.includes("3根")) addItem("I001-3", 1, extractedTeeth);
+      else if (soapAll.includes("2根")) addItem("I001-2", 1, extractedTeeth);
+      else addItem("I001-1", 1, extractedTeeth);
     }
-    if (soapAll.includes("感染根管")) addItem("I002-1");
-    if (soapAll.includes("根管充填") || soapAll.includes("根充")) addItem("I006-1");
-    if (soapAll.includes("貼薬")) addItem("I005");
+    if (soapAll.includes("感染根管")) addItem("I002-1", 1, extractedTeeth);
+    if (soapAll.includes("根管充填") || soapAll.includes("根充")) addItem("I006-1", 1, extractedTeeth);
+    if (soapAll.includes("貼薬")) addItem("I005", 1, extractedTeeth);
 
-    // 歯周治療
+    // 歯周治療（歯番紐づけなし - 通常は部位単位）
     if (soapAll.includes("スケーリング") || soapAll.includes("sc")) addItem("I011-1");
     if (soapAll.includes("srp")) addItem("I011-SRP-2");
 
-    // 抜歯
+    // 抜歯（歯番あり）
     if (soapAll.includes("抜歯")) {
-      if (soapAll.includes("難") || soapAll.includes("埋伏")) addItem("J001-3");
-      else if (soapAll.includes("臼歯") || soapAll.includes("奥歯")) addItem("J001-2");
-      else addItem("J001-1");
+      if (soapAll.includes("難") || soapAll.includes("埋伏")) addItem("J001-3", 1, extractedTeeth);
+      else if (soapAll.includes("臼歯") || soapAll.includes("奥歯")) addItem("J001-2", 1, extractedTeeth);
+      else addItem("J001-1", 1, extractedTeeth);
     }
 
-    // 投薬
+    // 投薬（歯番紐づけなし）
     if (soapAll.includes("処方") || soapAll.includes("投薬")) {
       addItem("F-shoho"); addItem("F-chozai"); addItem("F-yaku-1");
     }
