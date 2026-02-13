@@ -98,13 +98,14 @@ export async function POST(request: NextRequest) {
       lines.push(`MF,00,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,`);
 
       for (const b of pBillings) {
-        const procs = (b.procedures_detail || []) as { code: string; points: number; count: number }[];
+        const procs = (b.procedures_detail || []) as { code: string; points: number; count: number; tooth_numbers?: string[] }[];
         for (const proc of procs) {
           const { data: feeItem } = await supabase.from("fee_master").select("receipt_code, receipt_category").eq("code", proc.code).single();
           const rCode = feeItem?.receipt_code || proc.code;
           const rCat = feeItem?.receipt_category || "99";
           const pad = new Array(64).fill("").join(",");
-          lines.push(`SS,${rCat},2,${rCode},,,${pad},${proc.points},${proc.count},,,,,,,,,,,,,,,,,,,,,,,,`);
+          const teethStr = proc.tooth_numbers && proc.tooth_numbers.length > 0 ? proc.tooth_numbers.join(" ") : "";
+          lines.push(`SS,${rCat},2,${rCode},,,${pad},${proc.points},${proc.count},${teethStr},,,,,,,,,,,,,,,,,,,,,,,`);
         }
       }
     }
