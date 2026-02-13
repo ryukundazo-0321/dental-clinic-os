@@ -138,6 +138,103 @@ export async function POST(request: NextRequest) {
       addItem("F-shoho"); addItem("F-chozai"); addItem("F-yaku-1");
     }
 
+    // 補綴 - インレー
+    if (soapAll.includes("インレー") || soapAll.includes("inlay")) {
+      if (soapAll.includes("複雑") || soapAll.includes("2面")) addItem("M-IN-fuku", 1, extractedTeeth);
+      else addItem("M-IN-sho", 1, extractedTeeth);
+      addItem("M-IMP-sei", 1, extractedTeeth); addItem("M-BITE", 1, extractedTeeth);
+    }
+
+    // 補綴 - クラウン
+    if (soapAll.includes("クラウン") || soapAll.includes("fmc") || soapAll.includes("全部金属冠") || soapAll.includes("かぶせ")) {
+      if (soapAll.includes("前装") || soapAll.includes("前歯")) addItem("M-CRN-ko", 1, extractedTeeth);
+      else if (soapAll.includes("cad")) addItem("M-CRN-cad2", 1, extractedTeeth);
+      else if (soapAll.includes("大臼歯")) addItem("M-CRN-zen-dai", 1, extractedTeeth);
+      else addItem("M-CRN-zen", 1, extractedTeeth);
+      addItem("M-IMP-sei", 1, extractedTeeth); addItem("M-BITE", 1, extractedTeeth);
+    }
+
+    // 補綴 - 支台築造
+    if (soapAll.includes("コア") || soapAll.includes("支台築造")) {
+      if (soapAll.includes("メタル") || soapAll.includes("間接")) addItem("M-POST-cast", 1, extractedTeeth);
+      else addItem("M-POST", 1, extractedTeeth);
+    }
+
+    // 補綴 - TEK
+    if (soapAll.includes("tek") || soapAll.includes("テック") || soapAll.includes("仮歯")) {
+      addItem("M-TEK", 1, extractedTeeth);
+    }
+
+    // 補綴 - セット（装着）- 義歯以外の場合のみ
+    if ((soapAll.includes("セット") || soapAll.includes("装着") || soapAll.includes("合着")) && !soapAll.includes("義歯") && !soapAll.includes("デンチャー") && !soapAll.includes("入れ歯")) {
+      addItem("M-SET", 1, extractedTeeth);
+    }
+
+    // 補綴 - 印象（単独指示の場合）
+    if ((soapAll.includes("印象") || soapAll.includes("型取り")) && !soapAll.includes("インレー") && !soapAll.includes("クラウン") && !soapAll.includes("義歯")) {
+      if (soapAll.includes("精密")) addItem("M-IMP-sei", 1, extractedTeeth);
+      else addItem("M-IMP", 1, extractedTeeth);
+    }
+
+    // ブリッジ
+    if (soapAll.includes("ブリッジ") || soapAll.includes("br")) {
+      addItem("M-CRN-zen", 1, extractedTeeth); addItem("BR-PON", 1, extractedTeeth);
+      addItem("M-IMP-sei", 1, extractedTeeth); addItem("M-BITE", 1, extractedTeeth);
+    }
+
+    // 義歯
+    if (soapAll.includes("義歯") || soapAll.includes("デンチャー") || soapAll.includes("入れ歯")) {
+      const isDenAdj = soapAll.includes("調整") || soapAll.includes("あたり");
+      const isDenRep = soapAll.includes("修理");
+      const isDenReline = soapAll.includes("裏装") || soapAll.includes("リライン");
+      const isDenSet = soapAll.includes("セット") || soapAll.includes("装着");
+      const isDenMaintenanceOnly = (isDenAdj || isDenRep || isDenReline) && !isDenSet && !soapAll.includes("新製") && !soapAll.includes("作製");
+      // 義歯本体は新製・セット時のみ
+      if (!isDenMaintenanceOnly) {
+        if (soapAll.includes("総義歯") || soapAll.includes("フルデンチャー")) {
+          if (soapAll.includes("下")) addItem("DEN-FULL-LO"); else addItem("DEN-FULL-UP");
+        } else {
+          addItem("DEN-1-4");
+        }
+      }
+      if (isDenAdj) addItem("DEN-ADJ");
+      if (isDenRep) addItem("DEN-REP");
+      if (isDenReline) addItem("DEN-RELINE");
+      if (isDenSet) addItem("DEN-SET");
+    }
+
+    // 歯周外科
+    if (soapAll.includes("フラップ") || soapAll.includes("歯周外科")) {
+      addItem("PE-FLAP", 1, extractedTeeth);
+    }
+    if (soapAll.includes("小帯切除")) addItem("PE-FREN");
+    if (soapAll.includes("歯肉切除")) addItem("PE-GVECT");
+
+    // 口腔外科
+    if (soapAll.includes("嚢胞") || soapAll.includes("のう胞")) addItem("OPE-NOH", 1, extractedTeeth);
+    if (soapAll.includes("歯根端切除")) {
+      if (soapAll.includes("大臼歯")) addItem("OPE-API-dai", 1, extractedTeeth);
+      else addItem("OPE-API", 1, extractedTeeth);
+    }
+    if (soapAll.includes("切開") || soapAll.includes("排膿")) addItem("OPE-DRAIN", 1, extractedTeeth);
+    if (soapAll.includes("縫合")) addItem("OPE-SUTURE", 1, extractedTeeth);
+
+    // 医学管理
+    if (soapAll.includes("管理料") || soapAll.includes("tbi") || soapAll.includes("ブラッシング指導")) {
+      addItem("B-SHIDO"); addItem("B-DOC");
+    }
+    if (soapAll.includes("衛生指導") || soapAll.includes("衛生士指導")) addItem("B-HOKEN");
+
+    // その他処置
+    if (soapAll.includes("覆髄")) {
+      if (soapAll.includes("直接")) addItem("PCEM-D", 1, extractedTeeth);
+      else addItem("PCEM", 1, extractedTeeth);
+    }
+    if (soapAll.includes("固定") || soapAll.includes("暫間固定")) addItem("PERIO-FIX", 1, extractedTeeth);
+    if (soapAll.includes("除去") && (soapAll.includes("冠") || soapAll.includes("セメント"))) addItem("DEBOND", 1, extractedTeeth);
+    if (soapAll.includes("フッ素") || soapAll.includes("フッ化物")) addItem("F-COAT", 1, extractedTeeth);
+    if (soapAll.includes("シーラント")) addItem("SEALANT", 1, extractedTeeth);
+
     // === 合計計算 ===
     const totalPoints = selectedItems.reduce((sum, item) => sum + item.points * item.count, 0);
     const patientBurden = Math.ceil(totalPoints * 10 * burdenRatio);
