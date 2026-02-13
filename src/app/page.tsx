@@ -54,8 +54,6 @@ export default function Home() {
     { href: "/settings", icon: "⚙️", title: "クリニック設定", desc: "基本情報・ユニット・スタッフ・予約枠" },
     { href: "/audit", icon: "🔍", title: "監査ログ", desc: "カルテ・会計の全変更履歴" },
     { href: "/reservation/book", icon: "🌐", title: "患者向け予約ページ", desc: "Web予約画面（URLを患者に共有）" },
-    { href: "/questionnaire", icon: "📝", title: "WEB問診票", desc: "患者向け問診票画面" },
-    { href: "/checkin/self", icon: "📲", title: "セルフチェックイン", desc: "患者向けチェックイン画面" },
   ];
 
   return (
