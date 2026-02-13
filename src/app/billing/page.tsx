@@ -49,6 +49,164 @@ export default function BillingPage() {
     await loadBillings(); setSelected(null); setProcessing(false);
   }
 
+  function printReceipt(billing: BillingRow) {
+    const name = billing.patients?.name_kanji || "不明";
+    const kana = billing.patients?.name_kana || "";
+    const insType = billing.patients?.insurance_type || "";
+    const burdenPct = Math.round(billing.burden_ratio * 10);
+    const dateStr = new Date(billing.created_at).toLocaleDateString("ja-JP");
+    const procs = billing.procedures_detail || [];
+
+    // 厚労省歯科領収証の法定区分にマッピング
+    // fee_masterのcategoryとcodeから自動判定
+
+    // fee_masterのcategoryからの自動マッピング
+    function mapToReceiptCategory(item: { category: string; code: string; name: string }): string {
+      const cat = (item.category || "").toLowerCase();
+      const code = (item.code || "").toUpperCase();
+      // 初・再診料
+      if (code.startsWith("A0") || code === "A001-A" || code === "A001-B" || code === "A002") return "初・再診料";
+      // 医学管理等
+      if (code.startsWith("B-") || cat.includes("医学管理")) return "医学管理等";
+      // 歯冠修復及び欠損補綴（M-, BR-, DEN- を検査/投薬より先に判定）
+      if (code.startsWith("M-") || code.startsWith("M0") || code.startsWith("BR-") || code.startsWith("DEN-") || cat.includes("歯冠") || cat.includes("ブリッジ") || cat.includes("有床義歯") || cat.includes("補綴")) return "歯冠修復及び欠損補綴";
+      // 検査（D始まりだがDEN-は上で除外済み、DEBONDも除外）
+      if ((code.startsWith("D") && !code.startsWith("DE")) || cat.includes("検査")) return "検査";
+      // 画像診断
+      if (code.startsWith("E") || cat.includes("画像")) return "画像診断";
+      // 投薬（F-COATは処置なので除外）
+      if (code.startsWith("F-") && code !== "F-COAT") return "投薬";
+      if (cat.includes("投薬")) return "投薬";
+      // 注射
+      if (cat.includes("注射")) return "注射";
+      // 手術（J0, OPE, PE- を処置より先に判定）
+      if (code.startsWith("J0") || cat.includes("口腔外科") || code.startsWith("OPE") || code.startsWith("PE-")) return "手術";
+      // 麻酔
+      if (code.startsWith("K0") || cat.includes("麻酔")) return "麻酔";
+      // 処置（I0, sc, srp, その他）
+      if (code.startsWith("I0") || code.startsWith("I011") || code === "SC" || code === "SRP") return "処置";
+      // 在宅
+      if (cat.includes("在宅") || code.startsWith("VISIT")) return "在宅医療";
+      // 自費
+      if (cat.includes("自費")) return "保険外（自費）";
+      // デフォルト: 処置（DEBOND, PCEM, PERIO-FIX, SEALANT, F-COAT等）
+      return "処置";
+    }
+
+    // 区分ごとに集計
+    const catPoints: Record<string, number> = {};
+    const catItems: Record<string, typeof procs> = {};
+    for (let i = 0; i < procs.length; i++) {
+      const item = procs[i];
+      const cat = mapToReceiptCategory(item);
+      if (!catPoints[cat]) catPoints[cat] = 0;
+      if (!catItems[cat]) catItems[cat] = [];
+      catPoints[cat] += item.points * item.count;
+      catItems[cat].push(item);
+    }
+
+    // 領収証（上段）の区分行
+    const receiptOrder = ["初・再診料","医学管理等","在宅医療","検査","画像診断","投薬","注射","リハビリテーション","処置","手術","麻酔","放射線治療","歯冠修復及び欠損補綴","歯科矯正","病理診断"];
+    const receiptRows = receiptOrder.map(cat =>
+      `<tr><td style="padding:3px 6px;font-size:11px;border:1px solid #999;">${cat}</td><td style="text-align:right;padding:3px 8px;font-size:11px;border:1px solid #999;">${catPoints[cat] ? catPoints[cat].toLocaleString() : ""}</td><td style="text-align:center;font-size:11px;border:1px solid #999;">点</td></tr>`
+    ).join("");
+
+    // 明細書（下段）の詳細行
+    const detailRows = Object.entries(catItems).map(([cat, items]) =>
+      `<tr><td colspan="4" style="background:#f0f0f0;font-weight:bold;padding:4px 6px;font-size:10px;border:1px solid #999;">${cat}</td></tr>` +
+      items.map(item =>
+        `<tr><td style="padding:2px 6px;font-size:10px;border:1px solid #ddd;">${item.name}${item.tooth_numbers && item.tooth_numbers.length > 0 ? " ("+item.tooth_numbers.map((t: string) => "#"+t).join(",")+")" : ""}</td><td style="text-align:center;font-size:10px;border:1px solid #ddd;">${item.count}</td><td style="text-align:right;font-size:10px;border:1px solid #ddd;">${item.points}</td><td style="text-align:right;font-size:10px;border:1px solid #ddd;">${(item.points * item.count).toLocaleString()}</td></tr>`
+      ).join("")
+    ).join("");
+
+    const totalMedical = billing.total_points * 10;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>領収証 兼 診療明細書</title>
+<style>
+  @media print { body { margin: 0; padding: 10px; } .no-print { display: none !important; } @page { size: A4; margin: 10mm; } }
+  body { font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif; max-width: 700px; margin: 10px auto; color: #333; font-size: 11px; }
+  h2 { font-size: 16px; text-align: center; margin: 0 0 8px 0; padding: 6px; border: 2px solid #333; }
+  .meta { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .meta td { padding: 2px 6px; font-size: 11px; }
+  table.receipt { width: 100%; border-collapse: collapse; }
+  .section-title { font-size: 12px; font-weight: bold; margin: 12px 0 4px 0; border-bottom: 1px solid #333; padding-bottom: 2px; }
+  .total-box { border: 2px solid #333; padding: 8px; margin-top: 8px; }
+  .total-box td { padding: 3px 6px; font-size: 12px; }
+  .total-box .big { font-size: 18px; font-weight: bold; }
+  .footer { font-size: 9px; color: #666; text-align: center; margin-top: 12px; border-top: 1px solid #ccc; padding-top: 6px; }
+  .stamp { display: inline-block; width: 50px; height: 50px; border: 1.5px solid #aaa; border-radius: 50%; text-align: center; line-height: 50px; font-size: 9px; color: #aaa; float: right; margin-top: -40px; }
+  .page-break { page-break-before: always; }
+</style></head><body>
+
+<div class="no-print" style="text-align:center;margin-bottom:12px;">
+  <button onclick="window.print()" style="padding:8px 24px;font-size:14px;background:#333;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨️ 印刷する</button>
+  <button onclick="window.close()" style="padding:8px 16px;font-size:12px;background:#eee;border:none;border-radius:6px;cursor:pointer;margin-left:8px;">閉じる</button>
+</div>
+
+<!-- ===== 領収証 ===== -->
+<h2>領 収 証</h2>
+<table style="width:100%;margin-bottom:8px;">
+  <tr>
+    <td style="font-size:14px;"><b>${name}</b> 様</td>
+    <td style="text-align:right;font-size:11px;">診療日: ${dateStr}</td>
+  </tr>
+  <tr>
+    <td style="font-size:10px;color:#666;">${kana}</td>
+    <td style="text-align:right;font-size:10px;">保険: ${insType || "社保"} ／ ${burdenPct}割</td>
+  </tr>
+</table>
+
+<table class="receipt">
+  <thead><tr>
+    <th style="text-align:left;padding:4px 6px;border:1px solid #999;background:#eee;width:60%;">区 分</th>
+    <th style="text-align:right;padding:4px 6px;border:1px solid #999;background:#eee;width:30%;">点 数</th>
+    <th style="text-align:center;padding:4px 6px;border:1px solid #999;background:#eee;width:10%;"></th>
+  </tr></thead>
+  <tbody>${receiptRows}</tbody>
+</table>
+
+<table class="total-box" style="width:100%;border-collapse:collapse;">
+  <tr><td>合計点数</td><td style="text-align:right;">${billing.total_points.toLocaleString()} 点</td></tr>
+  <tr><td>保険医療費（10円×点数）</td><td style="text-align:right;">¥${totalMedical.toLocaleString()}</td></tr>
+  <tr><td>保険者負担</td><td style="text-align:right;">¥${billing.insurance_claim.toLocaleString()}</td></tr>
+  <tr style="border-top:2px solid #333;"><td class="big">患者負担額（${burdenPct}割）</td><td style="text-align:right;" class="big">¥${billing.patient_burden.toLocaleString()}</td></tr>
+</table>
+<div class="stamp">収納印</div>
+
+<!-- ===== 診療明細書 ===== -->
+<div class="page-break"></div>
+<h2>診 療 明 細 書</h2>
+<table style="width:100%;margin-bottom:6px;">
+  <tr><td><b>${name}</b> 様</td><td style="text-align:right;">診療日: ${dateStr}</td></tr>
+</table>
+
+<table class="receipt">
+  <thead><tr>
+    <th style="text-align:left;padding:3px 6px;border:1px solid #999;background:#eee;">項 目</th>
+    <th style="text-align:center;padding:3px 6px;border:1px solid #999;background:#eee;width:40px;">回数</th>
+    <th style="text-align:right;padding:3px 6px;border:1px solid #999;background:#eee;width:50px;">点数</th>
+    <th style="text-align:right;padding:3px 6px;border:1px solid #999;background:#eee;width:60px;">小計</th>
+  </tr></thead>
+  <tbody>${detailRows}</tbody>
+</table>
+
+<table class="total-box" style="width:100%;border-collapse:collapse;">
+  <tr><td class="big">合計</td><td style="text-align:right;" class="big">${billing.total_points.toLocaleString()} 点</td></tr>
+</table>
+
+<div class="footer">
+  <p>この領収証は医療費控除の申告にご使用いただけます。再発行はいたしかねますので大切に保管してください。</p>
+  <p>発行日: ${new Date().toLocaleDateString("ja-JP")}</p>
+</div>
+</body></html>`;
+
+    const printWindow = window.open("", "_blank");
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+    }
+  }
+
   function getName(b: BillingRow) { return b.patients?.name_kanji || "不明"; }
   function getKana(b: BillingRow) { return b.patients?.name_kana || ""; }
   function groupByCategory(items: BillingRow["procedures_detail"]) {
@@ -114,7 +272,7 @@ export default function BillingPage() {
                 {selected.ai_check_warnings?.length > 0 && <div className="bg-amber-50 border-b border-amber-200 px-4 py-2"><p className="text-xs font-bold text-amber-700 mb-1">⚠️ AI算定チェック</p>{selected.ai_check_warnings.map((w, i) => <p key={i} className="text-xs text-amber-600">• {w}</p>)}</div>}
                 <div className="p-4 max-h-[50vh] overflow-y-auto">{Object.entries(groupByCategory(selected.procedures_detail)).map(([cat, items]) => (<div key={cat} className="mb-4"><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 border-b border-gray-100 pb-1">{cat}</p>{items.map((item, idx) => (<div key={idx} className="flex items-center justify-between py-1.5"><div className="flex-1"><p className="text-sm font-bold text-gray-800">{item.name}</p><p className="text-[10px] text-gray-400">{item.code}{item.note ? ` · ${item.note}` : ""}{item.tooth_numbers && item.tooth_numbers.length > 0 ? ` · 🦷${item.tooth_numbers.map(t => `#${t}`).join(",")}` : ""}</p></div><p className="text-sm font-bold text-gray-900 ml-3">{(item.points * item.count).toLocaleString()} <span className="text-[10px] text-gray-400">点</span></p></div>))}</div>))}</div>
                 <div className="border-t border-gray-200 p-4 bg-gray-50"><div className="grid grid-cols-3 gap-2 mb-3 text-center"><div><p className="text-[10px] text-gray-400">合計点数</p><p className="text-lg font-bold text-gray-900">{selected.total_points.toLocaleString()}</p></div><div><p className="text-[10px] text-gray-400">{Math.round(selected.burden_ratio * 10)}割負担</p><p className="text-lg font-bold text-orange-600">¥{selected.patient_burden.toLocaleString()}</p></div><div><p className="text-[10px] text-gray-400">保険請求</p><p className="text-lg font-bold text-sky-600">¥{selected.insurance_claim.toLocaleString()}</p></div></div>
-                  {selected.payment_status === "unpaid" ? <button onClick={() => markPaid(selected)} disabled={processing} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">{processing ? "処理中..." : "💰 精算完了"}</button> : <div className="text-center py-3 bg-green-100 rounded-xl"><p className="text-green-700 font-bold">✅ 精算済み</p></div>}
+                  {selected.payment_status === "unpaid" ? <button onClick={() => markPaid(selected)} disabled={processing} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">{processing ? "処理中..." : "💰 精算完了"}</button> : <><div className="text-center py-3 bg-green-100 rounded-xl"><p className="text-green-700 font-bold">✅ 精算済み</p></div><button onClick={() => printReceipt(selected)} className="w-full mt-2 bg-gray-800 text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-700">🖨️ 領収書・明細書を印刷</button></>}
                 </div>
               </div></div>
             )}
