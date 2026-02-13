@@ -59,6 +59,7 @@ function SessionContent() {
     soap: { s: string; o: string; a: string; p: string };
     tooth_updates: Record<string, string>;
     procedures: string[];
+    diagnoses: { name: string; tooth: string; code: string }[];
   } | null>(null);
   const [showAiPreview, setShowAiPreview] = useState(false);
 
@@ -128,7 +129,7 @@ function SessionContent() {
       const data = await res.json();
       if (data.success) {
         setTranscript(data.transcript);
-        setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates, procedures: data.procedures });
+        setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates, procedures: data.procedures, diagnoses: data.diagnoses || [] });
         setShowAiPreview(true);
         setSaveMsg(data.warning ? `⚠️ ${data.warning}` : "✅ AI分析完了！");
       } else {
@@ -140,7 +141,7 @@ function SessionContent() {
     setTimeout(() => setSaveMsg(""), 5000);
   }
 
-  function applyAiResult() {
+  async function applyAiResult() {
     if (!record || !aiResult) return;
     const chart = { ...(record.tooth_chart || {}) };
     if (aiResult.tooth_updates) {
@@ -157,6 +158,27 @@ function SessionContent() {
       soap_p: aiResult.soap.p || record.soap_p,
       tooth_chart: chart,
     });
+    // 傷病名をpatient_diagnosesに自動登録（重複チェック付き）
+    if (aiResult.diagnoses && aiResult.diagnoses.length > 0 && record.patient_id) {
+      try {
+        for (let di = 0; di < aiResult.diagnoses.length; di++) {
+          const d = aiResult.diagnoses[di];
+          const { data: dup } = await supabase.from("patient_diagnoses")
+            .select("id").eq("patient_id", record.patient_id)
+            .eq("diagnosis_code", d.code || "").eq("tooth_number", d.tooth || "")
+            .eq("outcome", "continuing").limit(1);
+          if (dup && dup.length > 0) continue;
+          await supabase.from("patient_diagnoses").insert({
+            patient_id: record.patient_id,
+            diagnosis_code: d.code || "",
+            diagnosis_name: d.name || "",
+            tooth_number: d.tooth || "",
+            start_date: new Date().toISOString().split("T")[0],
+            outcome: "continuing",
+          });
+        }
+      } catch (e) { console.error("傷病名登録エラー:", e); }
+    }
     setShowAiPreview(false);
     setSaveMsg("✅ 反映しました");
     setTimeout(() => setSaveMsg(""), 3000);
@@ -471,6 +493,19 @@ function SessionContent() {
                   <div className="flex flex-wrap gap-2">
                     {aiResult.procedures.map((p, i) => (
                       <span key={i} className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold">{p}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {aiResult.diagnoses && aiResult.diagnoses.length > 0 && (
+                <div className="bg-purple-50 rounded-xl p-3 border border-purple-200">
+                  <p className="text-xs text-purple-600 font-bold mb-1">🏷️ 傷病名（自動登録されます）</p>
+                  <div className="flex flex-wrap gap-2">
+                    {aiResult.diagnoses.map((d, i) => (
+                      <span key={i} className="bg-white border border-purple-200 px-3 py-1 rounded-full text-sm font-bold text-purple-700">
+                        {d.name}{d.tooth ? ` ${d.tooth}` : ""}
+                      </span>
                     ))}
                   </div>
                 </div>
