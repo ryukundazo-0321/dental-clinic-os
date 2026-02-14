@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -45,7 +46,7 @@ type Diagnosis = {
 
 type DiagnosisMaster = { code: string; name: string; category: string };
 
-export default function ChartPage() {
+function ChartContent() {
   const [tab, setTab] = useState<Tab>("today");
   const [searchQuery, setSearchQuery] = useState("");
   const [allPatients, setAllPatients] = useState<Patient[]>([]);
@@ -65,7 +66,17 @@ export default function ChartPage() {
   const [showDiagForm, setShowDiagForm] = useState(false);
   const [diagSearch, setDiagSearch] = useState("");
   const [newDiag, setNewDiag] = useState({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false, notes: "" });
+  const searchParams = useSearchParams();
   useEffect(() => { loadTodayPatients(); loadAllPatients(); loadDiagMaster(); }, []);
+
+  // URLパラメータ ?patient_id=xxx で患者を自動選択
+  useEffect(() => {
+    const pid = searchParams.get("patient_id");
+    if (pid && allPatients.length > 0 && !selectedPatient) {
+      const found = allPatients.find(p => p.id === pid);
+      if (found) selectPatient(found);
+    }
+  }, [allPatients, searchParams]);
 
   async function loadDiagMaster() {
     const { data } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
@@ -506,5 +517,13 @@ export default function ChartPage() {
       </main>
       {editingTooth && <div className="fixed inset-0 z-10" onClick={() => setEditingTooth(null)} />}
     </div>
+  );
+}
+
+export default function ChartPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>}>
+      <ChartContent />
+    </Suspense>
   );
 }
