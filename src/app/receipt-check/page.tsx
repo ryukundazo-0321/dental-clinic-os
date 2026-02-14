@@ -9,6 +9,7 @@ type BillingRow = {
   total_points: number; patient_burden: number; insurance_claim: number; burden_ratio: number;
   procedures_detail: { code: string; name: string; points: number; category: string; count: number; note: string; tooth_numbers?: string[] }[];
   ai_check_warnings: string[];
+  document_provided: boolean;
   claim_status: string; payment_status: string; created_at: string;
   patients: { name_kanji: string; name_kana: string; insurance_type: string } | null;
 };
@@ -205,7 +206,11 @@ function runChecks(
   }
 
   if (billing.ai_check_warnings && billing.ai_check_warnings.length > 0) {
-    billing.ai_check_warnings.forEach(w => warnings.push(w));
+    billing.ai_check_warnings.forEach(w => {
+      // 管理計画書警告は、文書提供済みならスキップ
+      if (w.includes("管理計画書") && billing.document_provided) return;
+      warnings.push(w);
+    });
   }
 
   return { errors, warnings };
