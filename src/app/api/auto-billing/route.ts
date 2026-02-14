@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    for (const [, bonus] of bestBonus) {
+    Array.from(bestBonus.values()).forEach(bonus => {
       const isShoshinBonus = bonus.target_kubun === "A000";
       const isSaishinBonus = bonus.target_kubun === "A002";
       const hasTarget = existingCodes.some(c => c === bonus.target_kubun || c.startsWith(bonus.target_kubun));
@@ -284,7 +284,7 @@ export async function POST(request: NextRequest) {
           tooth_numbers: [],
         });
       }
-    }
+    });
 
     // === 合計計算 ===
     const totalPoints = selectedItems.reduce((sum, item) => sum + item.points * item.count, 0);
