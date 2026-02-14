@@ -46,8 +46,8 @@ export async function POST(request: NextRequest) {
       if (pat?.burden_ratio) burdenRatio = pat.burden_ratio;
     }
 
-    // 4. fee_master取得
-    const { data: feeItems, error: feeErr } = await supabase.from("fee_master_legacy").select("*");
+    // 4. fee_master取得（★変更: fee_master_legacy → fee_master）
+    const { data: feeItems, error: feeErr } = await supabase.from("fee_master").select("*");
     if (feeErr || !feeItems || feeItems.length === 0) {
       return NextResponse.json({ error: "点数マスターが空です", detail: feeErr?.message }, { status: 500 });
     }
@@ -202,7 +202,6 @@ export async function POST(request: NextRequest) {
       const isDenReline = soapAll.includes("裏装") || soapAll.includes("リライン");
       const isDenSet = soapAll.includes("セット") || soapAll.includes("装着");
       const isDenMaintenanceOnly = (isDenAdj || isDenRep || isDenReline) && !isDenSet && !soapAll.includes("新製") && !soapAll.includes("作製");
-      // 義歯本体は新製・セット時のみ
       if (!isDenMaintenanceOnly) {
         if (soapAll.includes("総義歯") || soapAll.includes("フルデンチャー")) {
           if (soapAll.includes("下")) addItem("DEN-FULL-LO"); else addItem("DEN-FULL-UP");
@@ -249,16 +248,12 @@ export async function POST(request: NextRequest) {
     if (soapAll.includes("シーラント")) addItem("SEALANT", 1, extractedTeeth);
 
     // === 施設基準加算 ===
-    // 同カテゴリの施設基準（例：外感染1と外感染2）が両方ONの場合は、
-    // 同じtarget_kubunに対して最高点数のみ適用する
     const existingCodes = selectedItems.map(item => item.code);
     const hasShoshin = existingCodes.some(c => c === "A000" || c.startsWith("A000"));
     const hasSaishin = existingCodes.some(c => c === "A002" || c.startsWith("A002"));
 
-    // facility_codeから数字を除いたグループ名を取得（gaikansen1→gaikansen, gaianzen2→gaianzen）
     const getGroup = (code: string) => code.replace(/[0-9]/g, "");
 
-    // グループ×target_kubunごとに最高点数のボーナスだけ残す
     const bestBonus = new Map<string, typeof activeBonuses[0]>();
     for (const bonus of activeBonuses) {
       if (bonus.bonus_type !== "add" || bonus.bonus_points <= 0) continue;
@@ -295,7 +290,7 @@ export async function POST(request: NextRequest) {
     if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
 
-    // 6. billingテーブルに保存（既存チェック→INSERT or UPDATE）
+    // 6. billingテーブルに保存
     const billingData = {
       record_id: recordId,
       patient_id: patientId,
@@ -309,19 +304,16 @@ export async function POST(request: NextRequest) {
       payment_status: "unpaid",
     };
 
-    // 既存レコードがあるかチェック
-    const { data: existing } = await supabase.from("billing").select("id").eq("record_id", recordId).limit(1);
+    const { data: existingBilling } = await supabase.from("billing").select("id").eq("record_id", recordId).limit(1);
 
     let billing = null;
     let billErr = null;
 
-    if (existing && existing.length > 0) {
-      // UPDATE
+    if (existingBilling && existingBilling.length > 0) {
       const res = await supabase.from("billing").update(billingData).eq("record_id", recordId).select().single();
       billing = res.data;
       billErr = res.error;
     } else {
-      // INSERT
       const res = await supabase.from("billing").insert(billingData).select().single();
       billing = res.data;
       billErr = res.error;
