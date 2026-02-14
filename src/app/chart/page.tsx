@@ -358,6 +358,7 @@ function ChartContent() {
                   <div className="flex items-center gap-3">
                     <div className="text-center"><p className="text-2xl font-bold text-sky-600">{records.length}</p><p className="text-[10px] text-gray-400">来院回数</p></div>
                     <button onClick={() => setShowInsurance(!showInsurance)} className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors ${showInsurance ? "bg-sky-100 text-sky-700" : "text-sky-500 hover:bg-sky-50"}`}>🏥 保険証情報</button>
+                    <Link href={`/management-plan?patient_id=${selectedPatient.id}`} className="text-xs px-2.5 py-1.5 rounded-lg text-emerald-500 hover:bg-emerald-50 transition-colors">📄 管理計画書</Link>
                     <button onClick={deletePatient} disabled={saving} className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50">🗑️ 患者削除</button>
                   </div>
                 </div>
