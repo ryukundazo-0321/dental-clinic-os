@@ -608,17 +608,39 @@ export default function ReceiptCheckPage() {
                       </div>
                     ))}
 
-                    {/* アクションボタン */}
-                    <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
-                      <Link href="/chart" className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
-                        📋 カルテを開く（{r.patient_name}）
-                      </Link>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); recheckOne(r.billing_id); }}
-                        disabled={isRechecking || checking}
-                        className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
-                        🔄 再チェック
-                      </button>
+                    {/* アクションボタン + 修正ガイド */}
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      {/* 修正ガイド */}
+                      <div className="mb-3 bg-gray-50 rounded-lg p-3">
+                        <p className="text-[10px] text-gray-400 font-bold mb-1.5">💡 修正方法</p>
+                        {r.errors.concat(r.warnings).map((msg, i) => (
+                          <p key={"g" + i} className="text-[11px] text-gray-500 py-0.5">
+                            {msg.includes("傷病名") ? "→ カルテの「傷病名」欄で該当する傷病名を追加してください"
+                              : msg.includes("初診料と再診料") ? "→ カルテの会計で初診料または再診料のどちらかを削除してください"
+                              : msg.includes("抜歯した歯") ? "→ 抜歯した歯番に紐づく他の処置を会計から削除してください"
+                              : msg.includes("合計点数が0") ? "→ 処置内容が正しく入力されているか確認してください"
+                              : msg.includes("同月") ? "→ 同月の他の会計で重複算定がないか確認してください"
+                              : msg.includes("患者負担額") ? "→ 会計画面で負担額を再計算してください"
+                              : msg.includes("保険種別") ? "→ カルテの患者情報で保険種別を設定してください"
+                              : msg.includes("治癒") ? "→ 傷病名の転帰を「継続」に変更するか、処置を見直してください"
+                              : msg.includes("処置がありません") ? "→ 処置内容の入力漏れがないか確認してください"
+                              : msg.includes("歯周組織検査") ? "→ 歯周検査を先に実施・算定してください"
+                              : "→ カルテを確認して該当箇所を修正してください"}
+                          </p>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <Link href={`/chart?patient_id=${r.patient_id}`}
+                          className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors">
+                          📋 {r.patient_name}さんのカルテを開く
+                        </Link>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); recheckOne(r.billing_id); }}
+                          disabled={isRechecking || checking}
+                          className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
+                          🔄 再チェック
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
