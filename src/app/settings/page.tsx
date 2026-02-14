@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -6,7 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 // タブの種類
-type Tab = "clinic" | "units" | "staff" | "slots";
+type Tab = "clinic" | "units" | "staff" | "slots" | "facility";
 
 // 型定義
 type Clinic = {
@@ -41,6 +40,27 @@ type Unit = {
   default_doctor_id: string | null;
   is_active: boolean;
   sort_order: number;
+};
+
+type FacilityStandard = {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  level: number;
+  description: string;
+  requirements: Record<string, unknown>;
+  is_registered: boolean;
+  sort_order: number;
+};
+
+type FacilityBonus = {
+  id: string;
+  facility_code: string;
+  target_kubun: string;
+  bonus_points: number;
+  bonus_type: string;
+  condition: string;
 };
 
 type Staff = {
@@ -80,6 +100,9 @@ export default function SettingsPage() {
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [newStaff, setNewStaff] = useState({ name: "", role: "doctor", email: "", phone: "", license_number: "", color: "#0ea5e9" });
+  const [facilities, setFacilities] = useState<FacilityStandard[]>([]);
+  const [bonuses, setBonuses] = useState<FacilityBonus[]>([]);
+  const [facilitySaving, setFacilitySaving] = useState(false);
 
   // ===== 初期データ取得 =====
   useEffect(() => {
@@ -141,7 +164,50 @@ export default function SettingsPage() {
       .eq("clinic_id", currentClinicId)
       .order("sort_order", { ascending: true });
     if (staffData) setStaffList(staffData);
+
+    // 施設基準取得
+    const { data: facilityData } = await supabase
+      .from("facility_standards")
+      .select("*")
+      .order("sort_order", { ascending: true });
+    if (facilityData) setFacilities(facilityData as FacilityStandard[]);
+
+    // 施設基準ボーナス取得
+    const { data: bonusData } = await supabase
+      .from("facility_bonus")
+      .select("*")
+      .eq("is_active", true);
+    if (bonusData) setBonuses(bonusData as FacilityBonus[]);
   }
+
+  // ===== 施設基準 ON/OFF =====
+  async function toggleFacility(code: string, currentValue: boolean) {
+    setFacilitySaving(true);
+    await supabase.from("facility_standards").update({ is_registered: !currentValue }).eq("code", code);
+    setFacilities(prev => prev.map(f => f.code === code ? { ...f, is_registered: !currentValue } : f));
+    setFacilitySaving(false);
+  }
+
+  // 施設基準のカテゴリ名
+  const categoryNames: Record<string, string> = {
+    basic: "基本", safety: "医療安全", infection: "感染対策",
+    management: "管理体制", home_care: "在宅", dx: "医療DX",
+    prosth: "補綴", equipment: "設備", cooperation: "連携",
+  };
+
+  // 施設基準ごとの加算点数を取得
+  function getBonusesForFacility(code: string) {
+    return bonuses.filter(b => b.facility_code === code);
+  }
+
+  // 届出済み施設基準の加算合計（初診時）
+  const registeredBonusTotal = facilities
+    .filter(f => f.is_registered)
+    .reduce((sum, f) => {
+      const bs = getBonusesForFacility(f.code);
+      const shoshinBonus = bs.find(b => b.target_kubun === "A000" && b.bonus_type === "add");
+      return sum + (shoshinBonus?.bonus_points || 0);
+    }, 0);
 
   // ===== 保存: クリニック基本情報 =====
   async function saveClinic() {
@@ -242,6 +308,7 @@ export default function SettingsPage() {
     { key: "units", label: "ユニット", icon: "🪥" },
     { key: "staff", label: "スタッフ", icon: "👥" },
     { key: "slots", label: "予約枠", icon: "📅" },
+    { key: "facility", label: "施設基準", icon: "📋" },
   ];
 
   return (
@@ -673,6 +740,84 @@ export default function SettingsPage() {
                 })}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ========== 施設基準タブ ========== */}
+        {activeTab === "facility" && (
+          <div className="space-y-6">
+            {/* 概要カード */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="text-lg font-bold text-gray-900 mb-2">📋 施設基準の届出状況</h2>
+              <p className="text-xs text-gray-400 mb-4">届出済みの施設基準に基づいて、auto-billingで加算点数が自動計算されます。</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-sky-50 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-sky-600">{facilities.filter(f => f.is_registered).length}</p>
+                  <p className="text-xs text-gray-400">届出済み</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-gray-400">{facilities.filter(f => !f.is_registered).length}</p>
+                  <p className="text-xs text-gray-400">未届出</p>
+                </div>
+                <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-600">+{registeredBonusTotal}点</p>
+                  <p className="text-xs text-gray-400">初診時加算合計</p>
+                </div>
+              </div>
+            </div>
+
+            {/* カテゴリごとの施設基準一覧 */}
+            {Object.entries(categoryNames).map(([catKey, catName]) => {
+              const catFacilities = facilities.filter(f => f.category === catKey);
+              if (catFacilities.length === 0) return null;
+              return (
+                <div key={catKey} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                    <h3 className="text-sm font-bold text-gray-700">{catName}</h3>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {catFacilities.map(f => {
+                      const fBonuses = getBonusesForFacility(f.code);
+                      return (
+                        <div key={f.id} className={`px-4 py-3 flex items-center gap-4 ${f.is_registered ? "bg-sky-50/30" : ""}`}>
+                          <label className="flex items-center gap-3 flex-1 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={f.is_registered}
+                              onChange={() => toggleFacility(f.code, f.is_registered)}
+                              disabled={facilitySaving}
+                              className="w-5 h-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            <div className="flex-1">
+                              <p className={`text-sm font-bold ${f.is_registered ? "text-gray-900" : "text-gray-400"}`}>
+                                {f.name}
+                                {f.level > 0 && <span className="ml-1 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Lv.{f.level}</span>}
+                              </p>
+                              <p className="text-[11px] text-gray-400 mt-0.5">{f.description}</p>
+                            </div>
+                          </label>
+                          {fBonuses.length > 0 && (
+                            <div className="text-right shrink-0">
+                              {fBonuses.filter(b => b.bonus_type === "add").map((b, i) => (
+                                <p key={i} className={`text-xs font-bold ${f.is_registered ? "text-sky-600" : "text-gray-300"}`}>
+                                  +{b.bonus_points}点
+                                  <span className="text-[10px] font-normal text-gray-400 ml-1">{b.condition}</span>
+                                </p>
+                              ))}
+                              {fBonuses.filter(b => b.bonus_type === "unlock").map((b, i) => (
+                                <p key={"u" + i} className={`text-[10px] ${f.is_registered ? "text-emerald-500" : "text-gray-300"}`}>
+                                  🔓 {b.condition}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
