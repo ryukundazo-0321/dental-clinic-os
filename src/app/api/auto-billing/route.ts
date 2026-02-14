@@ -54,6 +54,19 @@ export async function POST(request: NextRequest) {
 
     const feeMap = new Map(feeItems.map((f: { code: string }) => [f.code, f]));
 
+    // 4b. 届出済み施設基準の加算点数を取得
+    let activeBonuses: { facility_code: string; target_kubun: string; target_sub: string; bonus_points: number; bonus_type: string; condition: string }[] = [];
+    try {
+      const { data: facilityBonuses } = await supabase
+        .from("facility_bonus")
+        .select("*, facility_standards!inner(is_registered)")
+        .eq("is_active", true)
+        .eq("facility_standards.is_registered", true);
+      if (facilityBonuses) activeBonuses = facilityBonuses as typeof activeBonuses;
+    } catch {
+      // facility_bonusテーブルが存在しない場合はスキップ
+    }
+
     // 5. SOAPテキストから処置を推定
     const soapAll = [record.soap_s, record.soap_o, record.soap_a, record.soap_p]
       .filter(Boolean)
@@ -234,6 +247,44 @@ export async function POST(request: NextRequest) {
     if (soapAll.includes("除去") && (soapAll.includes("冠") || soapAll.includes("セメント"))) addItem("DEBOND", 1, extractedTeeth);
     if (soapAll.includes("フッ素") || soapAll.includes("フッ化物")) addItem("F-COAT", 1, extractedTeeth);
     if (soapAll.includes("シーラント")) addItem("SEALANT", 1, extractedTeeth);
+
+    // === 施設基準加算 ===
+    // 同カテゴリの施設基準（例：外感染1と外感染2）が両方ONの場合は、
+    // 同じtarget_kubunに対して最高点数のみ適用する
+    const existingCodes = selectedItems.map(item => item.code);
+    const hasShoshin = existingCodes.some(c => c === "A000" || c.startsWith("A000"));
+    const hasSaishin = existingCodes.some(c => c === "A002" || c.startsWith("A002"));
+
+    // facility_codeから数字を除いたグループ名を取得（gaikansen1→gaikansen, gaianzen2→gaianzen）
+    const getGroup = (code: string) => code.replace(/[0-9]/g, "");
+
+    // グループ×target_kubunごとに最高点数のボーナスだけ残す
+    const bestBonus = new Map<string, typeof activeBonuses[0]>();
+    for (const bonus of activeBonuses) {
+      if (bonus.bonus_type !== "add" || bonus.bonus_points <= 0) continue;
+      const groupKey = `${getGroup(bonus.facility_code)}__${bonus.target_kubun}`;
+      const existing = bestBonus.get(groupKey);
+      if (!existing || bonus.bonus_points > existing.bonus_points) {
+        bestBonus.set(groupKey, bonus);
+      }
+    }
+
+    for (const [, bonus] of bestBonus) {
+      const isShoshinBonus = bonus.target_kubun === "A000";
+      const isSaishinBonus = bonus.target_kubun === "A002";
+      const hasTarget = existingCodes.some(c => c === bonus.target_kubun || c.startsWith(bonus.target_kubun));
+      if ((isShoshinBonus && hasShoshin) || (isSaishinBonus && hasSaishin) || hasTarget) {
+        selectedItems.push({
+          code: `BONUS-${bonus.facility_code}-${bonus.target_kubun}`,
+          name: `施設基準加算（${bonus.condition}）`,
+          points: bonus.bonus_points,
+          category: "加算",
+          count: 1,
+          note: bonus.facility_code,
+          tooth_numbers: [],
+        });
+      }
+    }
 
     // === 合計計算 ===
     const totalPoints = selectedItems.reduce((sum, item) => sum + item.points * item.count, 0);
