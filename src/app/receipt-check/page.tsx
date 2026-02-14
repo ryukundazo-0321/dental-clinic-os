@@ -20,6 +20,7 @@ type DiagRow = {
 
 type CheckResult = {
   billing_id: string;
+  patient_id: string;
   patient_name: string;
   status: "pending" | "checking" | "ok" | "warn" | "error";
   errors: string[];
@@ -47,6 +48,8 @@ type DiagReq = {
   legal_basis: string;
 };
 
+type FilterTab = "all" | "error" | "warn" | "ok";
+
 // ============================
 // DB駆動チェックエンジン
 // ============================
@@ -68,7 +71,6 @@ function runChecks(
     else warnings.push(fullMsg);
   };
 
-  // === 構造チェック（rule_type が全体系） ===
   for (const rule of calcRules) {
     switch (rule.rule_type) {
       case "zero_points":
@@ -110,7 +112,6 @@ function runChecks(
         if (!billing.patients?.insurance_type) addIssue(rule.error_level, rule.message, rule.legal_basis);
         break;
 
-      // === 併算定不可 ===
       case "cannot_combine": {
         const hasSource = codes.some(c => c === rule.source_code || c.startsWith(rule.source_code));
         const hasTarget = rule.target_code
@@ -120,7 +121,6 @@ function runChecks(
         break;
       }
 
-      // === 回数制限（月） ===
       case "frequency_month": {
         const maxPerMonth = (rule.condition as { max_per_month?: number }).max_per_month || 1;
         const billingMonth = billing.created_at.substring(0, 7);
@@ -143,7 +143,6 @@ function runChecks(
         break;
       }
 
-      // === 歯番衝突 ===
       case "tooth_conflict": {
         const sourceProcs = procs.filter(p =>
           p.code === rule.source_code || p.code.startsWith(rule.source_code)
@@ -168,7 +167,6 @@ function runChecks(
         break;
       }
 
-      // === 前提条件 ===
       case "requires_other": {
         const hasSource = codes.some(c => c === rule.source_code || c.startsWith(rule.source_code));
         if (hasSource && rule.target_code) {
@@ -184,7 +182,6 @@ function runChecks(
     }
   }
 
-  // === 傷病名要件チェック（diagnosis_requirements） ===
   for (const req of diagReqs) {
     const matchingProcs = procs.filter(p =>
       p.code === req.procedure_code_pattern ||
@@ -207,7 +204,6 @@ function runChecks(
     }
   }
 
-  // === AI算定警告（既存機能を維持） ===
   if (billing.ai_check_warnings && billing.ai_check_warnings.length > 0) {
     billing.ai_check_warnings.forEach(w => warnings.push(w));
   }
@@ -228,9 +224,10 @@ export default function ReceiptCheckPage() {
   const [calcRules, setCalcRules] = useState<CalcRule[]>([]);
   const [diagReqs, setDiagReqs] = useState<DiagReq[]>([]);
   const [rulesLoaded, setRulesLoaded] = useState(false);
+  const [filterTab, setFilterTab] = useState<FilterTab>("all");
+  const [recheckingId, setRecheckingId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // DBからルールを読み込み
   useEffect(() => {
     async function loadRules() {
       const [{ data: rules }, { data: reqs }] = await Promise.all([
@@ -248,6 +245,7 @@ export default function ReceiptCheckPage() {
     setLoading(true);
     setResults([]);
     setCheckDone(false);
+    setFilterTab("all");
     const ym = checkMonth;
     const startDate = `${ym}-01T00:00:00`;
     const endDay = new Date(parseInt(ym.split("-")[0]), parseInt(ym.split("-")[1]), 0).getDate();
@@ -266,6 +264,7 @@ export default function ReceiptCheckPage() {
       setBillings(bills);
       setResults(bills.map(b => ({
         billing_id: b.id,
+        patient_id: b.patient_id,
         patient_name: b.patients?.name_kanji || "不明",
         status: "pending",
         errors: [],
@@ -275,18 +274,23 @@ export default function ReceiptCheckPage() {
     setLoading(false);
   }
 
+  async function fetchDiagnoses(patientIds: string[]): Promise<DiagRow[]> {
+    const { data } = await supabase
+      .from("patient_diagnoses")
+      .select("id, patient_id, diagnosis_code, diagnosis_name, tooth_number, start_date, end_date, outcome")
+      .in("patient_id", patientIds);
+    return (data || []) as DiagRow[];
+  }
+
   async function startCheck() {
     if (billings.length === 0) return;
     setChecking(true);
     setCheckDone(false);
     setExpandedId(null);
+    setFilterTab("all");
 
     const patientIds = Array.from(new Set(billings.map(b => b.patient_id)));
-    const { data: diagData } = await supabase
-      .from("patient_diagnoses")
-      .select("id, patient_id, diagnosis_code, diagnosis_name, tooth_number, start_date, end_date, outcome")
-      .in("patient_id", patientIds);
-    const allDiags = (diagData || []) as DiagRow[];
+    const allDiags = await fetchDiagnoses(patientIds);
 
     for (let i = 0; i < billings.length; i++) {
       setResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: "checking" } : r));
@@ -310,6 +314,89 @@ export default function ReceiptCheckPage() {
     setCheckDone(true);
   }
 
+  // 1件だけ再チェック（修正後に使う）
+  async function recheckOne(billingId: string) {
+    setRecheckingId(billingId);
+    const idx = results.findIndex(r => r.billing_id === billingId);
+    if (idx < 0) { setRecheckingId(null); return; }
+
+    // billingデータを再取得（修正が反映されるように）
+    const { data: freshBilling } = await supabase
+      .from("billing")
+      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .eq("id", billingId)
+      .single();
+
+    if (!freshBilling) { setRecheckingId(null); return; }
+    const bill = freshBilling as unknown as BillingRow;
+
+    // billings配列も更新
+    setBillings(prev => prev.map((b, i) => i === idx ? bill : b));
+
+    setResults(prev => prev.map((r, i) => i === idx ? { ...r, status: "checking" } : r));
+    await new Promise(res => setTimeout(res, 500));
+
+    const allDiags = await fetchDiagnoses([bill.patient_id]);
+    const patientDiags = allDiags.filter(d => d.patient_id === bill.patient_id);
+
+    // allBillingsも最新にする
+    const updatedBillings = billings.map((b, i) => i === idx ? bill : b);
+    const { errors, warnings } = runChecks(bill, patientDiags, updatedBillings, calcRules, diagReqs);
+
+    setResults(prev => prev.map((r, i) => i === idx ? {
+      ...r,
+      patient_name: bill.patients?.name_kanji || "不明",
+      status: errors.length > 0 ? "error" : warnings.length > 0 ? "warn" : "ok",
+      errors,
+      warnings,
+    } : r));
+    setRecheckingId(null);
+  }
+
+  // 全件再チェック
+  async function recheckAll() {
+    setChecking(true);
+    setExpandedId(null);
+
+    // 全billingデータを再取得
+    const ym = checkMonth;
+    const startDate = `${ym}-01T00:00:00`;
+    const endDay = new Date(parseInt(ym.split("-")[0]), parseInt(ym.split("-")[1]), 0).getDate();
+    const endDate = `${ym}-${String(endDay).padStart(2, "0")}T23:59:59`;
+
+    const { data } = await supabase
+      .from("billing")
+      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .eq("payment_status", "paid")
+      .gte("created_at", startDate)
+      .lte("created_at", endDate)
+      .order("created_at");
+
+    if (!data) { setChecking(false); return; }
+    const freshBillings = data as unknown as BillingRow[];
+    setBillings(freshBillings);
+
+    const patientIds = Array.from(new Set(freshBillings.map(b => b.patient_id)));
+    const allDiags = await fetchDiagnoses(patientIds);
+
+    const newResults: CheckResult[] = [];
+    for (const bill of freshBillings) {
+      const patientDiags = allDiags.filter(d => d.patient_id === bill.patient_id);
+      const { errors, warnings } = runChecks(bill, patientDiags, freshBillings, calcRules, diagReqs);
+      newResults.push({
+        billing_id: bill.id,
+        patient_id: bill.patient_id,
+        patient_name: bill.patients?.name_kanji || "不明",
+        status: errors.length > 0 ? "error" : warnings.length > 0 ? "warn" : "ok",
+        errors,
+        warnings,
+      });
+    }
+    setResults(newResults);
+    setChecking(false);
+    setCheckDone(true);
+  }
+
   const summary = {
     total: results.length,
     ok: results.filter(r => r.status === "ok").length,
@@ -317,6 +404,14 @@ export default function ReceiptCheckPage() {
     error: results.filter(r => r.status === "error").length,
     pending: results.filter(r => r.status === "pending" || r.status === "checking").length,
   };
+
+  const filteredResults = results.filter(r => {
+    if (filterTab === "all") return true;
+    if (filterTab === "error") return r.status === "error";
+    if (filterTab === "warn") return r.status === "warn";
+    if (filterTab === "ok") return r.status === "ok";
+    return true;
+  });
 
   function getStatusIcon(status: CheckResult["status"]) {
     switch (status) {
@@ -374,7 +469,7 @@ export default function ReceiptCheckPage() {
       <main className="max-w-4xl mx-auto px-4 py-6">
         {/* 月選択 + 読み込み */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <div>
               <label className="text-xs text-gray-400 block mb-1">対象年月</label>
               <input type="month" value={checkMonth} onChange={e => setCheckMonth(e.target.value)}
@@ -386,7 +481,7 @@ export default function ReceiptCheckPage() {
                 {loading ? "読み込み中..." : !rulesLoaded ? "ルール読込中..." : "📋 レセプト一覧を取得"}
               </button>
             </div>
-            {results.length > 0 && !checking && (
+            {results.length > 0 && !checking && !checkDone && (
               <div className="pt-5">
                 <button onClick={startCheck}
                   className="bg-sky-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-sky-700 shadow-lg shadow-sky-200 transition-all hover:scale-105">
@@ -394,31 +489,56 @@ export default function ReceiptCheckPage() {
                 </button>
               </div>
             )}
+            {checkDone && !checking && (
+              <div className="pt-5">
+                <button onClick={recheckAll}
+                  className="bg-emerald-600 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-emerald-700 transition-all">
+                  🔄 全件再チェック
+                </button>
+              </div>
+            )}
           </div>
           {results.length > 0 && (
             <p className="text-xs text-gray-400 mt-3">{checkMonth.replace("-", "年")}月 の精算済みレセプト: {results.length}件</p>
           )}
+          {checkDone && summary.error === 0 && summary.warn === 0 && (
+            <div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🎉</span>
+                <p className="text-sm text-green-700 font-bold">全件OK！レセプト請求の準備が整いました</p>
+              </div>
+              <Link href="/billing" className="bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700">
+                📄 レセ電ダウンロードへ
+              </Link>
+            </div>
+          )}
         </div>
 
-        {/* チェック結果サマリー（完了後） */}
+        {/* チェック結果サマリー + フィルター */}
         {checkDone && (
-          <div className="grid grid-cols-4 gap-3 mb-6">
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-              <p className="text-2xl font-bold text-gray-900">{summary.total}</p>
-              <p className="text-xs text-gray-400 mt-1">総件数</p>
+          <div className="mb-6">
+            <div className="grid grid-cols-4 gap-3 mb-3">
+              {([
+                { key: "all" as FilterTab, label: "総件数", count: summary.total, bg: "bg-white border-gray-200", text: "text-gray-900" },
+                { key: "ok" as FilterTab, label: "OK", count: summary.ok, bg: "bg-green-50 border-green-200", text: "text-green-600" },
+                { key: "warn" as FilterTab, label: "警告", count: summary.warn, bg: "bg-amber-50 border-amber-200", text: "text-amber-600" },
+                { key: "error" as FilterTab, label: "エラー", count: summary.error, bg: "bg-red-50 border-red-200", text: "text-red-600" },
+              ]).map(f => (
+                <button key={f.key} onClick={() => setFilterTab(f.key)}
+                  className={`rounded-xl border p-4 text-center transition-all ${f.bg} ${filterTab === f.key ? "ring-2 ring-sky-400 scale-105" : "hover:scale-102"}`}>
+                  <p className={`text-2xl font-bold ${f.text}`}>{f.count}</p>
+                  <p className={`text-xs mt-1 ${filterTab === f.key ? "text-sky-600 font-bold" : "text-gray-400"}`}>
+                    {f.label}{filterTab === f.key ? " ●" : ""}
+                  </p>
+                </button>
+              ))}
             </div>
-            <div className="bg-green-50 rounded-xl border border-green-200 p-4 text-center">
-              <p className="text-2xl font-bold text-green-600">{summary.ok}</p>
-              <p className="text-xs text-green-500 mt-1">OK</p>
-            </div>
-            <div className="bg-amber-50 rounded-xl border border-amber-200 p-4 text-center">
-              <p className="text-2xl font-bold text-amber-600">{summary.warn}</p>
-              <p className="text-xs text-amber-500 mt-1">警告</p>
-            </div>
-            <div className="bg-red-50 rounded-xl border border-red-200 p-4 text-center">
-              <p className="text-2xl font-bold text-red-600">{summary.error}</p>
-              <p className="text-xs text-red-500 mt-1">エラー</p>
-            </div>
+            {filterTab !== "all" && (
+              <p className="text-xs text-sky-500 text-center">
+                「{filterTab === "error" ? "エラー" : filterTab === "warn" ? "警告" : "OK"}」のみ表示中 ・
+                <button onClick={() => setFilterTab("all")} className="underline hover:text-sky-700">全件表示に戻す</button>
+              </p>
+            )}
           </div>
         )}
 
@@ -432,20 +552,24 @@ export default function ReceiptCheckPage() {
         )}
 
         <div ref={listRef} className="space-y-2">
-          {results.map((r, idx) => {
+          {filteredResults.map((r) => {
+            const idx = results.findIndex(res => res.billing_id === r.billing_id);
             const billing = billings[idx];
             const isExpanded = expandedId === r.billing_id;
             const hasIssues = r.errors.length > 0 || r.warnings.length > 0;
+            const isRechecking = recheckingId === r.billing_id;
 
             return (
               <div key={r.billing_id}
-                className={`rounded-xl border-2 transition-all duration-300 ${getStatusBg(r.status)} ${r.status === "checking" ? "scale-[1.01]" : ""}`}>
+                className={`rounded-xl border-2 transition-all duration-300 ${getStatusBg(r.status)} ${r.status === "checking" || isRechecking ? "scale-[1.01]" : ""}`}>
                 <button
                   onClick={() => hasIssues ? setExpandedId(isExpanded ? null : r.billing_id) : null}
                   className={`w-full px-4 py-3 flex items-center gap-4 text-left ${hasIssues ? "cursor-pointer" : "cursor-default"}`}>
                   <span className="text-xs text-gray-300 w-6 text-right font-mono">{idx + 1}</span>
                   <div className="w-8 flex justify-center">
-                    {getStatusIcon(r.status)}
+                    {isRechecking
+                      ? <span className="inline-block w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                      : getStatusIcon(r.status)}
                   </div>
                   <div className="flex-1">
                     <p className="font-bold text-gray-800 text-sm">{r.patient_name}</p>
@@ -456,7 +580,7 @@ export default function ReceiptCheckPage() {
                     )}
                   </div>
                   <div className="w-24 text-right">
-                    {getStatusLabel(r.status)}
+                    {isRechecking ? <span className="text-xs text-emerald-500 font-bold">再チェック中...</span> : getStatusLabel(r.status)}
                   </div>
                   {hasIssues && (
                     <div className="flex gap-1">
@@ -474,21 +598,47 @@ export default function ReceiptCheckPage() {
                     {r.errors.map((e, i) => (
                       <div key={"e" + i} className="flex items-start gap-2 py-1.5">
                         <span className="text-red-500 text-xs mt-0.5">❌</span>
-                        <p className="text-xs text-red-700">{e}</p>
+                        <p className="text-xs text-red-700 flex-1">{e}</p>
                       </div>
                     ))}
                     {r.warnings.map((w, i) => (
                       <div key={"w" + i} className="flex items-start gap-2 py-1.5">
                         <span className="text-amber-500 text-xs mt-0.5">⚠️</span>
-                        <p className="text-xs text-amber-700">{w}</p>
+                        <p className="text-xs text-amber-700 flex-1">{w}</p>
                       </div>
                     ))}
+
+                    {/* アクションボタン */}
+                    <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+                      <Link href="/chart" className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
+                        📋 カルテを開く（{r.patient_name}）
+                      </Link>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); recheckOne(r.billing_id); }}
+                        disabled={isRechecking || checking}
+                        className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
+                        🔄 再チェック
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             );
           })}
         </div>
+
+        {/* レセ電への導線（エラーがある場合） */}
+        {checkDone && (summary.error > 0 || summary.warn > 0) && (
+          <div className="mt-6 bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-2">
+              💡 エラーや警告のある項目は、カルテを開いて修正した後「🔄 再チェック」で確認できます。
+              会計データを修正すれば、レセ電ダウンロード時にも自動的に反映されます。
+            </p>
+            <Link href="/billing" className="text-xs text-sky-600 hover:text-sky-800 font-bold underline">
+              📄 レセ電ダウンロード画面へ →
+            </Link>
+          </div>
+        )}
       </main>
     </div>
   );
