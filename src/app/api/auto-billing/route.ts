@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. fee_master取得
-    const { data: feeItems, error: feeErr } = await supabase.from("fee_master").select("*");
+    const { data: feeItems, error: feeErr } = await supabase.from("fee_master_legacy").select("*");
     if (feeErr || !feeItems || feeItems.length === 0) {
       return NextResponse.json({ error: "点数マスターが空です", detail: feeErr?.message }, { status: 500 });
     }
