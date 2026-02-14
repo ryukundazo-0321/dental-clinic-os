@@ -9,6 +9,7 @@ type BillingRow = {
   total_points: number; patient_burden: number; insurance_claim: number; burden_ratio: number;
   procedures_detail: { code: string; name: string; points: number; category: string; count: number; note: string; tooth_numbers?: string[] }[];
   ai_check_warnings: string[];
+  document_provided: boolean;
   claim_status: string; payment_status: string; created_at: string;
   patients: { name_kanji: string; name_kana: string; insurance_type: string; burden_ratio: number } | null;
 };
@@ -47,6 +48,13 @@ export default function BillingPage() {
     const { data: rec } = await supabase.from("medical_records").select("appointment_id").eq("id", billing.record_id).single();
     if (rec?.appointment_id) await supabase.from("appointments").update({ status: "billing_done" }).eq("id", rec.appointment_id);
     await loadBillings(); setSelected(null); setProcessing(false);
+  }
+
+  async function toggleDocumentProvided(billing: BillingRow) {
+    const newVal = !billing.document_provided;
+    await supabase.from("billing").update({ document_provided: newVal }).eq("id", billing.id);
+    setBillings(prev => prev.map(b => b.id === billing.id ? { ...b, document_provided: newVal } : b));
+    if (selected?.id === billing.id) setSelected({ ...billing, document_provided: newVal });
   }
 
   function printReceipt(billing: BillingRow) {
@@ -270,7 +278,7 @@ export default function BillingPage() {
             {selected && (
               <div className="w-[420px] flex-shrink-0"><div className="bg-white rounded-xl border border-gray-200 shadow-lg sticky top-4 overflow-hidden">
                 <div className="bg-gray-900 text-white p-4"><div className="flex items-center justify-between"><div><p className="text-xs text-gray-400">患者名</p><p className="text-lg font-bold">{getName(selected)} 様</p></div><button onClick={() => setSelected(null)} className="text-gray-400 hover:text-white">✕</button></div><div className="flex items-end justify-between mt-3"><div><p className="text-xs text-gray-400">合計点数</p><p className="text-3xl font-bold text-sky-400">{selected.total_points.toLocaleString()} <span className="text-sm">点</span></p></div><div className="text-right"><p className="text-xs text-gray-400">患者負担（{Math.round(selected.burden_ratio * 10)}割）</p><p className="text-2xl font-bold text-orange-400">¥{selected.patient_burden.toLocaleString()}</p></div></div></div>
-                {selected.ai_check_warnings?.length > 0 && <div className="bg-amber-50 border-b border-amber-200 px-4 py-2"><p className="text-xs font-bold text-amber-700 mb-1">⚠️ AI算定チェック</p>{selected.ai_check_warnings.map((w, i) => <p key={i} className="text-xs text-amber-600">• {w}</p>)}</div>}
+                {selected.ai_check_warnings?.length > 0 && <div className="bg-amber-50 border-b border-amber-200 px-4 py-2"><p className="text-xs font-bold text-amber-700 mb-1">⚠️ AI算定チェック</p>{selected.ai_check_warnings.map((w, i) => w.includes("管理計画書") ? <div key={i} className={`flex items-center gap-2 py-1 ${selected.document_provided ? "opacity-50" : ""}`}><label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={selected.document_provided || false} onChange={() => toggleDocumentProvided(selected)} className="rounded border-amber-400" /><span className={`text-xs ${selected.document_provided ? "text-green-600 line-through" : "text-amber-600"}`}>{selected.document_provided ? "✅ 管理計画書を提供済み" : w}</span></label>{!selected.document_provided && <Link href={`/management-plan?patient_id=${selected.patient_id}`} className="text-[10px] text-sky-600 underline hover:text-sky-800">📄 作成</Link>}</div> : <p key={i} className="text-xs text-amber-600">• {w}</p>)}</div>}
                 <div className="p-4 max-h-[50vh] overflow-y-auto">{Object.entries(groupByCategory(selected.procedures_detail)).map(([cat, items]) => (<div key={cat} className="mb-4"><p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 border-b border-gray-100 pb-1">{cat}</p>{items.map((item, idx) => (<div key={idx} className="flex items-center justify-between py-1.5"><div className="flex-1"><p className="text-sm font-bold text-gray-800">{item.name}</p><p className="text-[10px] text-gray-400">{item.code}{item.note ? ` · ${item.note}` : ""}{item.tooth_numbers && item.tooth_numbers.length > 0 ? ` · 🦷${item.tooth_numbers.map(t => `#${t}`).join(",")}` : ""}</p></div><p className="text-sm font-bold text-gray-900 ml-3">{(item.points * item.count).toLocaleString()} <span className="text-[10px] text-gray-400">点</span></p></div>))}</div>))}</div>
                 <div className="border-t border-gray-200 p-4 bg-gray-50"><div className="grid grid-cols-3 gap-2 mb-3 text-center"><div><p className="text-[10px] text-gray-400">合計点数</p><p className="text-lg font-bold text-gray-900">{selected.total_points.toLocaleString()}</p></div><div><p className="text-[10px] text-gray-400">{Math.round(selected.burden_ratio * 10)}割負担</p><p className="text-lg font-bold text-orange-600">¥{selected.patient_burden.toLocaleString()}</p></div><div><p className="text-[10px] text-gray-400">保険請求</p><p className="text-lg font-bold text-sky-600">¥{selected.insurance_claim.toLocaleString()}</p></div></div>
                   {selected.payment_status === "unpaid" ? <button onClick={() => markPaid(selected)} disabled={processing} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">{processing ? "処理中..." : "💰 精算完了"}</button> : <><div className="text-center py-3 bg-green-100 rounded-xl"><p className="text-green-700 font-bold">✅ 精算済み</p></div><button onClick={() => printReceipt(selected)} className="w-full mt-2 bg-gray-800 text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-700">🖨️ 領収書・明細書を印刷</button></>}
