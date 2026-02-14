@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
     const insuranceClaim = totalPoints * 10 - patientBurden;
 
     const warnings: string[] = [];
-    if (isNew) warnings.push("歯科疾患管理料の算定には管理計画書の文書提供が必要です。");
+    if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
 
     // 6. billingテーブルに保存（既存チェック→INSERT or UPDATE）
