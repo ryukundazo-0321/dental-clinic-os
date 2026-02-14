@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthWrapper } from "@/lib/auth-wrapper";
 
 export const metadata: Metadata = {
   title: "DENTAL CLINIC OS | 歯科経営OS",
@@ -13,7 +14,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body>
+        <AuthWrapper>{children}</AuthWrapper>
+      </body>
     </html>
   );
 }
