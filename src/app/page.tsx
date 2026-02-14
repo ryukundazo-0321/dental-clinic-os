@@ -3,8 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/lib/auth-context";
 
 export default function Home() {
+  const { staff, signOut } = useAuth();
   const [todayStats, setTodayStats] = useState({
     total: 0, waiting: 0, completed: 0, billing_done: 0,
   });
@@ -64,7 +66,16 @@ export default function Home() {
             <div className="bg-sky-600 text-white w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold">🦷</div>
             <h1 className="text-xl font-bold text-gray-900">DENTAL CLINIC OS</h1>
           </div>
-          <div className="text-sm text-gray-500">{formattedDate}</div>
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-gray-500">{formattedDate}</div>
+            {staff && (
+              <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: staff.color || "#0ea5e9" }}>{staff.name.charAt(0)}</div>
+                <span className="text-sm font-bold text-gray-700">{staff.name}</span>
+                <button onClick={() => signOut()} className="text-xs text-gray-400 hover:text-red-500 ml-1">ログアウト</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
