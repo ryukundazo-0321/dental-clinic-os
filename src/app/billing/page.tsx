@@ -255,6 +255,7 @@ export default function BillingPage() {
           {([{ key: "billing" as MainTab, label: "💰 本日の会計" }, { key: "receipt" as MainTab, label: "📄 レセ電ダウンロード" }]).map(t => (
             <button key={t.key} onClick={() => setMainTab(t.key)} className={`px-5 py-2.5 text-sm font-bold border-b-2 transition-colors ${mainTab === t.key ? "border-sky-500 text-sky-600" : "border-transparent text-gray-400 hover:text-gray-600"}`}>{t.label}</button>
           ))}
+          <Link href="/receipt-check" className="px-5 py-2.5 text-sm font-bold border-b-2 border-transparent text-gray-400 hover:text-gray-600 transition-colors">🔍 レセプトチェック</Link>
         </div>
       </header>
 
