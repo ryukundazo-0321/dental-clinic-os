@@ -89,7 +89,7 @@ ${transcript}
   ]
 }
 
-diagnoses: 会話から推定される傷病名のリスト。各項目にname（傷病名）、tooth（対象歯番、なければ空）、code（歯科病名コード K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K045=Per, K050=G, K051=P, K081=Perico, K076=TMD, K120=Hys 等）を含める。
+diagnoses: 会話から推定される傷病名のリスト。各項目にname（傷病名）、tooth（対象歯番、なければ空）、code（歯科病名コード）を含める。主要コード: K020=CO, K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K041=歯髄壊死, K045=Per, K046=歯根嚢胞, K050=G, K051=P, K052=歯周膿瘍, K054=P1, K055=P2, K056=P3, K081=Perico, K083=埋伏歯, K076=TMD, K120=Hys, K130=咬合性外傷, K003=破折, K004=脱臼, K001=欠損, K100=口内炎, K084=歯性上顎洞炎, K088=ドライソケット, K131=ブラキシズム, K200=乳歯う蝕, K300=補綴物不適合, K301=二次う蝕。修飾語が適切な場合はnameに「急性」「慢性」「の疑い」等を付与する。
 tooth_updatesの値: caries / treated / crown / missing / implant / bridge`;
 
       // まずGPT-4oで試行
