@@ -98,7 +98,7 @@ export default function Home() {
     if (unpaid && unpaid.length > 0) items.push({ type: "unpaid", label: "未会計", count: unpaid.length, href: "/billing", color: "text-red-600 bg-red-50", icon: "💰" });
     // 未確定カルテ
     const { data: unconfirmed } = await supabase.from("medical_records").select("id").eq("doctor_confirmed", false).neq("status", "confirmed");
-    if (unconfirmed && unconfirmed.length > 0) items.push({ type: "unconfirmed", label: "未確定カルテ", count: unconfirmed.length, href: "/chart", color: "text-orange-600 bg-orange-50", icon: "📋" });
+    if (unconfirmed && unconfirmed.length > 0) items.push({ type: "unconfirmed", label: "未確定カルテ", count: unconfirmed.length, href: "/chart?tab=unconfirmed", color: "text-orange-600 bg-orange-50", icon: "📋" });
     // 来院済（診察待ち）
     const { data: waitingApt } = await supabase.from("appointments").select("id").eq("status", "checked_in")
       .gte("scheduled_at", `${todayStr}T00:00:00+00`).lte("scheduled_at", `${todayStr}T23:59:59+00`);
