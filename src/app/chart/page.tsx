@@ -43,7 +43,7 @@ const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string }>
   erupting: { label: "萌出",   color: "text-teal-700",   bg: "bg-teal-100" },
 };
 
-type Tab = "today" | "all" | "search";
+type Tab = "today" | "all" | "search" | "unconfirmed";
 type ToothMode = "permanent" | "deciduous" | "both";
 
 type Diagnosis = {
@@ -70,6 +70,7 @@ function ChartContent() {
   const [showInsurance, setShowInsurance] = useState(false);
   const [insForm, setInsForm] = useState({ sex: "2", insurer_number: "", insured_symbol: "", insured_number: "", insured_branch: "", public_insurer: "", public_recipient: "" });
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
+  const [unconfirmedRecords, setUnconfirmedRecords] = useState<{patient: Patient; record: MedicalRecord}[]>([]);
   const [diagMaster, setDiagMaster] = useState<DiagnosisMaster[]>([]);
   const [diagModifiers, setDiagModifiers] = useState<DiagnosisModifier[]>([]);
   const [showDiagForm, setShowDiagForm] = useState(false);
@@ -82,7 +83,7 @@ function ChartContent() {
   const soapORef = useRef<HTMLTextAreaElement>(null);
   const searchParams = useSearchParams();
 
-  useEffect(() => { loadTodayPatients(); loadAllPatients(); loadDiagMaster(); loadDiagModifiers(); }, []);
+  useEffect(() => { loadTodayPatients(); loadAllPatients(); loadDiagMaster(); loadDiagModifiers(); loadUnconfirmedRecords(); }, []);
 
   useEffect(() => {
     const pid = searchParams.get("patient_id");
@@ -90,6 +91,8 @@ function ChartContent() {
       const found = allPatients.find(p => p.id === pid);
       if (found) selectPatient(found);
     }
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "unconfirmed") setTab("unconfirmed");
   }, [allPatients, searchParams]);
 
   useEffect(() => {
@@ -98,6 +101,21 @@ function ChartContent() {
       setNewDiag(prev => ({ ...prev, diagnosis_name: combined }));
     }
   }, [selectedPrefix, selectedSuffix, baseDiagName]);
+
+  async function loadUnconfirmedRecords() {
+    const { data } = await supabase.from("medical_records")
+      .select("id, appointment_id, patient_id, status, soap_s, soap_o, soap_a, soap_p, tooth_chart, doctor_confirmed, created_at, appointments ( scheduled_at, patient_type, status, doctor_id ), patients!medical_records_patient_id_fkey ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio, is_new, sex, insurer_number, insured_symbol, insured_number, insured_branch, public_insurer, public_recipient )")
+      .in("status", ["draft", "soap_complete"])
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (data) {
+      const items = data.filter((r: Record<string, unknown>) => r.patients).map((r: Record<string, unknown>) => ({
+        patient: r.patients as unknown as Patient,
+        record: { ...r, patients: undefined, appointments: r.appointments } as unknown as MedicalRecord,
+      }));
+      setUnconfirmedRecords(items);
+    }
+  }
 
   async function loadDiagMaster() {
     const { data } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
@@ -353,10 +371,10 @@ function ChartContent() {
             </div>
           </div>
           <div className="flex border-b border-gray-100">
-            {([{ key: "today" as Tab, label: "本日の来院", count: todayPatients.length }, { key: "all" as Tab, label: "全患者", count: allPatients.length }]).map((t) => (
+            {([{ key: "today" as Tab, label: "本日の来院", count: todayPatients.length }, { key: "all" as Tab, label: "全患者", count: allPatients.length }, { key: "unconfirmed" as Tab, label: "未確定カルテ", count: unconfirmedRecords.length }]).map((t) => (
               <button key={t.key} onClick={() => { setTab(t.key); setSearchQuery(""); setSearchResults([]); }}
                 className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 transition-colors ${tab === t.key ? "border-sky-500 text-sky-600" : "border-transparent text-gray-400 hover:text-gray-600"}`}>
-                {t.label} <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${tab === t.key ? "bg-sky-100 text-sky-600" : "bg-gray-100 text-gray-400"}`}>{t.count}</span>
+                {t.label} <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${t.key === "unconfirmed" && t.count > 0 ? "bg-red-100 text-red-600" : tab === t.key ? "bg-sky-100 text-sky-600" : "bg-gray-100 text-gray-400"}`}>{t.count}</span>
               </button>
             ))}
           </div>
@@ -364,6 +382,24 @@ function ChartContent() {
             {tab === "search" && (searchResults.length > 0 ? searchResults.map((p) => <PatientRow key={p.id} patient={p} onClick={() => selectPatient(p)} />) : searchQuery.length > 0 ? <div className="text-center py-8"><p className="text-gray-400 text-sm">該当なし</p></div> : null)}
             {tab === "today" && (todayPatients.length > 0 ? todayPatients.map((tp, idx) => { const st = statusBadge[tp.appointment_status] || { text: tp.appointment_status, color: "bg-gray-100 text-gray-500" }; return <PatientRow key={`${tp.patient.id}-${idx}`} patient={tp.patient} onClick={() => selectPatient(tp.patient)} extra={<span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${st.color}`}>{st.text}</span>} />; }) : <div className="text-center py-12"><p className="text-3xl mb-2">📅</p><p className="text-gray-400 text-sm">本日の来院なし</p></div>)}
             {tab === "all" && (allPatients.length > 0 ? allPatients.map((p) => <PatientRow key={p.id} patient={p} onClick={() => selectPatient(p)} />) : <div className="text-center py-12"><p className="text-3xl mb-2">👤</p><p className="text-gray-400 text-sm">患者データなし</p></div>)}
+            {tab === "unconfirmed" && (unconfirmedRecords.length > 0 ? unconfirmedRecords.map((item, idx) => (
+              <button key={`uc-${item.record.id}-${idx}`} onClick={() => { selectPatient(item.patient); }}
+                className={`w-full text-left bg-white rounded-xl border p-3.5 hover:border-sky-300 hover:shadow-md transition-all ${selectedPatient?.id === item.patient.id ? "border-sky-400 shadow-md bg-sky-50/30" : "border-gray-200"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-gradient-to-br from-amber-100 to-amber-200 text-amber-700 w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0">{item.patient.name_kanji.charAt(0)}</div>
+                    <div>
+                      <div className="flex items-center gap-1.5"><p className="font-bold text-gray-900 text-sm">{item.patient.name_kanji}</p><span className="text-[10px] text-gray-400">{item.patient.name_kana}</span></div>
+                      <p className="text-[10px] text-gray-400">{item.record.created_at ? new Date(item.record.created_at).toLocaleDateString("ja-JP") : ""}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.record.status === "soap_complete" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>{item.record.status === "soap_complete" ? "SOAP済" : "下書き"}</span>
+                    <span className="text-gray-300">›</span>
+                  </div>
+                </div>
+              </button>
+            )) : <div className="text-center py-12"><p className="text-3xl mb-2">✅</p><p className="text-gray-400 text-sm">未確定カルテはありません</p></div>)}
           </div>
         </div>
 
