@@ -10,7 +10,6 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 // auto-billingのprocedures_detail.codeから確実に変換する
 // ============================================================
 const CODE_MAP: Record<string, { rc: string; sk: string }> = {
-const CODE_MAP: Record<string, { rc: string; sk: string }> = {
   // ============================================================
   // 厚労省 歯科診療行為マスター(R06)基本テーブル照合済み
   // ============================================================
