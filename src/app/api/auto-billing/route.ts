@@ -449,6 +449,56 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // [B-4] 補綴・義歯の付随項目を自動追加
+    // billing_patternsのメイン項目に加え、必須の関連項目を自動算定
+    // 冠・ブリッジ: 印象 + 咬合採得 + 装着 + 補綴時診断
+    // 義歯新製: 精密印象 + 咬合採得 + 義歯装着 + 補綴時診断
+    // 形成あり: TEK（仮歯）
+    // ============================================================
+    const existingCodes = Array.from(addedCodes);
+    const hasProsthMain = existingCodes.some(c =>
+      c.startsWith("M-CRN-") || c.startsWith("M003-") || c === "BR-PON" ||
+      c.startsWith("M-IN-") || c.startsWith("M001-3")
+    );
+    const hasDentureNew = existingCodes.some(c =>
+      c.startsWith("DEN-1-") || c.startsWith("DEN-5-") || c.startsWith("DEN-9-") ||
+      c.startsWith("DEN-12-") || c.startsWith("DEN-FULL")
+    );
+    const hasFormation = existingCodes.some(c =>
+      c === "M001-1" || c === "M001-2" || c === "M001-fuku" ||
+      c === "M001-sho" || c === "M003-1" || c === "M003-2" || c === "M003-3"
+    );
+    const isDenMaintenance = existingCodes.some(c =>
+      c === "DEN-ADJ" || c === "DEN-REP" || c === "DEN-RELINE"
+    );
+
+    // 冠・ブリッジの新製工程
+    if (hasProsthMain && !isDenMaintenance) {
+      addItem("M-IMP", 1, extractedTeeth);      // 印象採得
+      addItem("M-BITE", 1, extractedTeeth);      // 咬合採得
+      addItem("M-SET", 1, extractedTeeth);       // 装着
+      addItem("M-HOHEKI", 1, extractedTeeth);    // 補綴時診断
+    }
+
+    // 義歯の新製工程
+    if (hasDentureNew) {
+      addItem("M-IMP-sei", 1, []);    // 精密印象（義歯は部位不要）
+      addItem("M-BITE", 1, []);       // 咬合採得
+      addItem("DEN-SET", 1, []);      // 義歯装着
+      addItem("M-HOHEKI", 1, []);     // 補綴時診断
+    }
+
+    // 形成があればTEK（仮歯）を追加
+    if (hasFormation && (soapAll.includes("tek") || soapAll.includes("仮歯") || soapAll.includes("テンポラリー") || soapAll.includes("テック"))) {
+      addItem("M-TEK", 1, extractedTeeth);
+    }
+
+    // 支台築造があれば形成も追加
+    if (existingCodes.some(c => c === "M-POST" || c === "M-POST-cast")) {
+      addItem("M001-1", 1, extractedTeeth); // 窩洞形成（単純）
+    }
+
+    // ============================================================
     // [B-1] 投薬の自動算定
     // SOAPに薬名や「処方」キーワードがあれば、投薬の技術料+薬剤料を自動計算
     // ============================================================
@@ -627,6 +677,9 @@ export async function POST(request: NextRequest) {
     if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
     if (prescribedDrugs.length > 0) warnings.push(`💊 投薬 ${prescribedDrugs.length}品目を自動算定しました。処方内容をご確認ください。`);
+    if (hasProsthMain) warnings.push("🦷 補綴（冠・ブリッジ）: 印象・咬合・装着・補綴時診断を自動追加しました。工程をご確認ください。");
+    if (hasDentureNew) warnings.push("🦷 義歯新製: 精密印象・咬合・装着・補綴時診断を自動追加しました。欠損歯数・上下顎をご確認ください。");
+    if (isDenMaintenance) warnings.push("🔧 義歯メンテナンス（調整/修理/リライン）を算定しました。");
 
     // ============================================================
     // [B-3] コメント自動付与（公式コード準拠）
