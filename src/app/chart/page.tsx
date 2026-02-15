@@ -53,7 +53,7 @@ type Diagnosis = {
 };
 
 type DiagnosisMaster = { code: string; name: string; category: string };
-type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; position: string };
+type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; modifier_position: string };
 
 function ChartContent() {
   const [tab, setTab] = useState<Tab>("today");
@@ -271,8 +271,8 @@ function ChartContent() {
 
   const filteredDiagMaster = diagSearch.length > 0 ? diagMaster.filter(d => d.name.includes(diagSearch) || d.code.includes(diagSearch)) : diagMaster;
   const OUTCOME_LABEL: Record<string, { text: string; color: string }> = { continuing: { text: "継続", color: "bg-blue-100 text-blue-700" }, cured: { text: "治癒", color: "bg-green-100 text-green-700" }, suspended: { text: "中止", color: "bg-yellow-100 text-yellow-700" }, died: { text: "死亡", color: "bg-gray-200 text-gray-600" } };
-  const prefixModifiers = diagModifiers.filter(m => m.position === "prefix");
-  const suffixModifiers = diagModifiers.filter(m => m.position === "suffix");
+  const prefixModifiers = diagModifiers.filter(m => m.modifier_position === "prefix");
+  const suffixModifiers = diagModifiers.filter(m => m.modifier_position === "suffix");
 
   function renderTooth(toothNum: string, isDeciduous = false) {
     const status = selectedRecord?.tooth_chart?.[toothNum] || "normal";
