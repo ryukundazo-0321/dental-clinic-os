@@ -19,6 +19,7 @@ const CODE_MAP: Record<string, { rc: string; sk: string }> = {
   "A002-nyuji": { rc: "301002750", sk: "12" },
   // 医学管理等 (診療識別: 13)
   "A001-a": { rc: "302000610", sk: "13" },
+  "A001-b": { rc: "301002750", sk: "12" },
   "B000-4": { rc: "302000110", sk: "13" },
   "B000-4-doc": { rc: "302000150", sk: "13" },
   "B000-4-choki": { rc: "302000170", sk: "13" },
@@ -142,7 +143,7 @@ function toYMD(d: string): string {
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
   try {
-    const { yearMonth } = await request.json();
+    const { yearMonth, format } = await request.json();
     if (!yearMonth || yearMonth.length !== 6) {
       return NextResponse.json(
         { error: "yearMonth (YYYYMM) is required" },
@@ -294,7 +295,7 @@ export async function POST(request: NextRequest) {
             ? d.end_date.replace(/-/g, "").substring(0, 6)
             : "";
           lines.push(
-            `SY,${d.diagnosis_code || ""},${d.diagnosis_name || ""},${startYM},${outcomeCode},${endYM},${d.modifier_code || ""},${d.tooth_number || ""}`
+            `SY,${d.diagnosis_code || ""},${d.diagnosis_name || ""},${startYM},${outcomeCode},${endYM},${d.modifier_code || ""},${(d.tooth_number || "").replace(/#/g, "")}`
           );
         }
       }
@@ -363,7 +364,7 @@ export async function POST(request: NextRequest) {
 
           const teethStr =
             proc.tooth_numbers && proc.tooth_numbers.length > 0
-              ? proc.tooth_numbers.join(" ")
+              ? proc.tooth_numbers.map((t: string) => t.replace(/^#/, "")).join(" ")
               : "";
           const futanKubun = pat.public_insurer ? "1" : "";
 
@@ -395,9 +396,42 @@ export async function POST(request: NextRequest) {
     // === GO レコード（請求書） ===
     lines.push(`GO,${receiptNo},${totalPointsAll},99`);
 
-    // CR+LF改行で結合（UKEファイル仕様）
+    // UKEファイルの内容を結合（CR+LF改行）
     const ukeContent = lines.join("\r\n");
 
+    // Shift_JIS変換
+    // Note: iconv-liteがインストールされていない場合はUTF-8で出力
+    let outputBuffer: Buffer | null = null;
+    try {
+      // Dynamic require for optional dependency
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const iconv = require("iconv-lite");
+      if (iconv && iconv.encode) {
+        outputBuffer = iconv.encode(ukeContent, "Shift_JIS");
+      }
+    } catch {
+      outputBuffer = null;
+    }
+
+    // ダウンロード形式の判定
+    
+    if (format === "uke" || format === "download") {
+      // .UKEファイルとしてダウンロード
+      const fileName = `receipt_${yearMonth}.UKE`;
+      const contentType = outputBuffer 
+        ? "application/octet-stream" 
+        : "text/plain; charset=shift_jis";
+      const body = outputBuffer || Buffer.from(ukeContent, "utf-8");
+      
+      return new Response(body, {
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": `attachment; filename="${fileName}"`,
+        },
+      });
+    }
+
+    // JSON形式（デフォルト: プレビュー用）
     return NextResponse.json({
       success: true,
       csv: ukeContent,
