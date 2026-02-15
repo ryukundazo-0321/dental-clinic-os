@@ -43,6 +43,134 @@ interface FacilityBonus {
   condition: string;
 }
 
+// ============================================================
+// [B-1] 医薬品の型定義
+// ============================================================
+interface DrugItem {
+  yj_code: string;
+  name: string;
+  unit_price: number;
+  unit: string;
+  dosage_form: string;
+  default_dose: string;
+  default_frequency: string;
+  default_days: number;
+  drug_category: string;
+  receipt_code: string;
+}
+
+// ============================================================
+// [B-1] 処方キーワード → 薬名マッピング
+// SOAPに書かれるキーワードから適切な薬を自動選択する
+// ============================================================
+const PRESCRIPTION_KEYWORDS: {
+  keywords: string[];
+  drugNames: string[];
+  category: string;
+  withStomach?: boolean; // NSAIDsの場合、胃薬もセットで出す
+}[] = [
+  // 鎮痛薬
+  {
+    keywords: ["ロキソニン", "ロキソプロフェン", "痛み止め", "鎮痛"],
+    drugNames: ["ロキソプロフェンNa錠60mg"],
+    category: "消炎鎮痛薬",
+    withStomach: true,
+  },
+  {
+    keywords: ["カロナール", "アセトアミノフェン"],
+    drugNames: ["カロナール錠200"],
+    category: "解熱鎮痛薬",
+    withStomach: false,
+  },
+  {
+    keywords: ["ボルタレン", "ジクロフェナク"],
+    drugNames: ["ボルタレン錠25mg"],
+    category: "消炎鎮痛薬",
+    withStomach: true,
+  },
+  {
+    keywords: ["セレコックス", "セレコキシブ"],
+    drugNames: ["セレコックス錠100mg"],
+    category: "消炎鎮痛薬",
+    withStomach: true,
+  },
+  // 抗菌薬
+  {
+    keywords: ["アモキシシリン", "サワシリン", "パセトシン", "ペニシリン"],
+    drugNames: ["アモキシシリンカプセル250mg"],
+    category: "抗菌薬（ペニシリン系）",
+  },
+  {
+    keywords: ["フロモックス", "セフカペン"],
+    drugNames: ["フロモックス錠100mg"],
+    category: "抗菌薬（セフェム系）",
+  },
+  {
+    keywords: ["メイアクト", "セフジトレン"],
+    drugNames: ["メイアクトMS錠100mg"],
+    category: "抗菌薬（セフェム系）",
+  },
+  {
+    keywords: ["ジスロマック", "アジスロマイシン"],
+    drugNames: ["ジスロマック錠250mg"],
+    category: "抗菌薬（マクロライド系）",
+  },
+  {
+    keywords: ["クラリス", "クラリスロマイシン"],
+    drugNames: ["クラリスロマイシン錠200mg"],
+    category: "抗菌薬（マクロライド系）",
+  },
+  // 含嗽薬
+  {
+    keywords: ["アズノール", "うがい"],
+    drugNames: ["アズノールうがい液4%"],
+    category: "含嗽薬",
+  },
+  {
+    keywords: ["イソジン"],
+    drugNames: ["イソジンガーグル液7%"],
+    category: "含嗽薬",
+  },
+  // 口内炎用
+  {
+    keywords: ["口内炎", "アフタ", "デキサメタゾン軟膏"],
+    drugNames: ["デキサメタゾン口腔用軟膏1mg"],
+    category: "口腔用軟膏",
+  },
+  {
+    keywords: ["ケナログ"],
+    drugNames: ["ケナログ口腔用軟膏0.1%"],
+    category: "口腔用軟膏",
+  },
+  // 止血薬
+  {
+    keywords: ["トランサミン", "トラネキサム酸", "止血"],
+    drugNames: ["トランサミンカプセル250mg"],
+    category: "消炎酵素薬",
+  },
+  // 抗ウイルス
+  {
+    keywords: ["バルトレックス", "バラシクロビル", "ヘルペス"],
+    drugNames: ["バラシクロビル錠500mg"],
+    category: "抗ウイルス薬",
+  },
+  // 抗真菌
+  {
+    keywords: ["フロリード", "カンジダ"],
+    drugNames: ["フロリードゲル経口用2%"],
+    category: "抗真菌薬",
+  },
+  // 胃薬（単独処方）
+  {
+    keywords: ["レバミピド", "ムコスタ", "胃薬"],
+    drugNames: ["レバミピド錠100mg"],
+    category: "胃粘膜保護薬",
+  },
+];
+
+// 胃薬のデフォルト名
+const DEFAULT_STOMACH_DRUG = "レバミピド錠100mg";
+
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -132,6 +260,17 @@ export async function POST(request: NextRequest) {
     } catch {
       // facility_bonusテーブルが存在しない場合はスキップ
     }
+
+    // ============================================================
+    // [B-1] 医薬品マスタ取得
+    // ============================================================
+    const { data: drugItems } = await supabase
+      .from("drug_master")
+      .select("*")
+      .eq("is_active", true);
+    const drugByName = new Map<string, DrugItem>(
+      (drugItems || []).map((d: DrugItem) => [d.name, d])
+    );
 
     // 8. SOAPテキスト準備
     const soapAll = [record.soap_s, record.soap_o, record.soap_a, record.soap_p]
@@ -310,6 +449,83 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // [B-1] 投薬の自動算定
+    // SOAPに薬名や「処方」キーワードがあれば、投薬の技術料+薬剤料を自動計算
+    // ============================================================
+    const prescribedDrugs: {
+      drug: DrugItem;
+      quantity: number; // 1回あたりの数量
+      days: number;     // 処方日数
+      dosageForm: string;
+    }[] = [];
+
+    // SOAPから処方薬を検出
+    const hasPrescription = soapAll.includes("処方") || soapAll.includes("投薬") || soapAll.includes("rp");
+    
+    if (hasPrescription || drugItems) {
+      for (const preset of PRESCRIPTION_KEYWORDS) {
+        const matched = preset.keywords.some(kw => soapAll.includes(kw.toLowerCase()));
+        if (!matched) continue;
+
+        // マッチした薬をdrug_masterから検索
+        for (const drugName of preset.drugNames) {
+          const drug = drugByName.get(drugName);
+          if (drug) {
+            prescribedDrugs.push({
+              drug,
+              quantity: 1,
+              days: drug.default_days,
+              dosageForm: drug.dosage_form,
+            });
+
+            // NSAIDsの場合、胃薬を自動追加
+            if (preset.withStomach) {
+              const stomachDrug = drugByName.get(DEFAULT_STOMACH_DRUG);
+              if (stomachDrug && !prescribedDrugs.some(pd => pd.drug.name === DEFAULT_STOMACH_DRUG)) {
+                prescribedDrugs.push({
+                  drug: stomachDrug,
+                  quantity: 1,
+                  days: stomachDrug.default_days,
+                  dosageForm: stomachDrug.dosage_form,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 処方薬がある場合、投薬の技術料を追加
+    if (prescribedDrugs.length > 0) {
+      // 処方料（F100: 院内処方の場合）
+      addItem("F100");
+      // 調剤料（F200: 院内調剤の場合）
+      addItem("F200");
+
+      // 各薬剤の薬剤料を計算してselectedItemsに追加
+      // 薬剤料 = 薬価 × 数量 × 日数 を 10 で割って五捨五超入で点数化
+      for (const pd of prescribedDrugs) {
+        const totalPrice = pd.drug.unit_price * pd.quantity * pd.days;
+        // 薬剤料の点数計算: 15円以下の場合は1点、それ以上は10で割って五捨五超入
+        const drugPoints = totalPrice <= 15 ? 1 : Math.round(totalPrice / 10);
+        
+        const drugCode = `DRUG-${pd.drug.yj_code}`;
+        if (!addedCodes.has(drugCode)) {
+          addedCodes.add(drugCode);
+          selectedItems.push({
+            code: drugCode,
+            name: `【薬剤】${pd.drug.name}`,
+            points: drugPoints,
+            category: "投薬",
+            count: 1,
+            note: `${pd.drug.default_dose} ${pd.drug.default_frequency} ${pd.days}日分 (${pd.drug.unit_price}円/${pd.drug.unit})`,
+            tooth_numbers: [],
+          });
+        }
+      }
+    }
+
+    // ============================================================
     // 11. 施設基準加算
     // ============================================================
     const existingCodes = selectedItems.map(item => item.code);
@@ -355,6 +571,7 @@ export async function POST(request: NextRequest) {
     const warnings: string[] = [];
     if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
+    if (prescribedDrugs.length > 0) warnings.push(`💊 投薬 ${prescribedDrugs.length}品目を自動算定しました。処方内容をご確認ください。`);
 
     // ============================================================
     // 13. billingテーブルに保存
@@ -407,6 +624,12 @@ export async function POST(request: NextRequest) {
       insurance_claim: insuranceClaim,
       items: selectedItems,
       warnings,
+      prescribed_drugs: prescribedDrugs.length > 0 ? prescribedDrugs.map(pd => ({
+        name: pd.drug.name,
+        dose: pd.drug.default_dose,
+        frequency: pd.drug.default_frequency,
+        days: pd.days,
+      })) : undefined,
     });
 
   } catch (error: unknown) {
