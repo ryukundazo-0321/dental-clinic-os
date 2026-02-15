@@ -160,14 +160,13 @@ export default function BillingPage() {
     setGenerating(true); setReceiptStatus("");
     try {
       const ym = receiptMonth.replace("-", "");
-      const res = await fetch("/api/receipt-generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ yearMonth: ym }) });
-      const data = await res.json();
-      if (!res.ok) { setReceiptStatus(`❌ ${data.error}`); setGenerating(false); return; }
-      const blob = new Blob([data.csv], { type: "text/csv;charset=Shift_JIS" });
+      const res = await fetch("/api/receipt-generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ yearMonth: ym, format: "uke" }) });
+      if (!res.ok) { const data = await res.json(); setReceiptStatus(`❌ ${data.error}`); setGenerating(false); return; }
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `receipt_${ym}.csv`; a.click();
+      const a = document.createElement("a"); a.href = url; a.download = `receipt_${ym}.UKE`; a.click();
       URL.revokeObjectURL(url);
-      setReceiptStatus(`✅ ${data.receiptCount}件 / ${data.totalPoints.toLocaleString()}点 ダウンロード完了`);
+      setReceiptStatus(`✅ ダウンロード完了（Shift_JIS / .UKE形式）`);
     } catch (e) { setReceiptStatus(`❌ ${e instanceof Error ? e.message : "エラー"}`); }
     setGenerating(false);
   }
@@ -387,7 +386,7 @@ export default function BillingPage() {
               <div className="text-center mb-6">
                 <p className="text-5xl mb-3">📄</p>
                 <h2 className="text-xl font-bold text-gray-900">レセ電ファイル生成</h2>
-                <p className="text-sm text-gray-400 mt-1">指定月の精算済みデータからレセ電CSVを生成・ダウンロードします</p>
+                <p className="text-sm text-gray-400 mt-1">指定月の精算済みデータからUKEファイル（Shift_JIS）を生成・ダウンロードします</p>
               </div>
               <div className="flex items-center gap-4 justify-center mb-6">
                 <div>
@@ -396,7 +395,7 @@ export default function BillingPage() {
                 </div>
                 <div className="pt-5">
                   <button onClick={generateReceipt} disabled={generating} className="bg-sky-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-sky-700 disabled:opacity-50 shadow-lg shadow-sky-200">
-                    {generating ? "⏳ 生成中..." : "📄 レセ電CSV生成・ダウンロード"}
+                    {generating ? "⏳ 生成中..." : "📄 UKEファイル生成・ダウンロード"}
                   </button>
                 </div>
               </div>
@@ -406,9 +405,9 @@ export default function BillingPage() {
               <div className="mt-6 bg-gray-50 rounded-xl p-4">
                 <h3 className="text-xs font-bold text-gray-500 mb-2">📋 生成されるファイルについて</h3>
                 <div className="space-y-1 text-xs text-gray-400">
+                  <p>• UKEファイル形式（Shift_JIS / CR+LF改行）で出力</p>
                   <p>• UK, IR, RE, HO, KO, SY, SI, JD, MF, GO レコードを生成（厚労省9桁コード対応）</p>
                   <p>• 対象: 指定月の「精算済み」会計データのみ</p>
-                  <p>• 全119件の診療行為に厚労省9桁コード（receipt_code）を設定済み</p>
                   <p>• 患者の保険証情報は電子カルテの「🏥 保険証情報」で登録してください</p>
                 </div>
               </div>
