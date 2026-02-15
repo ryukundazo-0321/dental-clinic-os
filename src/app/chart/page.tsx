@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
@@ -26,17 +26,25 @@ const UPPER_LEFT  = ["21","22","23","24","25","26","27","28"];
 const LOWER_RIGHT = ["48","47","46","45","44","43","42","41"];
 const LOWER_LEFT  = ["31","32","33","34","35","36","37","38"];
 
+const UPPER_RIGHT_D = ["55","54","53","52","51"];
+const UPPER_LEFT_D  = ["61","62","63","64","65"];
+const LOWER_RIGHT_D = ["85","84","83","82","81"];
+const LOWER_LEFT_D  = ["71","72","73","74","75"];
+
 const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string }> = {
-  normal:  { label: "健全",   color: "text-green-700",  bg: "bg-green-100" },
-  caries:  { label: "C",     color: "text-red-700",    bg: "bg-red-100" },
-  treated: { label: "処置済", color: "text-blue-700",   bg: "bg-blue-100" },
-  crown:   { label: "冠",    color: "text-yellow-700", bg: "bg-yellow-100" },
-  missing: { label: "欠損",   color: "text-gray-500",   bg: "bg-gray-200" },
-  implant: { label: "Imp",   color: "text-purple-700", bg: "bg-purple-100" },
-  bridge:  { label: "Br",    color: "text-orange-700", bg: "bg-orange-100" },
+  normal:   { label: "健全",   color: "text-green-700",  bg: "bg-green-100" },
+  caries:   { label: "C",     color: "text-red-700",    bg: "bg-red-100" },
+  treated:  { label: "処置済", color: "text-blue-700",   bg: "bg-blue-100" },
+  crown:    { label: "冠",    color: "text-yellow-700", bg: "bg-yellow-100" },
+  missing:  { label: "欠損",   color: "text-gray-500",   bg: "bg-gray-200" },
+  implant:  { label: "Imp",   color: "text-purple-700", bg: "bg-purple-100" },
+  bridge:   { label: "Br",    color: "text-orange-700", bg: "bg-orange-100" },
+  deciduous:{ label: "乳",    color: "text-pink-700",   bg: "bg-pink-100" },
+  erupting: { label: "萌出",   color: "text-teal-700",   bg: "bg-teal-100" },
 };
 
 type Tab = "today" | "all" | "search";
+type ToothMode = "permanent" | "deciduous" | "both";
 
 type Diagnosis = {
   id: string; patient_id: string; diagnosis_code: string; diagnosis_name: string;
@@ -45,6 +53,7 @@ type Diagnosis = {
 };
 
 type DiagnosisMaster = { code: string; name: string; category: string };
+type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; position: string };
 
 function ChartContent() {
   const [tab, setTab] = useState<Tab>("today");
@@ -60,16 +69,21 @@ function ChartContent() {
   const [todayPatients, setTodayPatients] = useState<{ patient: Patient; appointment_status: string; record_id: string | null }[]>([]);
   const [showInsurance, setShowInsurance] = useState(false);
   const [insForm, setInsForm] = useState({ sex: "2", insurer_number: "", insured_symbol: "", insured_number: "", insured_branch: "", public_insurer: "", public_recipient: "" });
-  // 傷病名
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [diagMaster, setDiagMaster] = useState<DiagnosisMaster[]>([]);
+  const [diagModifiers, setDiagModifiers] = useState<DiagnosisModifier[]>([]);
   const [showDiagForm, setShowDiagForm] = useState(false);
   const [diagSearch, setDiagSearch] = useState("");
   const [newDiag, setNewDiag] = useState({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false, notes: "" });
+  const [selectedPrefix, setSelectedPrefix] = useState("");
+  const [selectedSuffix, setSelectedSuffix] = useState("");
+  const [toothMode, setToothMode] = useState<ToothMode>("permanent");
+  const [baseDiagName, setBaseDiagName] = useState("");
+  const soapORef = useRef<HTMLTextAreaElement>(null);
   const searchParams = useSearchParams();
-  useEffect(() => { loadTodayPatients(); loadAllPatients(); loadDiagMaster(); }, []);
 
-  // URLパラメータ ?patient_id=xxx で患者を自動選択
+  useEffect(() => { loadTodayPatients(); loadAllPatients(); loadDiagMaster(); loadDiagModifiers(); }, []);
+
   useEffect(() => {
     const pid = searchParams.get("patient_id");
     if (pid && allPatients.length > 0 && !selectedPatient) {
@@ -78,9 +92,23 @@ function ChartContent() {
     }
   }, [allPatients, searchParams]);
 
+  useEffect(() => {
+    if (baseDiagName) {
+      const combined = `${selectedPrefix}${baseDiagName}${selectedSuffix}`;
+      setNewDiag(prev => ({ ...prev, diagnosis_name: combined }));
+    }
+  }, [selectedPrefix, selectedSuffix, baseDiagName]);
+
   async function loadDiagMaster() {
     const { data } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
     if (data) setDiagMaster(data);
+  }
+
+  async function loadDiagModifiers() {
+    try {
+      const { data } = await supabase.from("diagnosis_modifiers").select("*").eq("is_active", true).order("sort_order");
+      if (data) setDiagModifiers(data as DiagnosisModifier[]);
+    } catch { /* テーブルが存在しない場合はスキップ */ }
   }
 
   async function loadDiagnoses(patientId: string) {
@@ -123,6 +151,10 @@ function ChartContent() {
     setInsForm({ sex: patient.sex || "2", insurer_number: patient.insurer_number || "", insured_symbol: patient.insured_symbol || "", insured_number: patient.insured_number || "", insured_branch: patient.insured_branch || "", public_insurer: patient.public_insurer || "", public_recipient: patient.public_recipient || "" });
     setShowInsurance(false);
     setShowDiagForm(false);
+    const age = getAge(patient.date_of_birth);
+    if (age <= 12) setToothMode("both");
+    else if (age <= 6) setToothMode("deciduous");
+    else setToothMode("permanent");
     loadDiagnoses(patient.id);
     const { data } = await supabase.from("medical_records")
       .select("id, appointment_id, patient_id, status, soap_s, soap_o, soap_a, soap_p, tooth_chart, doctor_confirmed, created_at, appointments ( scheduled_at, patient_type, status, doctor_id )")
@@ -154,16 +186,12 @@ function ChartContent() {
     setSaveMsg("編集可能にしました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false);
   }
 
-  // カルテ1件削除
   async function deleteRecord() {
     if (!selectedRecord || !selectedPatient) return;
-    if (!confirm(`このカルテ（${selectedRecord.appointments?.scheduled_at ? formatDate(selectedRecord.appointments.scheduled_at) : formatDate(selectedRecord.created_at)}）を削除しますか？\nこの操作は取り消せません。`)) return;
+    if (!confirm(`このカルテ（${selectedRecord.appointments?.scheduled_at ? formatDate(selectedRecord.appointments.scheduled_at) : formatDate(selectedRecord.created_at)}）を削除しますか？`)) return;
     setSaving(true);
-    // billing削除
     await supabase.from("billing").delete().eq("record_id", selectedRecord.id);
-    // カルテ削除
     await supabase.from("medical_records").delete().eq("id", selectedRecord.id);
-    // リスト更新
     const newRecords = records.filter(r => r.id !== selectedRecord.id);
     setRecords(newRecords);
     setSelectedRecord(newRecords.length > 0 ? newRecords[0] : null);
@@ -174,7 +202,6 @@ function ChartContent() {
     if (!selectedPatient) return; setSaving(true);
     await supabase.from("patients").update(insForm).eq("id", selectedPatient.id);
     setSelectedPatient({ ...selectedPatient, ...insForm });
-    // allPatientsも更新
     setAllPatients(allPatients.map(p => p.id === selectedPatient.id ? { ...p, ...insForm } : p));
     setSaveMsg("保険情報を保存しました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false); setShowInsurance(false);
   }
@@ -185,6 +212,7 @@ function ChartContent() {
     await supabase.from("patient_diagnoses").insert({ patient_id: selectedPatient.id, ...newDiag });
     await loadDiagnoses(selectedPatient.id);
     setNewDiag({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false, notes: "" });
+    setSelectedPrefix(""); setSelectedSuffix(""); setBaseDiagName("");
     setShowDiagForm(false); setDiagSearch("");
     setSaveMsg("傷病名を追加しました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false);
   }
@@ -202,37 +230,33 @@ function ChartContent() {
     await loadDiagnoses(selectedPatient.id);
   }
 
-  const filteredDiagMaster = diagSearch.length > 0 ? diagMaster.filter(d => d.name.includes(diagSearch) || d.code.includes(diagSearch)) : diagMaster;
-  const OUTCOME_LABEL: Record<string, { text: string; color: string }> = { continuing: { text: "継続", color: "bg-blue-100 text-blue-700" }, cured: { text: "治癒", color: "bg-green-100 text-green-700" }, suspended: { text: "中止", color: "bg-yellow-100 text-yellow-700" }, died: { text: "死亡", color: "bg-gray-200 text-gray-600" } };
-
-  // 患者削除（関連データ全て）
   async function deletePatient() {
     if (!selectedPatient) return;
-    if (!confirm(`⚠️ 「${selectedPatient.name_kanji}」さんの患者データを完全に削除しますか？\n\n関連するカルテ・予約・会計データも全て削除されます。\nこの操作は取り消せません。`)) return;
-    if (!confirm(`本当に削除してよろしいですか？\n\n患者名: ${selectedPatient.name_kanji}\nこの操作は元に戻せません。`)) return;
+    if (!confirm(`⚠️ 「${selectedPatient.name_kanji}」さんの患者データを完全に削除しますか？\n\n関連するカルテ・予約・会計データも全て削除されます。`)) return;
+    if (!confirm(`本当に削除してよろしいですか？\n患者名: ${selectedPatient.name_kanji}`)) return;
     setSaving(true);
     const pid = selectedPatient.id;
-    // billing削除（medical_records経由）
     const { data: recs } = await supabase.from("medical_records").select("id").eq("patient_id", pid);
-    if (recs) {
-      for (const r of recs) { await supabase.from("billing").delete().eq("record_id", r.id); }
-    }
-    // queue削除（appointments経由）
+    if (recs) { for (const r of recs) { await supabase.from("billing").delete().eq("record_id", r.id); } }
     const { data: apts } = await supabase.from("appointments").select("id").eq("patient_id", pid);
-    if (apts) {
-      for (const a of apts) { await supabase.from("queue").delete().eq("appointment_id", a.id); }
-    }
-    // medical_records削除
+    if (apts) { for (const a of apts) { await supabase.from("queue").delete().eq("appointment_id", a.id); } }
     await supabase.from("medical_records").delete().eq("patient_id", pid);
-    // appointments削除
     await supabase.from("appointments").delete().eq("patient_id", pid);
-    // 患者削除
     await supabase.from("patients").delete().eq("id", pid);
-    // UI更新
     setSelectedPatient(null); setSelectedRecord(null); setRecords([]);
     setAllPatients(allPatients.filter(p => p.id !== pid));
     setTodayPatients(todayPatients.filter(tp => tp.patient.id !== pid));
     setSaveMsg("患者データを削除しました 🗑️"); setTimeout(() => setSaveMsg(""), 3000); setSaving(false);
+  }
+
+  function onToothClickForSOAP(toothNum: string) {
+    if (!selectedRecord || selectedRecord.status === "confirmed") return;
+    const tag = `#${toothNum} `;
+    const currentO = selectedRecord.soap_o || "";
+    if (!currentO.includes(`#${toothNum}`)) {
+      setSelectedRecord({ ...selectedRecord, soap_o: currentO + (currentO && !currentO.endsWith(" ") ? " " : "") + tag });
+    }
+    setTimeout(() => soapORef.current?.focus(), 100);
   }
 
   function setToothStatus(toothNum: string, status: string) {
@@ -245,19 +269,25 @@ function ChartContent() {
   function formatDate(dateStr: string) { return new Date(dateStr).toLocaleDateString("ja-JP", { year: "numeric", month: "short", day: "numeric" }); }
   function getAge(dob: string) { const b = new Date(dob), t = new Date(); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; }
 
-  function renderTooth(toothNum: string) {
+  const filteredDiagMaster = diagSearch.length > 0 ? diagMaster.filter(d => d.name.includes(diagSearch) || d.code.includes(diagSearch)) : diagMaster;
+  const OUTCOME_LABEL: Record<string, { text: string; color: string }> = { continuing: { text: "継続", color: "bg-blue-100 text-blue-700" }, cured: { text: "治癒", color: "bg-green-100 text-green-700" }, suspended: { text: "中止", color: "bg-yellow-100 text-yellow-700" }, died: { text: "死亡", color: "bg-gray-200 text-gray-600" } };
+  const prefixModifiers = diagModifiers.filter(m => m.position === "prefix");
+  const suffixModifiers = diagModifiers.filter(m => m.position === "suffix");
+
+  function renderTooth(toothNum: string, isDeciduous = false) {
     const status = selectedRecord?.tooth_chart?.[toothNum] || "normal";
     const cfg = TOOTH_STATUS[status] || TOOTH_STATUS.normal;
     const isEditing = editingTooth === toothNum;
+    const size = isDeciduous ? "w-7 h-7 text-[9px]" : "w-9 h-9 text-[10px]";
     return (
       <div key={toothNum} className="relative">
-        <button onClick={() => setEditingTooth(isEditing ? null : toothNum)}
-          className={`w-9 h-9 rounded-lg text-[10px] font-bold border transition-all ${status === "normal" ? "bg-white border-gray-200 text-gray-500 hover:border-sky-300" : `${cfg.bg} border-transparent ${cfg.color}`} ${isEditing ? "ring-2 ring-sky-400" : ""}`}>
+        <button onClick={() => { setEditingTooth(isEditing ? null : toothNum); onToothClickForSOAP(toothNum); }}
+          className={`${size} rounded-lg font-bold border transition-all ${status === "normal" ? `bg-white border-gray-200 ${isDeciduous ? "text-pink-400" : "text-gray-500"} hover:border-sky-300` : `${cfg.bg} border-transparent ${cfg.color}`} ${isEditing ? "ring-2 ring-sky-400" : ""}`}>
           {status === "normal" ? toothNum : cfg.label}
         </button>
         {isEditing && (
           <div className="absolute z-20 top-full mt-1 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-lg border border-gray-200 p-2 min-w-[120px]">
-            <p className="text-[10px] text-gray-400 text-center mb-1">#{toothNum}</p>
+            <p className="text-[10px] text-gray-400 text-center mb-1">#{toothNum}{isDeciduous ? " (乳歯)" : ""}</p>
             {Object.entries(TOOTH_STATUS).map(([key, val]) => (
               <button key={key} onClick={() => { setToothStatus(toothNum, key); setEditingTooth(null); }}
                 className={`w-full text-left px-2 py-1 rounded text-xs font-bold hover:bg-gray-50 ${status === key ? "bg-sky-50 text-sky-700" : "text-gray-700"}`}>
@@ -285,10 +315,7 @@ function ChartContent() {
           <div className="flex items-center gap-3">
             <div className="bg-gradient-to-br from-sky-100 to-sky-200 text-sky-700 w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0">{patient.name_kanji.charAt(0)}</div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <p className="font-bold text-gray-900 text-sm">{patient.name_kanji}</p>
-                <span className="text-[10px] text-gray-400">{patient.name_kana}</span>
-              </div>
+              <div className="flex items-center gap-1.5"><p className="font-bold text-gray-900 text-sm">{patient.name_kanji}</p><span className="text-[10px] text-gray-400">{patient.name_kana}</span></div>
               <p className="text-[10px] text-gray-400">{getAge(patient.date_of_birth)}歳 / {patient.phone}</p>
             </div>
           </div>
@@ -343,9 +370,10 @@ function ChartContent() {
         {/* 右メインエリア */}
         <div className="flex-1 overflow-y-auto">
           {!selectedPatient ? (
-            <div className="h-full flex items-center justify-center"><div className="text-center"><p className="text-6xl mb-4">📋</p><p className="text-gray-400 text-lg font-bold">左から患者を選択してください</p><p className="text-gray-300 text-sm mt-1">検索・本日の来院・全患者から選べます</p></div></div>
+            <div className="h-full flex items-center justify-center"><div className="text-center"><p className="text-6xl mb-4">📋</p><p className="text-gray-400 text-lg font-bold">左から患者を選択してください</p></div></div>
           ) : (
             <div className="p-4">
+              {/* 患者ヘッダー */}
               <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -362,33 +390,24 @@ function ChartContent() {
                     <button onClick={deletePatient} disabled={saving} className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50">🗑️ 患者削除</button>
                   </div>
                 </div>
-                {/* 保険証情報パネル */}
                 {showInsurance && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div><label className="text-[10px] text-gray-400 block mb-1">性別</label>
-                        <select value={insForm.sex} onChange={e => setInsForm({...insForm, sex: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="1">男</option><option value="2">女</option></select></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">保険者番号（8桁）</label>
-                        <input value={insForm.insurer_number} onChange={e => setInsForm({...insForm, insurer_number: e.target.value})} placeholder="01130012" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者記号</label>
-                        <input value={insForm.insured_symbol} onChange={e => setInsForm({...insForm, insured_symbol: e.target.value})} placeholder="751-743" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者番号</label>
-                        <input value={insForm.insured_number} onChange={e => setInsForm({...insForm, insured_number: e.target.value})} placeholder="1045" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">枝番</label>
-                        <input value={insForm.insured_branch} onChange={e => setInsForm({...insForm, insured_branch: e.target.value})} placeholder="01" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label>
-                        <input value={insForm.public_insurer} onChange={e => setInsForm({...insForm, public_insurer: e.target.value})} placeholder="82230004" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">公費受給者番号</label>
-                        <input value={insForm.public_recipient} onChange={e => setInsForm({...insForm, public_recipient: e.target.value})} placeholder="9999996" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div className="flex items-end">
-                        <button onClick={saveInsurance} disabled={saving} className="w-full bg-sky-600 text-white py-1.5 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">💾 保存</button>
-                      </div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">性別</label><select value={insForm.sex} onChange={e => setInsForm({...insForm, sex: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="1">男</option><option value="2">女</option></select></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">保険者番号（8桁）</label><input value={insForm.insurer_number} onChange={e => setInsForm({...insForm, insurer_number: e.target.value})} placeholder="01130012" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者記号</label><input value={insForm.insured_symbol} onChange={e => setInsForm({...insForm, insured_symbol: e.target.value})} placeholder="751-743" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者番号</label><input value={insForm.insured_number} onChange={e => setInsForm({...insForm, insured_number: e.target.value})} placeholder="1045" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">枝番</label><input value={insForm.insured_branch} onChange={e => setInsForm({...insForm, insured_branch: e.target.value})} placeholder="01" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label><input value={insForm.public_insurer} onChange={e => setInsForm({...insForm, public_insurer: e.target.value})} placeholder="82230004" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div><label className="text-[10px] text-gray-400 block mb-1">公費受給者番号</label><input value={insForm.public_recipient} onChange={e => setInsForm({...insForm, public_recipient: e.target.value})} placeholder="9999996" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      <div className="flex items-end"><button onClick={saveInsurance} disabled={saving} className="w-full bg-sky-600 text-white py-1.5 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">💾 保存</button></div>
                     </div>
                   </div>
                 )}
               </div>
 
               <div className="flex gap-4">
+                {/* カルテ履歴 */}
                 <div className="w-48 flex-shrink-0">
                   <h3 className="text-xs font-bold text-gray-400 mb-2 px-1">カルテ履歴</h3>
                   <div className="space-y-1">
@@ -406,35 +425,42 @@ function ChartContent() {
                   </div>
                 </div>
 
+                {/* メインカルテ */}
                 <div className="flex-1">
                   {selectedRecord ? (
                     <div className="space-y-4">
                       <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${selectedRecord.status === "confirmed" ? "bg-green-100 text-green-700" : selectedRecord.status === "soap_complete" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>{selectedRecord.status === "confirmed" ? "✅ 確定済み" : selectedRecord.status === "soap_complete" ? "📝 SOAP入力済み" : "📋 下書き"}</span>
-                          <button onClick={deleteRecord} disabled={saving}
-                            className="text-[10px] text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors disabled:opacity-50">🗑️ このカルテを削除</button>
+                          <button onClick={deleteRecord} disabled={saving} className="text-[10px] text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors disabled:opacity-50">🗑️ このカルテを削除</button>
                         </div>
                         <div className="flex gap-2">
                           <button onClick={saveSOAP} disabled={saving || selectedRecord.status === "confirmed"} className="bg-sky-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">{saving ? "保存中..." : "一時保存"}</button>
                           {selectedRecord.status === "confirmed" ? <button onClick={unlockRecord} disabled={saving} className="bg-yellow-500 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-yellow-600 disabled:opacity-50">🔓 編集する</button> : <button onClick={confirmRecord} disabled={saving} className="bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700 disabled:opacity-50">カルテ確定</button>}
                         </div>
                       </div>
+
+                      {/* SOAP */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                        {([{ key: "soap_s" as const, l: "S", t: "主観的情報", c: "bg-red-100 text-red-700", p: "例: 右下奥歯が痛い" }, { key: "soap_o" as const, l: "O", t: "客観的情報", c: "bg-blue-100 text-blue-700", p: "例: #46 遠心面にC2" }, { key: "soap_a" as const, l: "A", t: "評価", c: "bg-yellow-100 text-yellow-700", p: "例: #46 C2" }, { key: "soap_p" as const, l: "P", t: "計画", c: "bg-green-100 text-green-700", p: "例: CR充填、次回経過観察" }]).map((s) => (
+                        {([
+                          { key: "soap_s" as const, l: "S", t: "主観的情報", c: "bg-red-100 text-red-700", p: "例: 右下奥歯が痛い" },
+                          { key: "soap_o" as const, l: "O", t: "客観的情報（歯式クリックで自動入力）", c: "bg-blue-100 text-blue-700", p: "例: #46 遠心面にC2" },
+                          { key: "soap_a" as const, l: "A", t: "評価", c: "bg-yellow-100 text-yellow-700", p: "例: #46 C2" },
+                          { key: "soap_p" as const, l: "P", t: "計画", c: "bg-green-100 text-green-700", p: "例: CR充填、次回経過観察" },
+                        ]).map((s) => (
                           <div key={s.key} className="bg-white rounded-xl border border-gray-200 p-3">
                             <div className="flex items-center gap-2 mb-2"><span className={`${s.c} text-xs font-bold w-6 h-6 rounded flex items-center justify-center`}>{s.l}</span><h4 className="text-xs font-bold text-gray-700">{s.t}</h4></div>
-                            <textarea value={selectedRecord[s.key] || ""} onChange={(e) => setSelectedRecord({ ...selectedRecord, [s.key]: e.target.value })} disabled={selectedRecord.status === "confirmed"} placeholder={s.p} rows={4} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none disabled:bg-gray-50" />
+                            <textarea ref={s.key === "soap_o" ? soapORef : undefined} value={selectedRecord[s.key] || ""} onChange={(e) => setSelectedRecord({ ...selectedRecord, [s.key]: e.target.value })} disabled={selectedRecord.status === "confirmed"} placeholder={s.p} rows={4} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none disabled:bg-gray-50" />
                           </div>
                         ))}
                       </div>
+
                       {/* 傷病名セクション */}
                       <div className="bg-white rounded-xl border border-gray-200 p-4">
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-sm font-bold text-gray-900">🏷️ 傷病名</h4>
                           <button onClick={() => setShowDiagForm(!showDiagForm)} className={`text-xs px-3 py-1 rounded-lg font-bold transition-colors ${showDiagForm ? "bg-gray-200 text-gray-600" : "bg-sky-100 text-sky-700 hover:bg-sky-200"}`}>{showDiagForm ? "✕ 閉じる" : "＋ 追加"}</button>
                         </div>
-                        {/* 追加フォーム */}
                         {showDiagForm && (
                           <div className="mb-4 bg-sky-50 rounded-xl p-3 border border-sky-200">
                             <div className="mb-2">
@@ -443,7 +469,7 @@ function ChartContent() {
                             {diagSearch.length > 0 && (
                               <div className="max-h-32 overflow-y-auto mb-2 bg-white rounded-lg border border-gray-200">
                                 {filteredDiagMaster.map(d => (
-                                  <button key={d.code} onClick={() => { setNewDiag({ ...newDiag, diagnosis_code: d.code, diagnosis_name: d.name }); setDiagSearch(""); }}
+                                  <button key={d.code} onClick={() => { setNewDiag({ ...newDiag, diagnosis_code: d.code, diagnosis_name: d.name }); setBaseDiagName(d.name); setSelectedPrefix(""); setSelectedSuffix(""); setDiagSearch(""); }}
                                     className="w-full text-left px-3 py-1.5 text-sm hover:bg-sky-50 border-b border-gray-50 last:border-0">
                                     <span className="text-xs text-gray-400 mr-2">{d.code}</span><span className="font-bold text-gray-700">{d.name}</span>
                                     <span className="text-[10px] text-gray-300 ml-2">{d.category}</span>
@@ -457,6 +483,40 @@ function ChartContent() {
                                 <div className="bg-white rounded-lg p-2 border border-sky-200">
                                   <p className="text-sm font-bold text-sky-700">{newDiag.diagnosis_name} <span className="text-xs text-gray-400">({newDiag.diagnosis_code})</span></p>
                                 </div>
+                                {/* 修飾語セクション */}
+                                {diagModifiers.length > 0 && (
+                                  <div className="bg-white rounded-lg p-2 border border-gray-200">
+                                    <p className="text-[10px] text-gray-400 font-bold mb-1">修飾語</p>
+                                    {prefixModifiers.length > 0 && (
+                                      <div className="mb-1.5">
+                                        <p className="text-[9px] text-gray-300 mb-0.5">前置修飾語</p>
+                                        <div className="flex flex-wrap gap-1">
+                                          <button onClick={() => setSelectedPrefix("")} className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedPrefix === "" ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-500 hover:border-sky-200"}`}>なし</button>
+                                          {prefixModifiers.map(m => (
+                                            <button key={m.id} onClick={() => setSelectedPrefix(m.modifier_name)}
+                                              className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedPrefix === m.modifier_name ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-500 hover:border-sky-200"}`}>
+                                              {m.modifier_name}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {suffixModifiers.length > 0 && (
+                                      <div>
+                                        <p className="text-[9px] text-gray-300 mb-0.5">後置修飾語</p>
+                                        <div className="flex flex-wrap gap-1">
+                                          <button onClick={() => setSelectedSuffix("")} className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedSuffix === "" ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-500 hover:border-sky-200"}`}>なし</button>
+                                          {suffixModifiers.map(m => (
+                                            <button key={m.id} onClick={() => setSelectedSuffix(m.modifier_name)}
+                                              className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedSuffix === m.modifier_name ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-500 hover:border-sky-200"}`}>
+                                              {m.modifier_name}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                                 <div className="grid grid-cols-3 gap-2">
                                   <div><label className="text-[10px] text-gray-400 block mb-0.5">歯番</label>
                                     <input value={newDiag.tooth_number} onChange={e => setNewDiag({...newDiag, tooth_number: e.target.value})} placeholder="#46" className="w-full border border-gray-200 rounded px-2 py-1 text-xs" /></div>
@@ -470,7 +530,6 @@ function ChartContent() {
                             )}
                           </div>
                         )}
-                        {/* 傷病名一覧 */}
                         {diagnoses.length > 0 ? (
                           <div className="space-y-1.5">
                             {diagnoses.map(d => {
@@ -485,9 +544,7 @@ function ChartContent() {
                                   </div>
                                   <div className="flex items-center gap-1">
                                     <select value={d.outcome} onChange={e => updateOutcome(d.id, e.target.value)} className="text-[10px] border border-gray-200 rounded px-1 py-0.5">
-                                      <option value="continuing">継続</option>
-                                      <option value="cured">治癒</option>
-                                      <option value="suspended">中止</option>
+                                      <option value="continuing">継続</option><option value="cured">治癒</option><option value="suspended">中止</option>
                                     </select>
                                     <button onClick={() => deleteDiagnosis(d.id)} className="text-[10px] text-red-400 hover:text-red-600 px-1">✕</button>
                                   </div>
@@ -499,14 +556,65 @@ function ChartContent() {
                           <p className="text-xs text-gray-400 text-center py-2">傷病名が登録されていません</p>
                         )}
                       </div>
+
+                      {/* 歯式チャート */}
                       <div className="bg-white rounded-xl border border-gray-200 p-4">
-                        <div className="flex items-center justify-between mb-3"><h4 className="text-sm font-bold text-gray-900">🦷 歯式チャート</h4><p className="text-xs text-gray-400">タップで状態変更</p></div>
-                        <div className="flex flex-col items-center gap-1">
-                          <div className="flex gap-0.5"><div className="flex gap-0.5 border-r-2 border-gray-400 pr-1">{UPPER_RIGHT.map(renderTooth)}</div><div className="flex gap-0.5 pl-1">{UPPER_LEFT.map(renderTooth)}</div></div>
-                          <div className="w-full border-t-2 border-gray-400 my-1" />
-                          <div className="flex gap-0.5"><div className="flex gap-0.5 border-r-2 border-gray-400 pr-1">{LOWER_RIGHT.map(renderTooth)}</div><div className="flex gap-0.5 pl-1">{LOWER_LEFT.map(renderTooth)}</div></div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-bold text-gray-900">🦷 歯式チャート</h4>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] text-gray-400">タップで状態変更＆SOAP O欄に自動入力</p>
+                            <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                              <button onClick={() => setToothMode("permanent")} className={`text-[10px] px-2 py-0.5 rounded font-bold transition-colors ${toothMode === "permanent" ? "bg-white text-gray-700 shadow-sm" : "text-gray-400"}`}>永久歯</button>
+                              <button onClick={() => setToothMode("both")} className={`text-[10px] px-2 py-0.5 rounded font-bold transition-colors ${toothMode === "both" ? "bg-white text-gray-700 shadow-sm" : "text-gray-400"}`}>混合</button>
+                              <button onClick={() => setToothMode("deciduous")} className={`text-[10px] px-2 py-0.5 rounded font-bold transition-colors ${toothMode === "deciduous" ? "bg-white text-gray-700 shadow-sm" : "text-gray-400"}`}>乳歯</button>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-2 mt-3 justify-center">{Object.entries(TOOTH_STATUS).map(([k, v]) => <span key={k} className={`text-[10px] font-bold px-2 py-0.5 rounded ${v.bg} ${v.color}`}>{v.label}</span>)}</div>
+                        <div className="flex flex-col items-center gap-1">
+                          {/* 半顎ラベル */}
+                          <div className="w-full flex justify-between px-4 mb-0.5">
+                            <span className="text-[9px] text-gray-400 font-bold">右上</span>
+                            <span className="text-[9px] text-gray-400 font-bold">左上</span>
+                          </div>
+                          {/* 永久歯 上顎 */}
+                          {(toothMode === "permanent" || toothMode === "both") && (
+                            <div className="flex gap-0.5">
+                              <div className="flex gap-0.5 border-r-2 border-gray-400 pr-1">{UPPER_RIGHT.map(t => renderTooth(t))}</div>
+                              <div className="flex gap-0.5 pl-1">{UPPER_LEFT.map(t => renderTooth(t))}</div>
+                            </div>
+                          )}
+                          {/* 乳歯 上顎 */}
+                          {(toothMode === "deciduous" || toothMode === "both") && (
+                            <div className="flex gap-0.5">
+                              <div className="flex gap-0.5 border-r-2 border-pink-300 pr-1">{UPPER_RIGHT_D.map(t => renderTooth(t, true))}</div>
+                              <div className="flex gap-0.5 pl-1">{UPPER_LEFT_D.map(t => renderTooth(t, true))}</div>
+                            </div>
+                          )}
+                          <div className="w-full border-t-2 border-gray-400 my-1" />
+                          {/* 乳歯 下顎 */}
+                          {(toothMode === "deciduous" || toothMode === "both") && (
+                            <div className="flex gap-0.5">
+                              <div className="flex gap-0.5 border-r-2 border-pink-300 pr-1">{LOWER_RIGHT_D.map(t => renderTooth(t, true))}</div>
+                              <div className="flex gap-0.5 pl-1">{LOWER_LEFT_D.map(t => renderTooth(t, true))}</div>
+                            </div>
+                          )}
+                          {/* 永久歯 下顎 */}
+                          {(toothMode === "permanent" || toothMode === "both") && (
+                            <div className="flex gap-0.5">
+                              <div className="flex gap-0.5 border-r-2 border-gray-400 pr-1">{LOWER_RIGHT.map(t => renderTooth(t))}</div>
+                              <div className="flex gap-0.5 pl-1">{LOWER_LEFT.map(t => renderTooth(t))}</div>
+                            </div>
+                          )}
+                          <div className="w-full flex justify-between px-4 mt-0.5">
+                            <span className="text-[9px] text-gray-400 font-bold">右下</span>
+                            <span className="text-[9px] text-gray-400 font-bold">左下</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-3 justify-center">
+                          {Object.entries(TOOTH_STATUS).map(([k, v]) => (
+                            <span key={k} className={`text-[10px] font-bold px-2 py-0.5 rounded ${v.bg} ${v.color}`}>{v.label}</span>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   ) : <div className="bg-white rounded-xl border border-gray-200 p-12 text-center"><p className="text-3xl mb-2">📝</p><p className="text-gray-400">カルテ履歴がありません</p></div>}
