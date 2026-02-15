@@ -404,8 +404,8 @@ export async function POST(request: NextRequest) {
       // Shift_JISに変換して.UKEファイルとしてダウンロード
       const fileName = `receipt_${yearMonth}.UKE`;
       const sjisBuffer = iconv.encode(ukeContent, "Shift_JIS");
-      const uint8 = new Uint8Array(sjisBuffer.buffer, sjisBuffer.byteOffset, sjisBuffer.byteLength);
-      return new Response(uint8, {
+      const blob = new Blob([sjisBuffer], { type: "application/octet-stream" });
+      return new Response(blob, {
         headers: {
           "Content-Type": "application/octet-stream",
           "Content-Disposition": `attachment; filename="${fileName}"`,
