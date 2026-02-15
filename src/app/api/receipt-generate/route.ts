@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import * as iconv from "iconv-lite";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -400,11 +401,13 @@ export async function POST(request: NextRequest) {
     const ukeContent = lines.join("\r\n");
 
     if (format === "uke" || format === "download") {
-      // .UKEファイルとしてダウンロード
+      // Shift_JISに変換して.UKEファイルとしてダウンロード
       const fileName = `receipt_${yearMonth}.UKE`;
-      return new Response(ukeContent, {
+      const sjisBuffer = iconv.encode(ukeContent, "Shift_JIS");
+      const uint8 = new Uint8Array(sjisBuffer.buffer, sjisBuffer.byteOffset, sjisBuffer.byteLength);
+      return new Response(uint8, {
         headers: {
-          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Type": "application/octet-stream",
           "Content-Disposition": `attachment; filename="${fileName}"`,
         },
       });
