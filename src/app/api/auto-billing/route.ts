@@ -526,6 +526,61 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // [B-2] 特定器材（材料）の自動算定
+    // 算定された処置コードに基づき、必要な材料を自動追加する
+    // ============================================================
+    const { data: materialItems } = await supabase
+      .from("material_master")
+      .select("*")
+      .eq("is_active", true);
+
+    if (materialItems && materialItems.length > 0) {
+      // 算定済みの処置コードを収集
+      const billedFeeCodes = selectedItems.map(item => item.code);
+      const addedMaterials = new Set<string>();
+
+      // 処置コードに紐づく材料を検索して追加
+      for (const mat of materialItems) {
+        if (!mat.related_fee_codes || mat.related_fee_codes.length === 0) continue;
+
+        // この材料に紐づく処置コードが算定されているか
+        const hasRelatedProcedure = mat.related_fee_codes.some(
+          (fc: string) => billedFeeCodes.includes(fc)
+        );
+        if (!hasRelatedProcedure) continue;
+
+        // 同じカテゴリの材料が既に追加されていたらスキップ（重複防止）
+        const matKey = `${mat.material_category}-${mat.procedure_category}`;
+        if (addedMaterials.has(matKey)) continue;
+        addedMaterials.add(matKey);
+
+        // 材料費の点数計算: 単価 × 数量 / 10（五捨五超入）
+        const totalPrice = mat.unit_price * mat.default_quantity;
+        const materialPoints = totalPrice <= 15 ? (totalPrice > 0 ? 1 : 0) : Math.round(totalPrice / 10);
+
+        // 金パラ（金属）は薬価基準で変動するため、点数0で注意を促す
+        if (mat.unit_price === 0) {
+          // 金属材料は時価のため、手動設定が必要
+          continue; // 単価0の金属は自動追加しない（手動で設定してもらう）
+        }
+
+        const matCode = `MAT-${mat.material_code}`;
+        if (!addedCodes.has(matCode)) {
+          addedCodes.add(matCode);
+          selectedItems.push({
+            code: matCode,
+            name: `【材料】${mat.name}`,
+            points: materialPoints,
+            category: "特定器材",
+            count: 1,
+            note: `${mat.default_quantity}${mat.unit} × ${mat.unit_price}円/${mat.unit}`,
+            tooth_numbers: [],
+          });
+        }
+      }
+    }
+
+    // ============================================================
     // 11. 施設基準加算
     // ============================================================
     const existingCodes = selectedItems.map(item => item.code);
