@@ -399,33 +399,12 @@ export async function POST(request: NextRequest) {
     // UKEファイルの内容を結合（CR+LF改行）
     const ukeContent = lines.join("\r\n");
 
-    // Shift_JIS変換
-    // Note: iconv-liteがインストールされていない場合はUTF-8で出力
-    let outputBuffer: Buffer | null = null;
-    try {
-      // Dynamic require for optional dependency
-      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-      const iconv = require("iconv-lite");
-      if (iconv && iconv.encode) {
-        outputBuffer = iconv.encode(ukeContent, "Shift_JIS");
-      }
-    } catch {
-      outputBuffer = null;
-    }
-
-    // ダウンロード形式の判定
-    
     if (format === "uke" || format === "download") {
       // .UKEファイルとしてダウンロード
       const fileName = `receipt_${yearMonth}.UKE`;
-      const contentType = outputBuffer 
-        ? "application/octet-stream" 
-        : "text/plain; charset=shift_jis";
-      const body = outputBuffer || Buffer.from(ukeContent, "utf-8");
-      
-      return new Response(body, {
+      return new Response(ukeContent, {
         headers: {
-          "Content-Type": contentType,
+          "Content-Type": "text/plain; charset=utf-8",
           "Content-Disposition": `attachment; filename="${fileName}"`,
         },
       });
