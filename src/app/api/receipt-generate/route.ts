@@ -554,6 +554,58 @@ export async function POST(request: NextRequest) {
       }
 
       // ============================================================
+      // [B-2] TO レコード（特定器材）
+      // auto-billingで算定されたMAT-コードの材料をTOレコードとして出力
+      // TO,診療識別(70=特定器材),負担区分,特定器材コード,使用量,単位コード,単価,点数,回数
+      // ============================================================
+      const matProcs: { code: string; name: string; points: number; count: number; note: string }[] = [];
+      for (const b of pBillings) {
+        const procs = (b.procedures_detail || []) as {
+          code: string; name: string; points: number; count: number; note?: string;
+        }[];
+        for (const proc of procs) {
+          if (proc.code.startsWith("MAT-")) {
+            matProcs.push({
+              code: proc.code,
+              name: proc.name,
+              points: proc.points,
+              count: proc.count,
+              note: proc.note || "",
+            });
+          }
+        }
+      }
+
+      if (matProcs.length > 0) {
+        // material_masterからreceipt_codeを取得
+        const matCodes = matProcs.map(mp => mp.code.replace("MAT-", ""));
+        const { data: matMasterData } = await supabase
+          .from("material_master")
+          .select("material_code, receipt_code, shinryo_shikibetsu, unit, unit_price, default_quantity")
+          .in("material_code", matCodes);
+        const matMasterMap = new Map(
+          (matMasterData || []).map((m: { material_code: string; receipt_code: string; shinryo_shikibetsu: string; unit: string; unit_price: number; default_quantity: number }) => [m.material_code, m])
+        );
+
+        const futanKubun = pat.public_expense_type ? "1" : "";
+
+        for (const mp of matProcs) {
+          const matCode = mp.code.replace("MAT-", "");
+          const matInfo = matMasterMap.get(matCode);
+
+          const matShikibetsu = matInfo?.shinryo_shikibetsu || "70";
+          const matReceiptCode = matInfo?.receipt_code || matCode;
+          const matQuantity = matInfo?.default_quantity || 1;
+          const matUnitPrice = matInfo?.unit_price || 0;
+
+          // TO,診療識別,負担区分,特定器材コード,使用量,単価,点数,回数
+          lines.push(
+            `TO,${matShikibetsu},${futanKubun},${matReceiptCode},${matQuantity},${matUnitPrice},${mp.points},${mp.count}`
+          );
+        }
+      }
+
+      // ============================================================
       // [A-1] JD レコード（受診日等）— 全billing分の受診日を統合
       // 月内の全来院日を1つのJDレコードにまとめる
       // ============================================================
