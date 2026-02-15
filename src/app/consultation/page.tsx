@@ -15,7 +15,6 @@ type Appointment = {
   duration_min: number;
   doctor_id: string | null;
   unit_id: string | null;
-  memo: string | null;
   patients: { id: string; name_kanji: string; name_kana: string; phone: string; is_new: boolean; date_of_birth?: string } | null;
   medical_records: { id: string; status: string }[] | null;
 };
@@ -31,12 +30,19 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8);
 
+// 日本時間の今日の日付をYYYY-MM-DD形式で取得
+function getTodayJST(): string {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().split("T")[0];
+}
+
 export default function ConsultationPage() {
   const [config, setConfig] = useState<ClinicConfig | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [selectedDate, setSelectedDate] = useState(getTodayJST);
   const [loading, setLoading] = useState(true);
   const [selectedApt, setSelectedApt] = useState<Appointment | null>(null);
 
@@ -57,11 +63,11 @@ export default function ConsultationPage() {
 
   const fetchAppointments = useCallback(async () => {
     const { data } = await supabase.from("appointments")
-      .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, unit_id, memo,
+      .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, unit_id,
         patients ( id, name_kanji, name_kana, phone, is_new, date_of_birth ),
         medical_records ( id, status )`)
-      .gte("scheduled_at", `${selectedDate}T00:00:00`)
-      .lte("scheduled_at", `${selectedDate}T23:59:59`)
+      .gte("scheduled_at", `${selectedDate}T00:00:00+00`)
+      .lte("scheduled_at", `${selectedDate}T23:59:59+00`)
       .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true });
     if (data) setAppointments(data as unknown as Appointment[]);
@@ -102,12 +108,12 @@ export default function ConsultationPage() {
     if (selectedApt?.id === aptId) setSelectedApt((prev) => prev ? { ...prev, doctor_id: doctorId || null } : null);
   }
 
+  // scheduled_atの文字列から時:分を直接取得（タイムゾーン変換を回避）
   function parseScheduledHourMin(apt: Appointment): [number, number] {
     const raw = apt.scheduled_at;
-    const match = raw.match(/(\d{2}):(\d{2}):(\d{2})/);
+    const match = raw.match(/(\d{2}):(\d{2}):\d{2}/);
     if (match) return [parseInt(match[1]), parseInt(match[2])];
-    const d = new Date(raw);
-    return [d.getHours(), d.getMinutes()];
+    return [0, 0];
   }
 
   function getAptTime(apt: Appointment) {
@@ -131,7 +137,11 @@ export default function ConsultationPage() {
     return a;
   }
 
-  // カラム生成: 担当医 → なければユニット → なければ1カラム
+  function goToday() { setSelectedDate(getTodayJST()); }
+  function goPrev() { const d = new Date(selectedDate + "T12:00:00"); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split("T")[0]); }
+  function goNext() { const d = new Date(selectedDate + "T12:00:00"); d.setDate(d.getDate() + 1); setSelectedDate(d.toISOString().split("T")[0]); }
+
+  // カラム: 担当医 → なければユニット → なければ1カラム + 常に未割当
   const columns = useMemo(() => {
     const cols: { id: string; label: string }[] = [];
     if (doctors.length > 0) {
@@ -157,7 +167,7 @@ export default function ConsultationPage() {
 
   // ミニカレンダー
   const miniCalDays = useMemo(() => {
-    const d = new Date(selectedDate + "T00:00:00");
+    const d = new Date(selectedDate + "T12:00:00");
     const year = d.getFullYear(), month = d.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const lastDate = new Date(year, month + 1, 0).getDate();
@@ -171,7 +181,6 @@ export default function ConsultationPage() {
   appointments.forEach((a) => { statusCounts[a.status] = (statusCounts[a.status] || 0) + 1; });
 
   const checkedInApts = appointments.filter(a => ["checked_in", "in_consultation", "completed"].includes(a.status));
-  const visibleCols = columns;
 
   if (loading || !config) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
 
@@ -187,14 +196,11 @@ export default function ConsultationPage() {
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
-              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split("T")[0]); }}
-                className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">◀</button>
+              <button onClick={goPrev} className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">◀</button>
               <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
                 className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 font-bold text-sm" />
-              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d.toISOString().split("T")[0]); }}
-                className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">▶</button>
-              <button onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
-                className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 text-xs text-gray-500">今日</button>
+              <button onClick={goNext} className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">▶</button>
+              <button onClick={goToday} className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 text-xs text-gray-500">今日</button>
             </div>
             <span className="text-xs text-gray-400">本日の予約: {appointments.length}件</span>
             <div className="flex gap-1.5">
@@ -213,9 +219,9 @@ export default function ConsultationPage() {
             {/* カラムヘッダー */}
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200 flex shadow-sm">
               <div className="w-16 flex-shrink-0 border-r border-gray-200" />
-              {visibleCols.map(col => (
-                <div key={col.id} className="flex-1 min-w-[160px] px-2 py-2.5 border-r border-gray-100 text-center">
-                  <p className="text-xs font-bold text-gray-700">{col.label}</p>
+              {columns.map(col => (
+                <div key={col.id} className={`flex-1 min-w-[160px] px-2 py-2.5 border-r border-gray-100 text-center ${col.id === "__unassigned__" ? "bg-amber-50" : ""}`}>
+                  <p className={`text-xs font-bold ${col.id === "__unassigned__" ? "text-amber-700" : "text-gray-700"}`}>{col.label}</p>
                 </div>
               ))}
             </div>
@@ -226,12 +232,12 @@ export default function ConsultationPage() {
                 <div className="w-16 flex-shrink-0 border-r border-gray-200 pr-2 pt-1 text-right">
                   <span className="text-[10px] text-gray-400 font-bold">{hour}:00</span>
                 </div>
-                {visibleCols.map(col => {
+                {columns.map(col => {
                   const colApts = (aptsByColumn.get(col.id) || []).filter(apt => {
                     return parseScheduledHourMin(apt)[0] === hour;
                   });
                   return (
-                    <div key={col.id} className="flex-1 min-w-[160px] border-r border-gray-50 relative px-1 py-0.5">
+                    <div key={col.id} className={`flex-1 min-w-[160px] border-r border-gray-50 relative px-1 py-0.5 ${col.id === "__unassigned__" ? "bg-amber-50/30" : ""}`}>
                       {colApts.map(apt => {
                         const st = STATUS_CONFIG[apt.status] || STATUS_CONFIG.reserved;
                         const duration = apt.duration_min || 30;
@@ -263,9 +269,6 @@ export default function ConsultationPage() {
                                   {unitName && <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1 rounded">{unitName}</span>}
                                 </div>
                               )}
-                              {blockHeight > 75 && apt.memo && (
-                                <p className="text-[9px] text-gray-400 mt-0.5 truncate">{apt.memo}</p>
-                              )}
                             </div>
                           </div>
                         );
@@ -286,9 +289,9 @@ export default function ConsultationPage() {
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-gray-700">{miniCalDays.year}年{miniCalDays.month + 1}月</span>
             <div className="flex gap-1">
-              <button onClick={() => { const d = new Date(selectedDate); d.setMonth(d.getMonth() - 1); setSelectedDate(d.toISOString().split("T")[0]); }}
+              <button onClick={() => { const d = new Date(selectedDate + "T12:00:00"); d.setMonth(d.getMonth() - 1); setSelectedDate(d.toISOString().split("T")[0]); }}
                 className="text-xs text-gray-400 hover:text-gray-700 px-1">‹</button>
-              <button onClick={() => { const d = new Date(selectedDate); d.setMonth(d.getMonth() + 1); setSelectedDate(d.toISOString().split("T")[0]); }}
+              <button onClick={() => { const d = new Date(selectedDate + "T12:00:00"); d.setMonth(d.getMonth() + 1); setSelectedDate(d.toISOString().split("T")[0]); }}
                 className="text-xs text-gray-400 hover:text-gray-700 px-1">›</button>
             </div>
           </div>
@@ -298,7 +301,7 @@ export default function ConsultationPage() {
               if (!day) return <span key={`e-${i}`} />;
               const dateStr = `${miniCalDays.year}-${String(miniCalDays.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
               const isSelected = dateStr === selectedDate;
-              const isToday = dateStr === new Date().toISOString().split("T")[0];
+              const isToday = dateStr === getTodayJST();
               return (
                 <button key={day} onClick={() => setSelectedDate(dateStr)}
                   className={`text-[10px] w-6 h-6 rounded-full flex items-center justify-center transition-colors
