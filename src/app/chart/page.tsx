@@ -10,6 +10,13 @@ type Patient = {
   date_of_birth: string; phone: string; insurance_type: string;
   burden_ratio: number; is_new: boolean; created_at?: string;
   sex?: string; insurer_number?: string; insured_symbol?: string;
+  insured_number?: string; insured_branch?: string; public_insurer?: string; public_recipient?: string;
+  insurance_relation?: string; insured_name?: string; insurance_valid_from?: string; insurance_valid_until?: string;
+  insurer_name?: string; insurer_address?: string; insurer_phone?: string;
+  high_cost_medical?: boolean; income_category?: string; disability_flag?: boolean;
+  public_valid_from?: string; public_valid_until?: string;
+  public_insurer_2?: string; public_recipient_2?: string; public_insurer_3?: string; public_recipient_3?: string;
+  postal_code?: string; address?: string; occupation?: string; notes?: string;
   insured_number?: string; insured_branch?: string;
   public_insurer?: string; public_recipient?: string;
 };
@@ -68,7 +75,8 @@ function ChartContent() {
   const [editingTooth, setEditingTooth] = useState<string | null>(null);
   const [todayPatients, setTodayPatients] = useState<{ patient: Patient; appointment_status: string; record_id: string | null }[]>([]);
   const [showInsurance, setShowInsurance] = useState(false);
-  const [insForm, setInsForm] = useState({ sex: "2", insurer_number: "", insured_symbol: "", insured_number: "", insured_branch: "", public_insurer: "", public_recipient: "" });
+  const [insForm, setInsForm] = useState<Record<string, string | boolean>>({ sex: "2", insurer_number: "", insured_symbol: "", insured_number: "", insured_branch: "", public_insurer: "", public_recipient: "", insurance_relation: "self", insured_name: "", insurance_valid_from: "", insurance_valid_until: "", insurer_name: "", insurer_address: "", insurer_phone: "", high_cost_medical: false, income_category: "", disability_flag: false, public_valid_from: "", public_valid_until: "", public_insurer_2: "", public_recipient_2: "", public_insurer_3: "", public_recipient_3: "", postal_code: "", address: "", occupation: "", notes: "" });
+  const [insTab, setInsTab] = useState<"basic" | "insurance" | "pub1" | "pub2" | "pub3">("basic");
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [unconfirmedRecords, setUnconfirmedRecords] = useState<{patient: Patient; record: MedicalRecord}[]>([]);
   const [diagMaster, setDiagMaster] = useState<DiagnosisMaster[]>([]);
@@ -166,7 +174,7 @@ function ChartContent() {
 
   async function selectPatient(patient: Patient) {
     setSelectedPatient(patient);
-    setInsForm({ sex: patient.sex || "2", insurer_number: patient.insurer_number || "", insured_symbol: patient.insured_symbol || "", insured_number: patient.insured_number || "", insured_branch: patient.insured_branch || "", public_insurer: patient.public_insurer || "", public_recipient: patient.public_recipient || "" });
+    setInsForm({ sex: patient.sex || "2", insurer_number: patient.insurer_number || "", insured_symbol: patient.insured_symbol || "", insured_number: patient.insured_number || "", insured_branch: patient.insured_branch || "", public_insurer: patient.public_insurer || "", public_recipient: patient.public_recipient || "", insurance_relation: patient.insurance_relation || "self", insured_name: patient.insured_name || "", insurance_valid_from: patient.insurance_valid_from || "", insurance_valid_until: patient.insurance_valid_until || "", insurer_name: patient.insurer_name || "", insurer_address: patient.insurer_address || "", insurer_phone: patient.insurer_phone || "", high_cost_medical: patient.high_cost_medical || false, income_category: patient.income_category || "", disability_flag: patient.disability_flag || false, public_valid_from: patient.public_valid_from || "", public_valid_until: patient.public_valid_until || "", public_insurer_2: patient.public_insurer_2 || "", public_recipient_2: patient.public_recipient_2 || "", public_insurer_3: patient.public_insurer_3 || "", public_recipient_3: patient.public_recipient_3 || "", postal_code: patient.postal_code || "", address: patient.address || "", occupation: patient.occupation || "", notes: patient.notes || "" });
     setShowInsurance(false);
     setShowDiagForm(false);
     const age = getAge(patient.date_of_birth);
@@ -218,9 +226,14 @@ function ChartContent() {
 
   async function saveInsurance() {
     if (!selectedPatient) return; setSaving(true);
-    await supabase.from("patients").update(insForm).eq("id", selectedPatient.id);
-    setSelectedPatient({ ...selectedPatient, ...insForm });
-    setAllPatients(allPatients.map(p => p.id === selectedPatient.id ? { ...p, ...insForm } : p));
+    const updateData: Record<string, unknown> = { ...insForm };
+    // 空文字のdate型をnullに変換
+    ["insurance_valid_from", "insurance_valid_until", "public_valid_from", "public_valid_until"].forEach(k => {
+      if (!updateData[k]) updateData[k] = null;
+    });
+    await supabase.from("patients").update(updateData).eq("id", selectedPatient.id);
+    setSelectedPatient({ ...selectedPatient, ...insForm } as Patient);
+    setAllPatients(allPatients.map(p => p.id === selectedPatient.id ? { ...p, ...insForm } as Patient : p));
     setSaveMsg("保険情報を保存しました ✅"); setTimeout(() => setSaveMsg(""), 2000); setSaving(false); setShowInsurance(false);
   }
 
@@ -428,15 +441,91 @@ function ChartContent() {
                 </div>
                 {showInsurance && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div><label className="text-[10px] text-gray-400 block mb-1">性別</label><select value={insForm.sex} onChange={e => setInsForm({...insForm, sex: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="1">男</option><option value="2">女</option></select></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">保険者番号（8桁）</label><input value={insForm.insurer_number} onChange={e => setInsForm({...insForm, insurer_number: e.target.value})} placeholder="01130012" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者記号</label><input value={insForm.insured_symbol} onChange={e => setInsForm({...insForm, insured_symbol: e.target.value})} placeholder="751-743" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">被保険者番号</label><input value={insForm.insured_number} onChange={e => setInsForm({...insForm, insured_number: e.target.value})} placeholder="1045" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">枝番</label><input value={insForm.insured_branch} onChange={e => setInsForm({...insForm, insured_branch: e.target.value})} placeholder="01" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label><input value={insForm.public_insurer} onChange={e => setInsForm({...insForm, public_insurer: e.target.value})} placeholder="82230004" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div><label className="text-[10px] text-gray-400 block mb-1">公費受給者番号</label><input value={insForm.public_recipient} onChange={e => setInsForm({...insForm, public_recipient: e.target.value})} placeholder="9999996" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
-                      <div className="flex items-end"><button onClick={saveInsurance} disabled={saving} className="w-full bg-sky-600 text-white py-1.5 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">💾 保存</button></div>
+                    {/* タブ */}
+                    <div className="flex gap-0 mb-3 border-b border-gray-200">
+                      {([
+                        { key: "basic" as const, label: "患者詳細" },
+                        { key: "insurance" as const, label: "保険詳細" },
+                        { key: "pub1" as const, label: "第一公費" },
+                        { key: "pub2" as const, label: "第二公費" },
+                        { key: "pub3" as const, label: "第三公費" },
+                      ]).map(t => (
+                        <button key={t.key} onClick={() => setInsTab(t.key)}
+                          className={`px-3 py-2 text-[11px] font-bold border-b-2 transition-colors ${insTab === t.key ? "border-sky-500 text-sky-600" : "border-transparent text-gray-400 hover:text-gray-600"}`}>{t.label}</button>
+                      ))}
+                      <div className="flex-1" />
+                      <span className="text-[10px] text-red-500 font-bold self-center mr-2">負担率: {selectedPatient.burden_ratio ? Math.round(Number(selectedPatient.burden_ratio) * 10) : 3}割</span>
+                    </div>
+
+                    {/* 患者詳細タブ */}
+                    {insTab === "basic" && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><label className="text-[10px] text-gray-400 block mb-1">性別</label><select value={String(insForm.sex)} onChange={e => setInsForm({...insForm, sex: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="1">男</option><option value="2">女</option></select></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">〒 郵便番号</label><input value={String(insForm.postal_code)} onChange={e => setInsForm({...insForm, postal_code: e.target.value})} placeholder="123-4567" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div className="col-span-2"><label className="text-[10px] text-gray-400 block mb-1">住所</label><input value={String(insForm.address)} onChange={e => setInsForm({...insForm, address: e.target.value})} placeholder="東京都..." className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">職業</label><input value={String(insForm.occupation)} onChange={e => setInsForm({...insForm, occupation: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div className="col-span-3"><label className="text-[10px] text-gray-400 block mb-1">備考</label><input value={String(insForm.notes)} onChange={e => setInsForm({...insForm, notes: e.target.value})} placeholder="100文字まで" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      </div>
+                    )}
+
+                    {/* 保険詳細タブ */}
+                    {insTab === "insurance" && (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div><label className="text-[10px] text-gray-400 block mb-1">保険者番号（8桁）</label><input value={String(insForm.insurer_number)} onChange={e => setInsForm({...insForm, insurer_number: e.target.value})} placeholder="01130012" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">被保険者記号</label><input value={String(insForm.insured_symbol)} onChange={e => setInsForm({...insForm, insured_symbol: e.target.value})} placeholder="751-743" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">被保険者番号</label><input value={String(insForm.insured_number)} onChange={e => setInsForm({...insForm, insured_number: e.target.value})} placeholder="1045" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">枝番</label><input value={String(insForm.insured_branch)} onChange={e => setInsForm({...insForm, insured_branch: e.target.value})} placeholder="01" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div><label className="text-[10px] text-gray-400 block mb-1">続柄</label><select value={String(insForm.insurance_relation)} onChange={e => setInsForm({...insForm, insurance_relation: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="self">本人</option><option value="family">家族</option></select></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">被保険者名</label><input value={String(insForm.insured_name)} onChange={e => setInsForm({...insForm, insured_name: e.target.value})} placeholder="家族の場合のみ" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">資格取得日</label><input type="date" value={String(insForm.insurance_valid_from)} onChange={e => setInsForm({...insForm, insurance_valid_from: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">有効期限</label><input type="date" value={String(insForm.insurance_valid_until)} onChange={e => setInsForm({...insForm, insurance_valid_until: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div><label className="text-[10px] text-gray-400 block mb-1">保険者名称</label><input value={String(insForm.insurer_name)} onChange={e => setInsForm({...insForm, insurer_name: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">保険者所在地</label><input value={String(insForm.insurer_address)} onChange={e => setInsForm({...insForm, insurer_address: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">保険者電話番号</label><input value={String(insForm.insurer_phone)} onChange={e => setInsForm({...insForm, insurer_phone: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                          <div><label className="text-[10px] text-gray-400 block mb-1">所得区分</label><select value={String(insForm.income_category)} onChange={e => setInsForm({...insForm, income_category: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"><option value="">-</option><option value="ア">ア</option><option value="イ">イ</option><option value="ウ">ウ</option><option value="エ">エ</option><option value="オ">オ</option><option value="低所得I">低所得I</option><option value="低所得II">低所得II</option></select></div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="flex items-center gap-2 pt-4"><input type="checkbox" checked={!!insForm.high_cost_medical} onChange={e => setInsForm({...insForm, high_cost_medical: e.target.checked})} className="rounded" /><span className="text-xs text-gray-600">高額療養費あり</span></div>
+                          <div className="flex items-center gap-2 pt-4"><input type="checkbox" checked={!!insForm.disability_flag} onChange={e => setInsForm({...insForm, disability_flag: e.target.checked})} className="rounded" /><span className="text-xs text-gray-600">障害者区分あり</span></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 第一公費タブ */}
+                    {insTab === "pub1" && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label><input value={String(insForm.public_insurer)} onChange={e => setInsForm({...insForm, public_insurer: e.target.value})} placeholder="82230004" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">受給者番号</label><input value={String(insForm.public_recipient)} onChange={e => setInsForm({...insForm, public_recipient: e.target.value})} placeholder="9999996" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">有効期限（開始）</label><input type="date" value={String(insForm.public_valid_from)} onChange={e => setInsForm({...insForm, public_valid_from: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">有効期限（終了）</label><input type="date" value={String(insForm.public_valid_until)} onChange={e => setInsForm({...insForm, public_valid_until: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                      </div>
+                    )}
+
+                    {/* 第二公費タブ */}
+                    {insTab === "pub2" && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label><input value={String(insForm.public_insurer_2)} onChange={e => setInsForm({...insForm, public_insurer_2: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">受給者番号</label><input value={String(insForm.public_recipient_2)} onChange={e => setInsForm({...insForm, public_recipient_2: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div className="col-span-2"><p className="text-[10px] text-gray-300 pt-5">第二公費が必要な場合のみ入力</p></div>
+                      </div>
+                    )}
+
+                    {/* 第三公費タブ */}
+                    {insTab === "pub3" && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><label className="text-[10px] text-gray-400 block mb-1">公費負担者番号</label><input value={String(insForm.public_insurer_3)} onChange={e => setInsForm({...insForm, public_insurer_3: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div><label className="text-[10px] text-gray-400 block mb-1">受給者番号</label><input value={String(insForm.public_recipient_3)} onChange={e => setInsForm({...insForm, public_recipient_3: e.target.value})} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+                        <div className="col-span-2"><p className="text-[10px] text-gray-300 pt-5">第三公費が必要な場合のみ入力</p></div>
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex justify-end">
+                      <button onClick={saveInsurance} disabled={saving} className="bg-sky-600 text-white px-6 py-2 rounded-lg text-xs font-bold hover:bg-sky-700 disabled:opacity-50">💾 保存</button>
                     </div>
                   </div>
                 )}
