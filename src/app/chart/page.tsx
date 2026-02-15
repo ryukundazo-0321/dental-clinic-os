@@ -17,8 +17,6 @@ type Patient = {
   public_valid_from?: string; public_valid_until?: string;
   public_insurer_2?: string; public_recipient_2?: string; public_insurer_3?: string; public_recipient_3?: string;
   postal_code?: string; address?: string; occupation?: string; notes?: string;
-  insured_number?: string; insured_branch?: string;
-  public_insurer?: string; public_recipient?: string;
 };
 
 type MedicalRecord = {
