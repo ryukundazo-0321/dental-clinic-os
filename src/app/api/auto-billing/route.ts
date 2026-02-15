@@ -139,9 +139,9 @@ export async function POST(request: NextRequest) {
       .join(" ")
       .toLowerCase();
 
-    // 歯番抽出
+    // 歯番抽出（永久歯11-48 + 乳歯51-85）
     const soapRaw = [record.soap_s, record.soap_o, record.soap_a, record.soap_p].filter(Boolean).join(" ");
-    const toothPattern = /[#＃]?\s*([1-4][1-8])\s*(?:番)?/g;
+    const toothPattern = /[#＃]?\s*([1-4][1-8]|[5-8][1-5])\s*(?:番)?/g;
     const extractedTeeth: string[] = [];
     let toothMatch;
     while ((toothMatch = toothPattern.exec(soapRaw)) !== null) {
