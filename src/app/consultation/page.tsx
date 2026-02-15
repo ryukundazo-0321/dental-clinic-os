@@ -102,15 +102,25 @@ export default function ConsultationPage() {
     if (selectedApt?.id === aptId) setSelectedApt((prev) => prev ? { ...prev, doctor_id: doctorId || null } : null);
   }
 
+  function parseScheduledHourMin(apt: Appointment): [number, number] {
+    const raw = apt.scheduled_at;
+    const match = raw.match(/(\d{2}):(\d{2}):(\d{2})/);
+    if (match) return [parseInt(match[1]), parseInt(match[2])];
+    const d = new Date(raw);
+    return [d.getHours(), d.getMinutes()];
+  }
+
   function getAptTime(apt: Appointment) {
-    const d = new Date(apt.scheduled_at);
-    return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
+    const [h, m] = parseScheduledHourMin(apt);
+    return h.toString().padStart(2, "0") + ":" + m.toString().padStart(2, "0");
   }
 
   function getAptEndTime(apt: Appointment) {
-    const d = new Date(apt.scheduled_at);
-    d.setMinutes(d.getMinutes() + (apt.duration_min || 30));
-    return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
+    const [h, m] = parseScheduledHourMin(apt);
+    const totalMin = h * 60 + m + (apt.duration_min || 30);
+    const eh = Math.floor(totalMin / 60);
+    const em = totalMin % 60;
+    return eh.toString().padStart(2, "0") + ":" + em.toString().padStart(2, "0");
   }
 
   function getAge(dob?: string) {
@@ -218,8 +228,7 @@ export default function ConsultationPage() {
                 </div>
                 {visibleCols.map(col => {
                   const colApts = (aptsByColumn.get(col.id) || []).filter(apt => {
-                    const d = new Date(apt.scheduled_at);
-                    return d.getUTCHours() === hour;
+                    return parseScheduledHourMin(apt)[0] === hour;
                   });
                   return (
                     <div key={col.id} className="flex-1 min-w-[160px] border-r border-gray-50 relative px-1 py-0.5">
@@ -227,7 +236,7 @@ export default function ConsultationPage() {
                         const st = STATUS_CONFIG[apt.status] || STATUS_CONFIG.reserved;
                         const duration = apt.duration_min || 30;
                         const blockHeight = Math.max(duration * 2, 48);
-                        const minuteOffset = new Date(apt.scheduled_at).getUTCMinutes();
+                        const minuteOffset = parseScheduledHourMin(apt)[1];
                         const topOffset = minuteOffset * 2;
                         const age = getAge(apt.patients?.date_of_birth);
                         const unitName = units.find(u => u.id === apt.unit_id)?.name;
