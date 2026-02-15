@@ -335,8 +335,12 @@ export async function POST(request: NextRequest) {
           // 3) 9桁数字コードの場合はそのまま使用
           if (!receiptCode && /^\d{9}$/.test(proc.code)) {
             receiptCode = proc.code;
-            const dbFound = dbLookup.get(`__${proc.code}`) ||
-              [...dbLookup.entries()].find(([, v]) => v.rc === proc.code)?.[1];
+            let dbFound = dbLookup.get(`__${proc.code}`);
+            if (!dbFound) {
+              const entries = Array.from(dbLookup.entries());
+              const match = entries.find(([, v]) => v.rc === proc.code);
+              if (match) dbFound = match[1];
+            }
             shikibetsu = dbFound?.sk || "80";
           }
 
