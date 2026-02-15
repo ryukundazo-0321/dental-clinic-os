@@ -129,6 +129,54 @@ const CODE_MAP: Record<string, { rc: string; sk: string }> = {
   "M009-CR": { rc: "312001110", sk: "61" },
 };
 
+// ============================================================
+// [A-2] 歯式コード6桁変換テーブル
+// 支払基金はSIレコードの歯式を6桁で要求する
+// 例: "46" → "004600", "A" (乳歯) → 乳歯コード
+// ============================================================
+const TOOTH_6DIGIT_MAP: Record<string, string> = {
+  // === 永久歯（上顎右: 11-18, 上顎左: 21-28, 下顎左: 31-38, 下顎右: 41-48） ===
+  "11": "001100", "12": "001200", "13": "001300", "14": "001400",
+  "15": "001500", "16": "001600", "17": "001700", "18": "001800",
+  "21": "002100", "22": "002200", "23": "002300", "24": "002400",
+  "25": "002500", "26": "002600", "27": "002700", "28": "002800",
+  "31": "003100", "32": "003200", "33": "003300", "34": "003400",
+  "35": "003500", "36": "003600", "37": "003700", "38": "003800",
+  "41": "004100", "42": "004200", "43": "004300", "44": "004400",
+  "45": "004500", "46": "004600", "47": "004700", "48": "004800",
+  // === 乳歯（上顎右: 51-55, 上顎左: 61-65, 下顎左: 71-75, 下顎右: 81-85） ===
+  "51": "005100", "52": "005200", "53": "005300", "54": "005400", "55": "005500",
+  "61": "006100", "62": "006200", "63": "006300", "64": "006400", "65": "006500",
+  "71": "007100", "72": "007200", "73": "007300", "74": "007400", "75": "007500",
+  "81": "008100", "82": "008200", "83": "008300", "84": "008400", "85": "008500",
+  // === 乳歯アルファベット表記 → FDI番号への変換 ===
+  "A": "005500", "B": "005400", "C": "005300", "D": "005200", "E": "005100",
+  "F": "006500", "G": "006400", "H": "006300", "I": "006200", "J": "006100",
+  "K": "007100", "L": "007200", "M": "007300", "N": "007400", "O": "007500",
+  "P": "008500", "Q": "008400", "R": "008300", "S": "008200", "T": "008100",
+};
+
+/**
+ * [A-2] 歯番号を6桁コードに変換
+ * 入力例: "46", "#46", "11", "A"
+ * 出力例: "004600", "001100", "005500"
+ */
+function toothTo6Digit(tooth: string): string {
+  // #プレフィックスを除去
+  const cleaned = tooth.replace(/^#/, "").trim();
+  // マップから検索
+  const mapped = TOOTH_6DIGIT_MAP[cleaned];
+  if (mapped) return mapped;
+  // 2桁数字でマップにない場合 → 00XX00 形式で生成
+  if (/^\d{1,2}$/.test(cleaned)) {
+    return cleaned.padStart(4, "0") + "00";
+  }
+  // すでに6桁の場合はそのまま
+  if (/^\d{6}$/.test(cleaned)) return cleaned;
+  // 変換不能 → そのまま返す（警告は呼び出し元で出す）
+  return cleaned;
+}
+
 function toFull(s: string): string {
   return s
     .replace(/[\x21-\x7e]/g, (c) =>
@@ -200,6 +248,17 @@ export async function POST(request: NextRequest) {
       )
     );
 
+    // [A-4] 傷病名マスタ（公式コード変換用）をDBから取得
+    const { data: diagMasterData } = await supabase
+      .from("diagnosis_master")
+      .select("code, icd_code, name, name_kana");
+    const diagMasterByName = new Map(
+      (diagMasterData || []).map((d: { name: string; code: string; icd_code: string }) => [d.name, d])
+    );
+    const diagMasterByCode = new Map(
+      (diagMasterData || []).map((d: { code: string; icd_code: string; name: string }) => [d.code, d])
+    );
+
     // クリニック情報
     const { data: settings } = await supabase
       .from("clinic_settings")
@@ -217,7 +276,11 @@ export async function POST(request: NextRequest) {
     const clinicName = clinicInfo?.name || "";
     const facilityCode = settings?.facility_code || "0117";
 
-    // 患者ごとにbillingをまとめる
+    // ============================================================
+    // [A-1] 同一患者の月内billing統合
+    // 1患者 = 1レセプト にまとめる（これがないと即返戻）
+    // 同じ患者の複数回来院分を統合し、点数を合算する
+    // ============================================================
     const patientMap = new Map<string, typeof billings>();
     for (const b of billings) {
       const pid = b.patient_id;
@@ -254,31 +317,48 @@ export async function POST(request: NextRequest) {
       const dob = toYMD(String(pat.date_of_birth || ""));
       const burdenRatio = Number(pat.burden_ratio || 0.3);
       const burdenCode = Math.round(burdenRatio * 10);
+
+      // ============================================================
+      // [A-1] 患者の月内合計点数を算出（全billing分を合算）
+      // ============================================================
       const patientTotalPoints = pBillings.reduce(
         (s: number, b: { total_points: number }) => s + b.total_points, 0
       );
       totalPointsAll += patientTotalPoints;
 
       // === RE レコード（レセプト共通） ===
+      // [A-1] 1患者につき1つのREレコードのみ出力（統合済み）
       lines.push(
         `RE,${receiptNo},${insCode}1${burdenCode}2,${yearMonth},${pat.name_kanji || ""},${sexCode},${dob},${burdenCode * 10},,,,1,,,,,${pat.name_kana || ""},`
       );
 
-      // === HO レコード（保険者） ===
+      // ============================================================
+      // [A-3] 保険者番号の0パディング（8桁に統一）
+      // 支払基金は8桁固定。桁数不足だと受付エラーで弾かれる
+      // ============================================================
       if (pat.insurer_number) {
+        const insurerNum = String(pat.insurer_number).padStart(8, "0");
+        const insuredSymbol = pat.insured_symbol ? toFull(String(pat.insured_symbol)) : "";
+        const insuredNum = pat.insured_number ? String(pat.insured_number) : "";
         lines.push(
-          `HO,${String(pat.insurer_number).padStart(8, "0")},,${toFull(String(pat.insured_symbol || ""))},${pat.insured_number || ""},${patientTotalPoints},,,,,,,,`
+          `HO,${insurerNum},,${insuredSymbol},${insuredNum},${patientTotalPoints},,,,,,,,`
         );
       }
 
       // === KO レコード（公費） ===
-      if (pat.public_insurer) {
+      if (pat.public_expense_type) {
+        const publicInsurer = String(pat.public_expense_type).padStart(8, "0");
+        const publicRecipient = pat.public_expense_recipient ? String(pat.public_expense_recipient).padStart(7, "0") : "";
         lines.push(
-          `KO,${pat.public_insurer},${pat.public_recipient || ""},,1,${patientTotalPoints},,,,`
+          `KO,${publicInsurer},${publicRecipient},,1,${patientTotalPoints},,,,`
         );
       }
 
-      // === SY レコード（傷病名部位） ===
+      // ============================================================
+      // [A-4] SY レコード（傷病名部位）— 公式マスタコード変換
+      // patient_diagnosesのdiagnosis_codeを公式コードに変換する
+      // 独自コードのままだと全レセプト返戻リスクあり
+      // ============================================================
       const { data: diagData } = await supabase
         .from("patient_diagnoses")
         .select("*")
@@ -295,13 +375,42 @@ export async function POST(request: NextRequest) {
           const endYM = d.end_date
             ? d.end_date.replace(/-/g, "").substring(0, 6)
             : "";
+
+          // [A-4] 傷病名コードの公式マスタ変換
+          let diagCode = d.diagnosis_code || "";
+          const diagName = d.diagnosis_name || "";
+
+          // まず diagnosis_master で公式コードを検索
+          // 1) コードでマスタを検索
+          const masterByCode = diagMasterByCode.get(diagCode);
+          if (masterByCode && masterByCode.icd_code) {
+            // マスタにICD-10コードがあればそれを使用
+            diagCode = masterByCode.code;
+          }
+          // 2) コードで見つからなければ名称でマスタを検索
+          if (!masterByCode) {
+            const masterByName = diagMasterByName.get(diagName);
+            if (masterByName) {
+              diagCode = masterByName.code;
+            } else {
+              // マスタに見つからない場合は警告
+              warnings.push(`傷病名マスタ未登録: "${diagName}" (code: ${d.diagnosis_code})`);
+            }
+          }
+
+          // 歯番号の#除去
+          const toothNum = (d.tooth_number || "").replace(/#/g, "");
+
           lines.push(
-            `SY,${d.diagnosis_code || ""},${d.diagnosis_name || ""},${startYM},${outcomeCode},${endYM},${d.modifier_code || ""},${(d.tooth_number || "").replace(/#/g, "")}`
+            `SY,${diagCode},${diagName},${startYM},${outcomeCode},${endYM},${d.modifier_code || ""},${toothNum}`
           );
         }
       }
 
-      // === SI レコード（歯科診療行為） ===
+      // ============================================================
+      // [A-1] SI レコード（歯科診療行為）— 全billing分を統合出力
+      // 同一患者の複数回来院分の処置をすべて1レセプトに含める
+      // ============================================================
       for (const b of pBillings) {
         const procs = (b.procedures_detail || []) as {
           code: string; name: string; points: number; count: number;
@@ -322,7 +431,6 @@ export async function POST(request: NextRequest) {
 
           // 2) DBから検索（CODE_MAPにないコード用）
           if (!receiptCode) {
-            // kubun_code部分を抽出して検索
             const codeParts = proc.code.split("-");
             const kubun = codeParts[0];
             const sub = codeParts.slice(1).join("-") || "";
@@ -350,7 +458,6 @@ export async function POST(request: NextRequest) {
           if (!receiptCode) {
             warnings.push(`receipt_code未解決: ${proc.code} (${proc.name})`);
             receiptCode = proc.code;
-            // カテゴリから推定
             const c = proc.code.charAt(0);
             if (c === "A") shikibetsu = "11";
             else if (c === "B" || c === "H") shikibetsu = "13";
@@ -363,20 +470,36 @@ export async function POST(request: NextRequest) {
             else shikibetsu = "80";
           }
 
-          const teethStr =
-            proc.tooth_numbers && proc.tooth_numbers.length > 0
-              ? proc.tooth_numbers.map((t: string) => t.replace(/^#/, "")).join(" ")
-              : "";
-          const futanKubun = pat.public_insurer ? "1" : "";
+          // ============================================================
+          // [A-2] 歯式コード6桁変換
+          // "46" → "004600" のように支払基金が要求する6桁形式に変換
+          // ============================================================
+          let teethStr = "";
+          if (proc.tooth_numbers && proc.tooth_numbers.length > 0) {
+            const converted = proc.tooth_numbers.map((t: string) => {
+              const sixDigit = toothTo6Digit(t);
+              // 変換結果が6桁数字でない場合は警告
+              if (!/^\d{6}$/.test(sixDigit)) {
+                warnings.push(`歯式6桁変換失敗: "${t}" → "${sixDigit}"`);
+              }
+              return sixDigit;
+            });
+            teethStr = converted.join(" ");
+          }
 
-          // SI,診療識別,負担区分,診療行為コード(9桁),歯式,,点数,回数
+          const futanKubun = pat.public_expense_type ? "1" : "";
+
+          // SI,診療識別,負担区分,診療行為コード(9桁),歯式(6桁),,点数,回数
           lines.push(
             `SI,${shikibetsu},${futanKubun},${receiptCode},${teethStr},,${proc.points},${proc.count}`
           );
         }
       }
 
-      // === JD レコード（受診日等） ===
+      // ============================================================
+      // [A-1] JD レコード（受診日等）— 全billing分の受診日を統合
+      // 月内の全来院日を1つのJDレコードにまとめる
+      // ============================================================
       const visitDays = pBillings.map(
         (b: { created_at: string }) => new Date(b.created_at).getDate()
       );
@@ -390,6 +513,7 @@ export async function POST(request: NextRequest) {
       lines.push(`JD,${uniqueDays.length},${dayFlags.join(",")}`);
 
       // === MF レコード（窓口負担額） ===
+      // [A-1] 統合後の合計点数から窓口負担を計算
       const windowAmount = Math.round(patientTotalPoints * 10 * burdenRatio);
       lines.push(`MF,${windowAmount}`);
     }
