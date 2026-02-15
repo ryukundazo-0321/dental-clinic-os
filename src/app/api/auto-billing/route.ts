@@ -455,20 +455,20 @@ export async function POST(request: NextRequest) {
     // 義歯新製: 精密印象 + 咬合採得 + 義歯装着 + 補綴時診断
     // 形成あり: TEK（仮歯）
     // ============================================================
-    const existingCodes = Array.from(addedCodes);
-    const hasProsthMain = existingCodes.some(c =>
+    const prosthCodes = Array.from(addedCodes);
+    const hasProsthMain = prosthCodes.some(c =>
       c.startsWith("M-CRN-") || c.startsWith("M003-") || c === "BR-PON" ||
       c.startsWith("M-IN-") || c.startsWith("M001-3")
     );
-    const hasDentureNew = existingCodes.some(c =>
+    const hasDentureNew = prosthCodes.some(c =>
       c.startsWith("DEN-1-") || c.startsWith("DEN-5-") || c.startsWith("DEN-9-") ||
       c.startsWith("DEN-12-") || c.startsWith("DEN-FULL")
     );
-    const hasFormation = existingCodes.some(c =>
+    const hasFormation = prosthCodes.some(c =>
       c === "M001-1" || c === "M001-2" || c === "M001-fuku" ||
       c === "M001-sho" || c === "M003-1" || c === "M003-2" || c === "M003-3"
     );
-    const isDenMaintenance = existingCodes.some(c =>
+    const isDenMaintenance = prosthCodes.some(c =>
       c === "DEN-ADJ" || c === "DEN-REP" || c === "DEN-RELINE"
     );
 
@@ -494,7 +494,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 支台築造があれば形成も追加
-    if (existingCodes.some(c => c === "M-POST" || c === "M-POST-cast")) {
+    if (prosthCodes.some(c => c === "M-POST" || c === "M-POST-cast")) {
       addItem("M001-1", 1, extractedTeeth); // 窩洞形成（単純）
     }
 
@@ -605,8 +605,8 @@ export async function POST(request: NextRequest) {
         addedMaterials.add(matKey);
 
         // 材料費の点数計算: 単価 × 数量 / 10（五捨五超入）
-        const totalPrice = mat.unit_price * mat.default_quantity;
-        const materialPoints = totalPrice <= 15 ? (totalPrice > 0 ? 1 : 0) : Math.round(totalPrice / 10);
+        const matTotalPrice = mat.unit_price * mat.default_quantity;
+        const materialPoints = matTotalPrice <= 15 ? (matTotalPrice > 0 ? 1 : 0) : Math.round(matTotalPrice / 10);
 
         // 金パラ（金属）は薬価基準で変動するため、点数0で注意を促す
         if (mat.unit_price === 0) {
@@ -731,13 +731,13 @@ export async function POST(request: NextRequest) {
     let billErr = null;
 
     if (existingBilling && existingBilling.length > 0) {
-      const res = await supabase.from("billing").update(billingData).eq("record_id", recordId).select().single();
-      billing = res.data;
-      billErr = res.error;
+      const updateRes = await supabase.from("billing").update(billingData).eq("record_id", recordId).select().single();
+      billing = updateRes.data;
+      billErr = updateRes.error;
     } else {
-      const res = await supabase.from("billing").insert(billingData).select().single();
-      billing = res.data;
-      billErr = res.error;
+      const insertRes = await supabase.from("billing").insert(billingData).select().single();
+      billing = insertRes.data;
+      billErr = insertRes.error;
     }
 
     if (billErr) {
