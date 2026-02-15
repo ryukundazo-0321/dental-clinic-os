@@ -1,639 +1,617 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import * as iconv from "iconv-lite";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// 型定義
-interface FeeItem {
-  code: string;
-  name: string;
-  points: number;
-  category: string;
-  conditions: { note?: string };
-}
-
-interface BillingPattern {
-  pattern_name: string;
-  category: string;
-  soap_keywords: string[];
-  soap_exclude_keywords: string[];
-  fee_codes: string[];
-  use_tooth_numbers: boolean;
-  condition: { and_keywords?: string[] };
-  priority: number;
-}
-
-interface SelectedItem {
-  code: string;
-  name: string;
-  points: number;
-  category: string;
-  count: number;
-  note: string;
-  tooth_numbers: string[];
-}
-
-interface FacilityBonus {
-  facility_code: string;
-  target_kubun: string;
-  target_sub: string;
-  bonus_points: number;
-  bonus_type: string;
-  condition: string;
-}
+// ============================================================
+// 独自code → 公式9桁コード + 診療識別コード マッピング
+// auto-billingのprocedures_detail.codeから確実に変換する
+// ============================================================
+const CODE_MAP: Record<string, { rc: string; sk: string }> = {
+  // 初・再診料 (診療識別: 11=初診, 12=再診)
+  "A000": { rc: "301000110", sk: "11" },
+  "A000-2": { rc: "301000210", sk: "11" },
+  "A000-meisai": { rc: "301000370", sk: "11" },
+  "A000-nyuji": { rc: "301000550", sk: "11" },
+  "A002": { rc: "301001610", sk: "12" },
+  "A002-2": { rc: "301001710", sk: "12" },
+  "A002-nyuji": { rc: "301002750", sk: "12" },
+  // 医学管理等 (診療識別: 13)
+  "A001-a": { rc: "302000610", sk: "13" },
+  "A001-b": { rc: "301002750", sk: "12" },
+  "B000-4": { rc: "302000110", sk: "13" },
+  "B000-4-doc": { rc: "302000150", sk: "13" },
+  "B000-4-choki": { rc: "302000170", sk: "13" },
+  "B000-4-info": { rc: "302000160", sk: "13" },
+  "B000-8": { rc: "302005010", sk: "13" },
+  "B001-2": { rc: "302000610", sk: "13" },
+  "B002": { rc: "302000710", sk: "13" },
+  "B004-6-2": { rc: "302003510", sk: "13" },
+  // 検査・画像 (診療識別: 31)
+  "D001": { rc: "306000110", sk: "31" },
+  "D002-1": { rc: "306000210", sk: "31" },
+  "D002-2": { rc: "306000310", sk: "31" },
+  "D002-mix": { rc: "306000410", sk: "31" },
+  "D009": { rc: "306001010", sk: "31" },
+  "E100-1": { rc: "307000110", sk: "31" },
+  "E100-pano": { rc: "307000510", sk: "31" },
+  "E100-ct": { rc: "307001010", sk: "31" },
+  "E100-1-diag": { rc: "307000150", sk: "31" },
+  "E200-diag": { rc: "307100110", sk: "31" },
+  // 投薬 (診療識別: 21)
+  "F100": { rc: "305000110", sk: "21" },
+  "F200": { rc: "305001010", sk: "21" },
+  "F400": { rc: "305000610", sk: "21" },
+  "F500": { rc: "305000810", sk: "21" },
+  // 処置 (診療識別: 41=処置・手術1)
+  "I000-1": { rc: "309000110", sk: "41" },
+  "I000-2": { rc: "309000210", sk: "41" },
+  "I000-3": { rc: "309000310", sk: "41" },
+  "I000-4": { rc: "309000410", sk: "41" },
+  "I005-1": { rc: "309002110", sk: "41" },
+  "I005-2": { rc: "309002210", sk: "41" },
+  "I005-3": { rc: "309002310", sk: "41" },
+  "I006-1": { rc: "309002410", sk: "41" },
+  "I006-2": { rc: "309002510", sk: "41" },
+  "I006-3": { rc: "309002610", sk: "41" },
+  "I007-1": { rc: "309002710", sk: "41" },
+  "I007-2": { rc: "309002810", sk: "41" },
+  "I007-3": { rc: "309002910", sk: "41" },
+  "I008-1": { rc: "309003610", sk: "41" },
+  "I008-2": { rc: "309003710", sk: "41" },
+  "I008-3": { rc: "309003810", sk: "41" },
+  "I010": { rc: "309004010", sk: "41" },
+  "I010-2": { rc: "309004110", sk: "41" },
+  "I011-1": { rc: "309004810", sk: "41" },
+  "I011-2": { rc: "309004910", sk: "41" },
+  "I011-1-3": { rc: "309005510", sk: "41" },
+  "I011-2-1": { rc: "309005010", sk: "41" },
+  "I011-2-2": { rc: "309005110", sk: "41" },
+  "I011-2-3": { rc: "309005210", sk: "41" },
+  "P-SC": { rc: "309004810", sk: "41" },
+  "P-SRP": { rc: "309005210", sk: "41" },
+  "P-SRP-zen": { rc: "309005010", sk: "41" },
+  "P-SRP-sho": { rc: "309005110", sk: "41" },
+  "I014": { rc: "309006010", sk: "41" },
+  "I017": { rc: "309007010", sk: "41" },
+  "I020": { rc: "309008010", sk: "41" },
+  "I020-direct": { rc: "309008110", sk: "41" },
+  "I029": { rc: "309010010", sk: "41" },
+  "I030": { rc: "309010110", sk: "41" },
+  "I030-2": { rc: "309010210", sk: "41" },
+  "I032": { rc: "309011010", sk: "41" },
+  "I032-dh": { rc: "309011020", sk: "41" },
+  // 手術 (診療識別: 42=手術2(抜歯等), 43=手術3)
+  "J-SEAL": { rc: "310099010", sk: "41" },
+  "SEALANT": { rc: "310099010", sk: "41" },
+  "J000-1": { rc: "310000010", sk: "42" },
+  "J000-2": { rc: "310000110", sk: "42" },
+  "J000-3": { rc: "310000210", sk: "42" },
+  "J000-4": { rc: "310000410", sk: "42" },
+  "J000-5": { rc: "310000510", sk: "42" },
+  "J000-6": { rc: "310000310", sk: "42" },
+  "J001": { rc: "310001010", sk: "43" },
+  "J001-2": { rc: "310001210", sk: "43" },
+  "J002": { rc: "310002010", sk: "43" },
+  "J003": { rc: "310003010", sk: "43" },
+  "J004": { rc: "310004010", sk: "43" },
+  "J004-2": { rc: "310004110", sk: "43" },
+  "J004-2-1": { rc: "310004210", sk: "43" },
+  "J004-2-2": { rc: "310004220", sk: "43" },
+  "J006": { rc: "310006010", sk: "43" },
+  "J063": { rc: "310063010", sk: "43" },
+  "J084": { rc: "310084010", sk: "43" },
+  // 麻酔 (診療識別: 54)
+  "K001-1": { rc: "311000210", sk: "54" },
+  "K001-2": { rc: "311000310", sk: "54" },
+  "K002": { rc: "311001010", sk: "54" },
+  // 歯冠修復・欠損補綴 (診療識別: 61-64)
+  "M-ADJ": { rc: "312090010", sk: "64" },
+  "M-DEBOND": { rc: "312080010", sk: "64" },
+  "M-DEBOND2": { rc: "312080020", sk: "64" },
+  "M000-2": { rc: "312000210", sk: "61" },
+  "M001-1": { rc: "312001110", sk: "61" },
+  "M001-2": { rc: "312001210", sk: "61" },
+  "M001-sho": { rc: "312001110", sk: "61" },
+  "M001-3-1": { rc: "312001310", sk: "61" },
+  "M001-3-2": { rc: "312001410", sk: "61" },
+  "M002-1": { rc: "312002110", sk: "61" },
+  "M002-2": { rc: "312002210", sk: "61" },
+  "M003-1": { rc: "312003110", sk: "62" },
+  "M003-2": { rc: "312003210", sk: "62" },
+  "M003-3": { rc: "312003310", sk: "62" },
+  "M003-2-1": { rc: "312003510", sk: "62" },
+  "M003-2-2": { rc: "312003610", sk: "62" },
+  "M003-2-3": { rc: "312003710", sk: "62" },
+  "M005": { rc: "312005010", sk: "62" },
+  "M009-CR": { rc: "312001110", sk: "61" },
+};
 
 // ============================================================
-// [B-1] 医薬品の型定義
+// [A-2] 歯式コード6桁変換テーブル
+// 支払基金はSIレコードの歯式を6桁で要求する
+// 例: "46" → "004600", "A" (乳歯) → 乳歯コード
 // ============================================================
-interface DrugItem {
-  yj_code: string;
-  name: string;
-  unit_price: number;
-  unit: string;
-  dosage_form: string;
-  default_dose: string;
-  default_frequency: string;
-  default_days: number;
-  drug_category: string;
-  receipt_code: string;
+const TOOTH_6DIGIT_MAP: Record<string, string> = {
+  // === 永久歯（上顎右: 11-18, 上顎左: 21-28, 下顎左: 31-38, 下顎右: 41-48） ===
+  "11": "001100", "12": "001200", "13": "001300", "14": "001400",
+  "15": "001500", "16": "001600", "17": "001700", "18": "001800",
+  "21": "002100", "22": "002200", "23": "002300", "24": "002400",
+  "25": "002500", "26": "002600", "27": "002700", "28": "002800",
+  "31": "003100", "32": "003200", "33": "003300", "34": "003400",
+  "35": "003500", "36": "003600", "37": "003700", "38": "003800",
+  "41": "004100", "42": "004200", "43": "004300", "44": "004400",
+  "45": "004500", "46": "004600", "47": "004700", "48": "004800",
+  // === 乳歯（上顎右: 51-55, 上顎左: 61-65, 下顎左: 71-75, 下顎右: 81-85） ===
+  "51": "005100", "52": "005200", "53": "005300", "54": "005400", "55": "005500",
+  "61": "006100", "62": "006200", "63": "006300", "64": "006400", "65": "006500",
+  "71": "007100", "72": "007200", "73": "007300", "74": "007400", "75": "007500",
+  "81": "008100", "82": "008200", "83": "008300", "84": "008400", "85": "008500",
+  // === 乳歯アルファベット表記 → FDI番号への変換 ===
+  "A": "005500", "B": "005400", "C": "005300", "D": "005200", "E": "005100",
+  "F": "006500", "G": "006400", "H": "006300", "I": "006200", "J": "006100",
+  "K": "007100", "L": "007200", "M": "007300", "N": "007400", "O": "007500",
+  "P": "008500", "Q": "008400", "R": "008300", "S": "008200", "T": "008100",
+};
+
+/**
+ * [A-2] 歯番号を6桁コードに変換
+ * 入力例: "46", "#46", "11", "A"
+ * 出力例: "004600", "001100", "005500"
+ */
+function toothTo6Digit(tooth: string): string {
+  // #プレフィックスを除去
+  const cleaned = tooth.replace(/^#/, "").trim();
+  // マップから検索
+  const mapped = TOOTH_6DIGIT_MAP[cleaned];
+  if (mapped) return mapped;
+  // 2桁数字でマップにない場合 → 00XX00 形式で生成
+  if (/^\d{1,2}$/.test(cleaned)) {
+    return cleaned.padStart(4, "0") + "00";
+  }
+  // すでに6桁の場合はそのまま
+  if (/^\d{6}$/.test(cleaned)) return cleaned;
+  // 変換不能 → そのまま返す（警告は呼び出し元で出す）
+  return cleaned;
 }
 
-// ============================================================
-// [B-1] 処方キーワード → 薬名マッピング
-// SOAPに書かれるキーワードから適切な薬を自動選択する
-// ============================================================
-const PRESCRIPTION_KEYWORDS: {
-  keywords: string[];
-  drugNames: string[];
-  category: string;
-  withStomach?: boolean; // NSAIDsの場合、胃薬もセットで出す
-}[] = [
-  // 鎮痛薬
-  {
-    keywords: ["ロキソニン", "ロキソプロフェン", "痛み止め", "鎮痛"],
-    drugNames: ["ロキソプロフェンNa錠60mg"],
-    category: "消炎鎮痛薬",
-    withStomach: true,
-  },
-  {
-    keywords: ["カロナール", "アセトアミノフェン"],
-    drugNames: ["カロナール錠200"],
-    category: "解熱鎮痛薬",
-    withStomach: false,
-  },
-  {
-    keywords: ["ボルタレン", "ジクロフェナク"],
-    drugNames: ["ボルタレン錠25mg"],
-    category: "消炎鎮痛薬",
-    withStomach: true,
-  },
-  {
-    keywords: ["セレコックス", "セレコキシブ"],
-    drugNames: ["セレコックス錠100mg"],
-    category: "消炎鎮痛薬",
-    withStomach: true,
-  },
-  // 抗菌薬
-  {
-    keywords: ["アモキシシリン", "サワシリン", "パセトシン", "ペニシリン"],
-    drugNames: ["アモキシシリンカプセル250mg"],
-    category: "抗菌薬（ペニシリン系）",
-  },
-  {
-    keywords: ["フロモックス", "セフカペン"],
-    drugNames: ["フロモックス錠100mg"],
-    category: "抗菌薬（セフェム系）",
-  },
-  {
-    keywords: ["メイアクト", "セフジトレン"],
-    drugNames: ["メイアクトMS錠100mg"],
-    category: "抗菌薬（セフェム系）",
-  },
-  {
-    keywords: ["ジスロマック", "アジスロマイシン"],
-    drugNames: ["ジスロマック錠250mg"],
-    category: "抗菌薬（マクロライド系）",
-  },
-  {
-    keywords: ["クラリス", "クラリスロマイシン"],
-    drugNames: ["クラリスロマイシン錠200mg"],
-    category: "抗菌薬（マクロライド系）",
-  },
-  // 含嗽薬
-  {
-    keywords: ["アズノール", "うがい"],
-    drugNames: ["アズノールうがい液4%"],
-    category: "含嗽薬",
-  },
-  {
-    keywords: ["イソジン"],
-    drugNames: ["イソジンガーグル液7%"],
-    category: "含嗽薬",
-  },
-  // 口内炎用
-  {
-    keywords: ["口内炎", "アフタ", "デキサメタゾン軟膏"],
-    drugNames: ["デキサメタゾン口腔用軟膏1mg"],
-    category: "口腔用軟膏",
-  },
-  {
-    keywords: ["ケナログ"],
-    drugNames: ["ケナログ口腔用軟膏0.1%"],
-    category: "口腔用軟膏",
-  },
-  // 止血薬
-  {
-    keywords: ["トランサミン", "トラネキサム酸", "止血"],
-    drugNames: ["トランサミンカプセル250mg"],
-    category: "消炎酵素薬",
-  },
-  // 抗ウイルス
-  {
-    keywords: ["バルトレックス", "バラシクロビル", "ヘルペス"],
-    drugNames: ["バラシクロビル錠500mg"],
-    category: "抗ウイルス薬",
-  },
-  // 抗真菌
-  {
-    keywords: ["フロリード", "カンジダ"],
-    drugNames: ["フロリードゲル経口用2%"],
-    category: "抗真菌薬",
-  },
-  // 胃薬（単独処方）
-  {
-    keywords: ["レバミピド", "ムコスタ", "胃薬"],
-    drugNames: ["レバミピド錠100mg"],
-    category: "胃粘膜保護薬",
-  },
-];
+function toFull(s: string): string {
+  return s
+    .replace(/[\x21-\x7e]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) + 0xfee0)
+    )
+    .replace(/ /g, "\u3000");
+}
 
-// 胃薬のデフォルト名
-const DEFAULT_STOMACH_DRUG = "レバミピド錠100mg";
+function toYMD(d: string): string {
+  return d.replace(/-/g, "");
+}
 
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
-
   try {
-    const body = await request.json();
-    const recordId = body.record_id;
-    if (!recordId) return NextResponse.json({ error: "record_id is required" }, { status: 400 });
-
-    // 1. カルテ取得
-    const { data: record, error: recErr } = await supabase
-      .from("medical_records")
-      .select("id, patient_id, appointment_id, soap_s, soap_o, soap_a, soap_p")
-      .eq("id", recordId)
-      .single();
-
-    if (recErr || !record) {
-      return NextResponse.json({ error: "カルテが見つかりません", detail: recErr?.message }, { status: 404 });
+    const { yearMonth, format } = await request.json();
+    if (!yearMonth || yearMonth.length !== 6) {
+      return NextResponse.json(
+        { error: "yearMonth (YYYYMM) is required" },
+        { status: 400 }
+      );
     }
+    const year = yearMonth.substring(0, 4);
+    const month = yearMonth.substring(4, 6);
+    const startDate = `${year}-${month}-01`;
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    const endDate = `${year}-${month}-${String(lastDay).padStart(2, "0")}`;
 
-    // 2. 予約取得（patient_typeを知るため）
-    let isNew = true;
-    if (record.appointment_id) {
-      const { data: apt } = await supabase
-        .from("appointments")
-        .select("patient_type")
-        .eq("id", record.appointment_id)
-        .single();
-      if (apt) isNew = apt.patient_type === "new";
-    }
-
-    // 3. 患者取得（burden_ratioを知るため）
-    let burdenRatio = 0.3;
-    const patientId = record.patient_id;
-    if (patientId) {
-      const { data: pat } = await supabase
-        .from("patients")
-        .select("burden_ratio")
-        .eq("id", patientId)
-        .single();
-      if (pat?.burden_ratio) burdenRatio = pat.burden_ratio;
-    }
-
-    // 4. fee_master取得
-    const { data: feeItems, error: feeErr } = await supabase.from("fee_master").select("*");
-    if (feeErr || !feeItems || feeItems.length === 0) {
-      return NextResponse.json({ error: "点数マスターが空です", detail: feeErr?.message }, { status: 500 });
-    }
-    const feeMap = new Map<string, FeeItem>(feeItems.map((f: FeeItem) => [f.code, f]));
-
-    // 5. 現在有効な改定版を取得
-    const { data: currentRevision } = await supabase
-      .from("fee_revisions")
-      .select("revision_code")
-      .eq("is_current", true)
-      .limit(1)
-      .single();
-    const currentRevCode = currentRevision?.revision_code || "R06";
-
-    // 6. billing_patterns取得（優先度降順、現在の改定版で取得→なければR06フォールバック）
-    let { data: patterns } = await supabase
-      .from("billing_patterns")
+    // === データ取得 ===
+    const { data: billings, error: bErr } = await supabase
+      .from("billing")
       .select("*")
-      .eq("is_active", true)
-      .eq("revision_code", currentRevCode)
-      .order("priority", { ascending: false });
+      .gte("created_at", `${startDate}T00:00:00`)
+      .lte("created_at", `${endDate}T23:59:59`)
+      .eq("payment_status", "paid");
 
-    // 新改定版のパターンがなければR06にフォールバック
-    if ((!patterns || patterns.length === 0) && currentRevCode !== "R06") {
-      const fallback = await supabase
-        .from("billing_patterns")
-        .select("*")
-        .eq("is_active", true)
-        .eq("revision_code", "R06")
-        .order("priority", { ascending: false });
-      patterns = fallback.data;
-    }
+    if (bErr)
+      return NextResponse.json({ error: bErr.message }, { status: 500 });
+    if (!billings || billings.length === 0)
+      return NextResponse.json(
+        { error: "該当月の精算済みデータがありません" },
+        { status: 404 }
+      );
 
-    // 7. 施設基準加算取得
-    let activeBonuses: FacilityBonus[] = [];
-    try {
-      const { data: facilityBonuses } = await supabase
-        .from("facility_bonus")
-        .select("*, facility_standards!inner(is_registered)")
-        .eq("is_active", true)
-        .eq("facility_standards.is_registered", true);
-      if (facilityBonuses) activeBonuses = facilityBonuses as FacilityBonus[];
-    } catch {
-      // facility_bonusテーブルが存在しない場合はスキップ
-    }
-
-    // ============================================================
-    // [B-1] 医薬品マスタ取得
-    // ============================================================
-    const { data: drugItems } = await supabase
-      .from("drug_master")
+    // 患者情報
+    const patientIds = Array.from(
+      new Set(
+        billings.map((b: { patient_id: string }) => b.patient_id)
+      )
+    );
+    const { data: patientsData } = await supabase
+      .from("patients")
       .select("*")
-      .eq("is_active", true);
-    const drugByName = new Map<string, DrugItem>(
-      (drugItems || []).map((d: DrugItem) => [d.name, d])
+      .in("id", patientIds);
+    const patientLookup = new Map(
+      (patientsData || []).map((p: { id: string }) => [p.id, p])
     );
 
-    // 8. SOAPテキスト準備
-    const soapAll = [record.soap_s, record.soap_o, record.soap_a, record.soap_p]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+    // DB上のreceipt_codeマッピング（CODE_MAPに無い場合のフォールバック）
+    const { data: receiptMap } = await supabase
+      .from("fee_master_receipt")
+      .select("kubun_code, sub_code, receipt_code, shinryo_shikibetsu");
+    const dbLookup = new Map(
+      (receiptMap || []).map(
+        (r: { kubun_code: string; sub_code: string; receipt_code: string; shinryo_shikibetsu: string }) => [
+          `${r.kubun_code}__${r.sub_code}`,
+          { rc: r.receipt_code, sk: r.shinryo_shikibetsu },
+        ]
+      )
+    );
 
-    // 歯番抽出（永久歯11-48 + 乳歯51-85）
-    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, record.soap_p].filter(Boolean).join(" ");
-    const toothPattern = /[#＃]?\s*([1-4][1-8]|[5-8][1-5])\s*(?:番)?/g;
-    const extractedTeeth: string[] = [];
-    let toothMatch;
-    while ((toothMatch = toothPattern.exec(soapRaw)) !== null) {
-      const num = toothMatch[1];
-      if (!extractedTeeth.includes(num)) extractedTeeth.push(num);
+    // [A-4] 傷病名マスタ（公式コード変換用）をDBから取得
+    const { data: diagMasterData } = await supabase
+      .from("diagnosis_master")
+      .select("code, icd_code, name, name_kana");
+    const diagMasterByName = new Map(
+      (diagMasterData || []).map((d: { name: string; code: string; icd_code: string }) => [d.name, d])
+    );
+    const diagMasterByCode = new Map(
+      (diagMasterData || []).map((d: { code: string; icd_code: string; name: string }) => [d.code, d])
+    );
+
+    // クリニック情報
+    const { data: settings } = await supabase
+      .from("clinic_settings")
+      .select("*")
+      .limit(1)
+      .single();
+    const { data: clinicInfo } = await supabase
+      .from("clinics")
+      .select("name, phone")
+      .limit(1)
+      .single();
+    const clinicCode = settings?.clinic_code || "3101471";
+    const clinicPref = settings?.prefecture_code || "23";
+    const clinicPhone = clinicInfo?.phone || "0000-00-0000";
+    const clinicName = clinicInfo?.name || "";
+    const facilityCode = settings?.facility_code || "0117";
+
+    // ============================================================
+    // [A-1] 同一患者の月内billing統合
+    // 1患者 = 1レセプト にまとめる（これがないと即返戻）
+    // 同じ患者の複数回来院分を統合し、点数を合算する
+    // ============================================================
+    const patientMap = new Map<string, typeof billings>();
+    for (const b of billings) {
+      const pid = b.patient_id;
+      if (!patientMap.has(pid)) patientMap.set(pid, []);
+      patientMap.get(pid)!.push(b);
     }
 
-    const selectedItems: SelectedItem[] = [];
-    const addedCodes = new Set<string>();
+    const lines: string[] = [];
+    const warnings: string[] = [];
 
-    // addItem関数（重複防止付き）
-    const addItem = (code: string, count = 1, teeth: string[] = []) => {
-      if (addedCodes.has(code)) return;
-      const fee = feeMap.get(code);
-      if (fee) {
-        addedCodes.add(code);
-        selectedItems.push({
-          code: fee.code,
-          name: fee.name,
-          points: fee.points,
-          category: fee.category,
-          count,
-          note: fee.conditions?.note || "",
-          tooth_numbers: teeth,
-        });
+    // === UK レコード（受付情報） ===
+    lines.push(
+      `UK,1,${clinicPref},3,${clinicCode},,${toFull(clinicName)},${yearMonth},${facilityCode},00`
+    );
+
+    // === IR レコード（医療機関情報） ===
+    lines.push(
+      `IR,1,${clinicPref},3,${clinicCode},,${yearMonth},${clinicPhone},${facilityCode}`
+    );
+
+    let receiptNo = 0;
+    let totalPointsAll = 0;
+
+    const patientKeys = Array.from(patientMap.keys());
+    for (const patientId of patientKeys) {
+      const pBillings = patientMap.get(patientId)!;
+      receiptNo++;
+      const pat = patientLookup.get(patientId) as Record<string, unknown> | undefined;
+      if (!pat) continue;
+
+      const insType = String(pat.insurance_type || "社保");
+      const insCode = insType === "国保" ? "3" : insType === "後期高齢" ? "7" : "1";
+      const sexCode = String(pat.sex || "2") === "男" || String(pat.sex || "2") === "1" ? "1" : "2";
+      const dob = toYMD(String(pat.date_of_birth || ""));
+      const burdenRatio = Number(pat.burden_ratio || 0.3);
+      const burdenCode = Math.round(burdenRatio * 10);
+
+      // ============================================================
+      // [A-1] 患者の月内合計点数を算出（全billing分を合算）
+      // ============================================================
+      const patientTotalPoints = pBillings.reduce(
+        (s: number, b: { total_points: number }) => s + b.total_points, 0
+      );
+      totalPointsAll += patientTotalPoints;
+
+      // === RE レコード（レセプト共通） ===
+      // [A-1] 1患者につき1つのREレコードのみ出力（統合済み）
+      lines.push(
+        `RE,${receiptNo},${insCode}1${burdenCode}2,${yearMonth},${pat.name_kanji || ""},${sexCode},${dob},${burdenCode * 10},,,,1,,,,,${pat.name_kana || ""},`
+      );
+
+      // ============================================================
+      // [A-3] 保険者番号の0パディング（8桁に統一）
+      // 支払基金は8桁固定。桁数不足だと受付エラーで弾かれる
+      // ============================================================
+      if (pat.insurer_number) {
+        const insurerNum = String(pat.insurer_number).padStart(8, "0");
+        const insuredSymbol = pat.insured_symbol ? toFull(String(pat.insured_symbol)) : "";
+        const insuredNum = pat.insured_number ? String(pat.insured_number) : "";
+        lines.push(
+          `HO,${insurerNum},,${insuredSymbol},${insuredNum},${patientTotalPoints},,,,,,,,`
+        );
       }
-    };
 
-    // ============================================================
-    // 9. 基本診療料（初診/再診は常に自動追加）
-    // ============================================================
-    if (isNew) {
-      addItem("A000");
-      addItem("A001-a");
-    } else {
-      addItem("A002");
-      addItem("A001-b");
-    }
-
-    // ============================================================
-    // 10. billing_patternsによるパターンマッチング
-    // ============================================================
-    if (patterns && patterns.length > 0) {
-      const exclusiveCategories = new Set(["endo", "anesthesia", "basic"]);
-      const matchedExclusive = new Set<string>();
-
-      for (const pattern of patterns as BillingPattern[]) {
-        if (pattern.category === "basic") continue;
-        if (exclusiveCategories.has(pattern.category) && matchedExclusive.has(pattern.category)) continue;
-
-        // キーワードマッチング
-        const keywordsMatch = pattern.soap_keywords.some(kw => soapAll.includes(kw.toLowerCase()));
-        if (!keywordsMatch) continue;
-
-        // 除外キーワードチェック
-        if (pattern.soap_exclude_keywords && pattern.soap_exclude_keywords.length > 0) {
-          const excluded = pattern.soap_exclude_keywords.some(kw => soapAll.includes(kw.toLowerCase()));
-          if (excluded) continue;
-        }
-
-        // AND条件チェック
-        if (pattern.condition && pattern.condition.and_keywords && pattern.condition.and_keywords.length > 0) {
-          const andMatch = pattern.condition.and_keywords.some(kw => soapAll.includes(kw.toLowerCase()));
-          if (!andMatch) continue;
-        }
-
-        // === 特殊判定 ===
-        // 抜髄: 根管数
-        if (pattern.category === "endo" && pattern.pattern_name.includes("抜髄")) {
-          if (pattern.pattern_name.includes("3根管") && !soapAll.includes("3根")) continue;
-          if (pattern.pattern_name.includes("2根管") && !soapAll.includes("2根")) continue;
-          if (pattern.pattern_name.includes("単根管") && (soapAll.includes("2根") || soapAll.includes("3根"))) continue;
-        }
-
-        // 麻酔: 浸潤/伝達
-        if (pattern.category === "anesthesia") {
-          if (pattern.pattern_name.includes("伝達") && !soapAll.includes("伝達")) continue;
-          if (pattern.pattern_name.includes("浸潤") && soapAll.includes("伝達")) continue;
-        }
-
-        // CR充填: 単純/複雑
-        if (pattern.category === "restoration") {
-          if (pattern.pattern_name.includes("複雑") && !soapAll.includes("複雑")) continue;
-          if (pattern.pattern_name.includes("単純") && soapAll.includes("複雑")) continue;
-        }
-
-        // 抜歯: 難易度
-        if (pattern.category === "surgery") {
-          if (pattern.pattern_name.includes("難") && !(soapAll.includes("難") || soapAll.includes("埋伏"))) continue;
-          if (pattern.pattern_name.includes("臼歯") && !pattern.pattern_name.includes("難") && (soapAll.includes("難") || soapAll.includes("埋伏"))) continue;
-          if (pattern.pattern_name.includes("前歯") && (soapAll.includes("臼歯") || soapAll.includes("奥歯") || soapAll.includes("難") || soapAll.includes("埋伏"))) continue;
-        }
-
-        // クラウン: 種類
-        if (pattern.category === "prosth" && (pattern.pattern_name.includes("FMC") || pattern.pattern_name.includes("CAD") || pattern.pattern_name.includes("前装冠"))) {
-          if (pattern.pattern_name.includes("CAD") && !soapAll.includes("cad")) continue;
-          if (pattern.pattern_name.includes("前装") && !(soapAll.includes("前装") || soapAll.includes("前歯"))) continue;
-          if (pattern.pattern_name.includes("大臼歯") && !soapAll.includes("大臼歯")) continue;
-          if (pattern.pattern_name === "FMC" && (soapAll.includes("cad") || soapAll.includes("前装") || soapAll.includes("前歯") || soapAll.includes("大臼歯"))) continue;
-        }
-
-        // インレー: 単純/複雑
-        if (pattern.pattern_name.includes("インレー")) {
-          if (pattern.pattern_name.includes("複雑") && !(soapAll.includes("複雑") || soapAll.includes("2面"))) continue;
-          if (pattern.pattern_name.includes("単純") && (soapAll.includes("複雑") || soapAll.includes("2面"))) continue;
-        }
-
-        // 支台築造: メタル/ファイバー
-        if (pattern.pattern_name.includes("支台築造")) {
-          if (pattern.pattern_name.includes("メタル") && !(soapAll.includes("メタル") || soapAll.includes("間接"))) continue;
-          if (pattern.pattern_name.includes("ファイバー") && (soapAll.includes("メタル") || soapAll.includes("間接"))) continue;
-        }
-
-        // 義歯: サブタイプ
-        if (pattern.category === "denture") {
-          const isDenAdj = soapAll.includes("調整") || soapAll.includes("あたり");
-          const isDenRep = soapAll.includes("修理");
-          const isDenReline = soapAll.includes("裏装") || soapAll.includes("リライン");
-          const isDenSet = soapAll.includes("セット") || soapAll.includes("装着");
-          const isNewDen = soapAll.includes("新製") || soapAll.includes("作製");
-          const isMaintenanceOnly = (isDenAdj || isDenRep || isDenReline) && !isDenSet && !isNewDen;
-
-          if (pattern.pattern_name.includes("調整") && !isDenAdj) continue;
-          if (pattern.pattern_name.includes("修理") && !isDenRep) continue;
-          if (pattern.pattern_name.includes("リライン") && !isDenReline) continue;
-          if (pattern.pattern_name.includes("装着") && !isDenSet) continue;
-          if (pattern.pattern_name.includes("総義歯") && !(soapAll.includes("総義歯") || soapAll.includes("フルデンチャー"))) continue;
-          if (pattern.pattern_name.includes("上顎") && soapAll.includes("下")) continue;
-          if (pattern.pattern_name.includes("下顎") && !soapAll.includes("下")) continue;
-          if (pattern.pattern_name.includes("部分床") && isMaintenanceOnly) continue;
-          if (pattern.pattern_name.includes("部分床") && (soapAll.includes("総義歯") || soapAll.includes("フルデンチャー"))) continue;
-        }
-
-        // 覆髄: 直接/間接
-        if (pattern.pattern_name.includes("覆髄")) {
-          if (pattern.pattern_name.includes("直接") && !soapAll.includes("直接")) continue;
-          if (pattern.pattern_name.includes("間接") && soapAll.includes("直接")) continue;
-        }
-
-        // 歯根端切除: 大臼歯
-        if (pattern.pattern_name.includes("歯根端切除")) {
-          if (pattern.pattern_name.includes("大臼歯") && !soapAll.includes("大臼歯")) continue;
-          if (!pattern.pattern_name.includes("大臼歯") && soapAll.includes("大臼歯")) continue;
-        }
-
-        // 装着: 義歯セットと区別
-        if (pattern.pattern_name === "装着") {
-          if (soapAll.includes("義歯") || soapAll.includes("デンチャー") || soapAll.includes("入れ歯")) continue;
-        }
-
-        // === マッチ成功 ===
-        const teeth = pattern.use_tooth_numbers ? extractedTeeth : [];
-        for (const code of pattern.fee_codes) {
-          addItem(code, 1, teeth);
-        }
-        if (exclusiveCategories.has(pattern.category)) {
-          matchedExclusive.add(pattern.category);
-        }
+      // === KO レコード（公費） ===
+      if (pat.public_expense_type) {
+        const publicInsurer = String(pat.public_expense_type).padStart(8, "0");
+        const publicRecipient = pat.public_expense_recipient ? String(pat.public_expense_recipient).padStart(7, "0") : "";
+        lines.push(
+          `KO,${publicInsurer},${publicRecipient},,1,${patientTotalPoints},,,,`
+        );
       }
-    } else {
-      // フォールバック（billing_patterns取得失敗時の最低限ロジック）
-      if (soapAll.includes("パノラマ")) { addItem("E100-pan"); addItem("E-diag"); }
-      if (soapAll.includes("デンタル")) { addItem("E100-1"); addItem("E100-1-diag"); }
-      if (soapAll.includes("麻酔") || soapAll.includes("浸潤")) { addItem("K001-1", 1, extractedTeeth); }
-      if (soapAll.includes("処方")) { addItem("F-shoho"); addItem("F-chozai"); addItem("F-yaku-1"); }
-    }
 
-    // ============================================================
-    // [B-1] 投薬の自動算定
-    // SOAPに薬名や「処方」キーワードがあれば、投薬の技術料+薬剤料を自動計算
-    // ============================================================
-    const prescribedDrugs: {
-      drug: DrugItem;
-      quantity: number; // 1回あたりの数量
-      days: number;     // 処方日数
-      dosageForm: string;
-    }[] = [];
+      // ============================================================
+      // [A-4] SY レコード（傷病名部位）— 公式マスタコード変換
+      // patient_diagnosesのdiagnosis_codeを公式コードに変換する
+      // 独自コードのままだと全レセプト返戻リスクあり
+      // ============================================================
+      const { data: diagData } = await supabase
+        .from("patient_diagnoses")
+        .select("*")
+        .eq("patient_id", patientId);
+      if (diagData && diagData.length > 0) {
+        for (const d of diagData) {
+          const outcomeCode =
+            d.outcome === "cured" ? "1" :
+            d.outcome === "suspended" ? "3" :
+            d.outcome === "died" ? "2" : "";
+          const startYM = d.start_date
+            ? d.start_date.replace(/-/g, "").substring(0, 6)
+            : yearMonth;
+          const endYM = d.end_date
+            ? d.end_date.replace(/-/g, "").substring(0, 6)
+            : "";
 
-    // SOAPから処方薬を検出
-    const hasPrescription = soapAll.includes("処方") || soapAll.includes("投薬") || soapAll.includes("rp");
-    
-    if (hasPrescription || drugItems) {
-      for (const preset of PRESCRIPTION_KEYWORDS) {
-        const matched = preset.keywords.some(kw => soapAll.includes(kw.toLowerCase()));
-        if (!matched) continue;
+          // [A-4] 傷病名コードの公式マスタ変換
+          let diagCode = d.diagnosis_code || "";
+          const diagName = d.diagnosis_name || "";
 
-        // マッチした薬をdrug_masterから検索
-        for (const drugName of preset.drugNames) {
-          const drug = drugByName.get(drugName);
-          if (drug) {
-            prescribedDrugs.push({
-              drug,
-              quantity: 1,
-              days: drug.default_days,
-              dosageForm: drug.dosage_form,
-            });
-
-            // NSAIDsの場合、胃薬を自動追加
-            if (preset.withStomach) {
-              const stomachDrug = drugByName.get(DEFAULT_STOMACH_DRUG);
-              if (stomachDrug && !prescribedDrugs.some(pd => pd.drug.name === DEFAULT_STOMACH_DRUG)) {
-                prescribedDrugs.push({
-                  drug: stomachDrug,
-                  quantity: 1,
-                  days: stomachDrug.default_days,
-                  dosageForm: stomachDrug.dosage_form,
-                });
-              }
+          // まず diagnosis_master で公式コードを検索
+          // 1) コードでマスタを検索
+          const masterByCode = diagMasterByCode.get(diagCode);
+          if (masterByCode && masterByCode.icd_code) {
+            // マスタにICD-10コードがあればそれを使用
+            diagCode = masterByCode.code;
+          }
+          // 2) コードで見つからなければ名称でマスタを検索
+          if (!masterByCode) {
+            const masterByName = diagMasterByName.get(diagName);
+            if (masterByName) {
+              diagCode = masterByName.code;
+            } else {
+              // マスタに見つからない場合は警告
+              warnings.push(`傷病名マスタ未登録: "${diagName}" (code: ${d.diagnosis_code})`);
             }
           }
+
+          // 歯番号の#除去
+          const toothNum = (d.tooth_number || "").replace(/#/g, "");
+
+          lines.push(
+            `SY,${diagCode},${diagName},${startYM},${outcomeCode},${endYM},${d.modifier_code || ""},${toothNum}`
+          );
         }
       }
-    }
 
-    // 処方薬がある場合、投薬の技術料を追加
-    if (prescribedDrugs.length > 0) {
-      // 処方料（F100: 院内処方の場合）
-      addItem("F100");
-      // 調剤料（F200: 院内調剤の場合）
-      addItem("F200");
+      // ============================================================
+      // [A-1] SI レコード（歯科診療行為）— 全billing分を統合出力
+      // [B-1] DRUG-プレフィックスはIYレコードで別途出力するためスキップ
+      // ============================================================
+      const drugProcs: { code: string; name: string; points: number; count: number; note: string }[] = [];
 
-      // 各薬剤の薬剤料を計算してselectedItemsに追加
-      // 薬剤料 = 薬価 × 数量 × 日数 を 10 で割って五捨五超入で点数化
-      for (const pd of prescribedDrugs) {
-        const totalPrice = pd.drug.unit_price * pd.quantity * pd.days;
-        // 薬剤料の点数計算: 15円以下の場合は1点、それ以上は10で割って五捨五超入
-        const drugPoints = totalPrice <= 15 ? 1 : Math.round(totalPrice / 10);
-        
-        const drugCode = `DRUG-${pd.drug.yj_code}`;
-        if (!addedCodes.has(drugCode)) {
-          addedCodes.add(drugCode);
-          selectedItems.push({
-            code: drugCode,
-            name: `【薬剤】${pd.drug.name}`,
-            points: drugPoints,
-            category: "投薬",
-            count: 1,
-            note: `${pd.drug.default_dose} ${pd.drug.default_frequency} ${pd.days}日分 (${pd.drug.unit_price}円/${pd.drug.unit})`,
-            tooth_numbers: [],
-          });
+      for (const b of pBillings) {
+        const procs = (b.procedures_detail || []) as {
+          code: string; name: string; points: number; count: number;
+          tooth_numbers?: string[]; note?: string;
+        }[];
+
+        for (const proc of procs) {
+          if (proc.code.startsWith("BONUS-")) continue;
+
+          // [B-1] DRUG-プレフィックスの項目はIYレコード用に別途収集
+          if (proc.code.startsWith("DRUG-")) {
+            drugProcs.push({
+              code: proc.code,
+              name: proc.name,
+              points: proc.points,
+              count: proc.count,
+              note: proc.note || "",
+            });
+            continue;
+          }
+
+          // 1) CODE_MAPから検索（最優先・最も確実）
+          let receiptCode = "";
+          let shikibetsu = "";
+          const mapped = CODE_MAP[proc.code];
+          if (mapped) {
+            receiptCode = mapped.rc;
+            shikibetsu = mapped.sk;
+          }
+
+          // 2) DBから検索（CODE_MAPにないコード用）
+          if (!receiptCode) {
+            const codeParts = proc.code.split("-");
+            const kubun = codeParts[0];
+            const sub = codeParts.slice(1).join("-") || "";
+            const dbKey = `${kubun}__${sub}`;
+            const dbFound = dbLookup.get(dbKey);
+            if (dbFound) {
+              receiptCode = dbFound.rc;
+              shikibetsu = dbFound.sk;
+            }
+          }
+
+          // 3) 9桁数字コードの場合はそのまま使用
+          if (!receiptCode && /^\d{9}$/.test(proc.code)) {
+            receiptCode = proc.code;
+            let dbFound = dbLookup.get(`__${proc.code}`);
+            if (!dbFound) {
+              const entries = Array.from(dbLookup.entries());
+              const match = entries.find(([, v]) => v.rc === proc.code);
+              if (match) dbFound = match[1];
+            }
+            shikibetsu = dbFound?.sk || "80";
+          }
+
+          // 4) 最終フォールバック（警告付き）
+          if (!receiptCode) {
+            warnings.push(`receipt_code未解決: ${proc.code} (${proc.name})`);
+            receiptCode = proc.code;
+            const c = proc.code.charAt(0);
+            if (c === "A") shikibetsu = "11";
+            else if (c === "B" || c === "H") shikibetsu = "13";
+            else if (c === "D" || c === "E") shikibetsu = "31";
+            else if (c === "F") shikibetsu = "21";
+            else if (c === "I") shikibetsu = "41";
+            else if (c === "J") shikibetsu = "42";
+            else if (c === "K") shikibetsu = "54";
+            else if (c === "M") shikibetsu = "62";
+            else shikibetsu = "80";
+          }
+
+          // ============================================================
+          // [A-2] 歯式コード6桁変換
+          // "46" → "004600" のように支払基金が要求する6桁形式に変換
+          // ============================================================
+          let teethStr = "";
+          if (proc.tooth_numbers && proc.tooth_numbers.length > 0) {
+            const converted = proc.tooth_numbers.map((t: string) => {
+              const sixDigit = toothTo6Digit(t);
+              // 変換結果が6桁数字でない場合は警告
+              if (!/^\d{6}$/.test(sixDigit)) {
+                warnings.push(`歯式6桁変換失敗: "${t}" → "${sixDigit}"`);
+              }
+              return sixDigit;
+            });
+            teethStr = converted.join(" ");
+          }
+
+          const futanKubun = pat.public_expense_type ? "1" : "";
+
+          // SI,診療識別,負担区分,診療行為コード(9桁),歯式(6桁),,点数,回数
+          lines.push(
+            `SI,${shikibetsu},${futanKubun},${receiptCode},${teethStr},,${proc.points},${proc.count}`
+          );
         }
       }
-    }
 
-    // ============================================================
-    // 11. 施設基準加算
-    // ============================================================
-    const existingCodes = selectedItems.map(item => item.code);
-    const hasShoshin = existingCodes.some(c => c === "A000" || c.startsWith("A000"));
-    const hasSaishin = existingCodes.some(c => c === "A002" || c.startsWith("A002"));
+      // ============================================================
+      // [B-1] IY レコード（医薬品）
+      // auto-billingで算定されたDRUG-コードの薬剤をIYレコードとして出力
+      // IY,診療識別(21=内服,23=外用,25=頓服),負担区分,医薬品コード,使用量,点数,回数
+      // ============================================================
+      if (drugProcs.length > 0) {
+        // drug_masterからreceipt_codeを取得するためにDBを参照
+        const drugYjCodes = drugProcs.map(dp => dp.code.replace("DRUG-", ""));
+        const { data: drugMasterData } = await supabase
+          .from("drug_master")
+          .select("yj_code, receipt_code, dosage_form, name, unit_price, unit")
+          .in("yj_code", drugYjCodes);
+        const drugMasterMap = new Map(
+          (drugMasterData || []).map((d: { yj_code: string; receipt_code: string; dosage_form: string; name: string; unit_price: number; unit: string }) => [d.yj_code, d])
+        );
 
-    const getGroup = (code: string) => code.replace(/[0-9]/g, "");
-    const bestBonus = new Map<string, FacilityBonus>();
+        const futanKubun = pat.public_expense_type ? "1" : "";
 
-    for (const bonus of activeBonuses) {
-      if (bonus.bonus_type !== "add" || bonus.bonus_points <= 0) continue;
-      const groupKey = `${getGroup(bonus.facility_code)}__${bonus.target_kubun}`;
-      const existing = bestBonus.get(groupKey);
-      if (!existing || bonus.bonus_points > existing.bonus_points) {
-        bestBonus.set(groupKey, bonus);
+        for (const dp of drugProcs) {
+          const yjCode = dp.code.replace("DRUG-", "");
+          const drugInfo = drugMasterMap.get(yjCode);
+
+          // 診療識別: 内服=21, 頓服=22, 外用=23, 注射=31
+          let drugShikibetsu = "21";
+          if (drugInfo) {
+            if (drugInfo.dosage_form === "頓服") drugShikibetsu = "22";
+            else if (drugInfo.dosage_form === "外用") drugShikibetsu = "23";
+            else if (drugInfo.dosage_form === "注射") drugShikibetsu = "31";
+          }
+
+          // レセプト用医薬品コード（receipt_codeを優先、なければyj_codeを使用）
+          const drugReceiptCode = drugInfo?.receipt_code || yjCode;
+
+          // 使用量（noteから日数等を抽出、なければ1）
+          const usageStr = "1";
+
+          // IY,診療識別,負担区分,医薬品コード,使用量,点数,回数
+          lines.push(
+            `IY,${drugShikibetsu},${futanKubun},${drugReceiptCode},${usageStr},${dp.points},${dp.count}`
+          );
+        }
       }
+
+      // ============================================================
+      // [A-1] JD レコード（受診日等）— 全billing分の受診日を統合
+      // 月内の全来院日を1つのJDレコードにまとめる
+      // ============================================================
+      const visitDays = pBillings.map(
+        (b: { created_at: string }) => new Date(b.created_at).getDate()
+      );
+      const uniqueDays = Array.from(new Set(visitDays)).sort(
+        (a: number, b: number) => a - b
+      );
+      const dayFlags = new Array(31).fill(0);
+      uniqueDays.forEach((d: number) => {
+        if (d >= 1 && d <= 31) dayFlags[d - 1] = 1;
+      });
+      lines.push(`JD,${uniqueDays.length},${dayFlags.join(",")}`);
+
+      // === MF レコード（窓口負担額） ===
+      // [A-1] 統合後の合計点数から窓口負担を計算
+      const windowAmount = Math.round(patientTotalPoints * 10 * burdenRatio);
+      lines.push(`MF,${windowAmount}`);
     }
 
-    Array.from(bestBonus.values()).forEach(bonus => {
-      const isShoshinBonus = bonus.target_kubun === "A000";
-      const isSaishinBonus = bonus.target_kubun === "A002";
-      const hasTarget = existingCodes.some(c => c === bonus.target_kubun || c.startsWith(bonus.target_kubun));
-      if ((isShoshinBonus && hasShoshin) || (isSaishinBonus && hasSaishin) || hasTarget) {
-        selectedItems.push({
-          code: `BONUS-${bonus.facility_code}-${bonus.target_kubun}`,
-          name: `施設基準加算（${bonus.condition}）`,
-          points: bonus.bonus_points,
-          category: "加算",
-          count: 1,
-          note: bonus.facility_code,
-          tooth_numbers: [],
-        });
+    // === GO レコード（請求書） ===
+    lines.push(`GO,${receiptNo},${totalPointsAll},99`);
+
+    // UKEファイルの内容を結合（CR+LF改行）
+    const ukeContent = lines.join("\r\n");
+
+    if (format === "uke" || format === "download") {
+      // Shift_JISに変換して.UKEファイルとしてダウンロード
+      const fileName = `receipt_${yearMonth}.UKE`;
+      const sjisBuffer = iconv.encode(ukeContent, "Shift_JIS");
+      // Node.js BufferをWeb標準のUint8Arrayにコピー
+      const bytes = new Uint8Array(sjisBuffer.length);
+      for (let i = 0; i < sjisBuffer.length; i++) {
+        bytes[i] = sjisBuffer[i];
       }
-    });
-
-    // ============================================================
-    // 12. 合計計算
-    // ============================================================
-    const totalPoints = selectedItems.reduce((sum, item) => sum + item.points * item.count, 0);
-    const patientBurden = Math.ceil(totalPoints * 10 * burdenRatio);
-    const insuranceClaim = totalPoints * 10 - patientBurden;
-
-    const warnings: string[] = [];
-    if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
-    if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
-    if (prescribedDrugs.length > 0) warnings.push(`💊 投薬 ${prescribedDrugs.length}品目を自動算定しました。処方内容をご確認ください。`);
-
-    // ============================================================
-    // 13. billingテーブルに保存
-    // ============================================================
-    const billingData = {
-      record_id: recordId,
-      patient_id: patientId,
-      total_points: totalPoints,
-      patient_burden: patientBurden,
-      insurance_claim: insuranceClaim,
-      burden_ratio: burdenRatio,
-      procedures_detail: selectedItems,
-      ai_check_warnings: warnings,
-      claim_status: "pending",
-      payment_status: "unpaid",
-    };
-
-    const { data: existingBilling } = await supabase.from("billing").select("id").eq("record_id", recordId).limit(1);
-    let billing = null;
-    let billErr = null;
-
-    if (existingBilling && existingBilling.length > 0) {
-      const res = await supabase.from("billing").update(billingData).eq("record_id", recordId).select().single();
-      billing = res.data;
-      billErr = res.error;
-    } else {
-      const res = await supabase.from("billing").insert(billingData).select().single();
-      billing = res.data;
-      billErr = res.error;
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
+      return new Response(blob, {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${fileName}"`,
+        },
+      });
     }
 
-    if (billErr) {
-      return NextResponse.json({
-        error: "billing保存失敗",
-        detail: billErr.message,
-        hint: billErr.hint || "",
-        code: billErr.code || "",
-        items: selectedItems,
-        totalPoints,
-        patientId,
-        recordId,
-      }, { status: 500 });
-    }
-
+    // JSON形式（デフォルト: プレビュー用）
     return NextResponse.json({
       success: true,
-      billing_id: billing?.id,
-      total_points: totalPoints,
-      patient_burden: patientBurden,
-      insurance_claim: insuranceClaim,
-      items: selectedItems,
-      warnings,
-      prescribed_drugs: prescribedDrugs.length > 0 ? prescribedDrugs.map(pd => ({
-        name: pd.drug.name,
-        dose: pd.drug.default_dose,
-        frequency: pd.drug.default_frequency,
-        days: pd.days,
-      })) : undefined,
+      csv: ukeContent,
+      receiptCount: receiptNo,
+      totalPoints: totalPointsAll,
+      yearMonth,
+      warnings: warnings.length > 0 ? warnings : undefined,
     });
-
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: "算定エラー", detail: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }
