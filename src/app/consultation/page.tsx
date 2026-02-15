@@ -171,7 +171,7 @@ export default function ConsultationPage() {
   appointments.forEach((a) => { statusCounts[a.status] = (statusCounts[a.status] || 0) + 1; });
 
   const checkedInApts = appointments.filter(a => ["checked_in", "in_consultation", "completed"].includes(a.status));
-  const visibleCols = columns.filter(c => c.id !== "__unassigned__" || (aptsByColumn.get("__unassigned__")?.length || 0) > 0);
+  const visibleCols = columns;
 
   if (loading || !config) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
 
