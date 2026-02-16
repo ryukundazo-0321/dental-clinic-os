@@ -190,15 +190,46 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "カルテが見つかりません", detail: recErr?.message }, { status: 404 });
     }
 
-    // 2. 予約取得（patient_typeを知るため）
+    // 2. 初診/再診の自動判定
+    // ルール:
+    //   - appointments.patient_type === "new" → 初診
+    //   - 前回来院日から3ヶ月(90日)以上 → 再初診（初診扱い）
+    //   - 前回来院日から3ヶ月未満 → 再診
+    //   - 前回来院なし → 初診
     let isNew = true;
     if (record.appointment_id) {
       const { data: apt } = await supabase
         .from("appointments")
-        .select("patient_type")
+        .select("patient_type, scheduled_at")
         .eq("id", record.appointment_id)
         .single();
-      if (apt) isNew = apt.patient_type === "new";
+
+      if (apt) {
+        if (apt.patient_type === "new") {
+          isNew = true;
+        } else {
+          // 同一患者の前回来院（今回より前で completed のもの）を取得
+          const { data: prevApts } = await supabase
+            .from("appointments")
+            .select("scheduled_at")
+            .eq("patient_id", record.patient_id)
+            .eq("status", "completed")
+            .lt("scheduled_at", apt.scheduled_at)
+            .order("scheduled_at", { ascending: false })
+            .limit(1);
+
+          if (prevApts && prevApts.length > 0) {
+            const lastVisit = new Date(prevApts[0].scheduled_at);
+            const thisVisit = new Date(apt.scheduled_at);
+            const daysDiff = Math.floor((thisVisit.getTime() - lastVisit.getTime()) / (1000 * 60 * 60 * 24));
+            // 3ヶ月(90日)以上空いたら再初診
+            isNew = daysDiff >= 90;
+          } else {
+            // 過去の来院記録がない = 初診
+            isNew = true;
+          }
+        }
+      }
     }
 
     // 3. 患者取得（burden_ratioを知るため）
