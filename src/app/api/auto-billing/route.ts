@@ -213,8 +213,8 @@ export async function POST(request: NextRequest) {
       if (pat?.burden_ratio) burdenRatio = pat.burden_ratio;
     }
 
-    // 4. fee_master取得
-    const { data: feeItems, error: feeErr } = await supabase.from("fee_master").select("*");
+    // 4. fee_master取得（※Supabaseデフォルト1000行制限を回避）
+    const { data: feeItems, error: feeErr } = await supabase.from("fee_master").select("*").limit(10000);
     if (feeErr || !feeItems || feeItems.length === 0) {
       return NextResponse.json({ error: "点数マスターが空です", detail: feeErr?.message }, { status: 500 });
     }
