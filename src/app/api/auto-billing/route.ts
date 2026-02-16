@@ -220,6 +220,19 @@ export async function POST(request: NextRequest) {
     }
     const feeMap = new Map<string, FeeItem>(feeItems.map((f: FeeItem) => [f.code, f]));
 
+    // デバッグ情報（本番リリース前に削除）
+    const debugFeeMap = {
+      totalFeeItems: feeItems.length,
+      uniqueCodes: feeMap.size,
+      hasA000: feeMap.has("A000"),
+      hasA002: feeMap.has("A002"),
+      hasK001: feeMap.has("K001-1"),
+      hasMCRN: feeMap.has("M-CRN-zen"),
+      hasMIMP: feeMap.has("M-IMP-sei"),
+      hasMSET: feeMap.has("M-SET"),
+      A000detail: feeMap.get("A000") ? { code: feeMap.get("A000")!.code, name: feeMap.get("A000")!.name, points: feeMap.get("A000")!.points } : null,
+    };
+
     // 5. 現在有効な改定版を取得
     const { data: currentRevision } = await supabase
       .from("fee_revisions")
@@ -761,6 +774,7 @@ export async function POST(request: NextRequest) {
       insurance_claim: insuranceClaim,
       items: selectedItems,
       warnings,
+      debugFeeMap,
       prescribed_drugs: prescribedDrugs.length > 0 ? prescribedDrugs.map(pd => ({
         name: pd.drug.name,
         dose: pd.drug.default_dose,
