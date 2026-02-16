@@ -7,7 +7,24 @@ import {
   type ClinicConfig, type TimeSlot, type DoctorOption,
 } from "@/lib/reservation-utils";
 
-type Step = "select_type" | "new_patient_info" | "returning_lookup" | "select_date" | "select_time" | "confirm" | "complete";
+type Step = "select_type" | "new_patient_info" | "returning_lookup" | "treatment_summary" | "select_date" | "select_time" | "confirm" | "complete";
+
+// 治療サマリー情報の型
+type TreatmentSummary = {
+  // 現在の傷病名
+  diagnoses: { name: string; tooth_number: string; start_date: string }[];
+  // 前回の来院情報
+  lastVisit: {
+    date: string;
+    soap_p: string;  // 処置内容
+    soap_a: string;  // 評価
+    procedures: string[];
+  } | null;
+  // 次回予定（前回P欄から）
+  nextPlan: string;
+  // 治療中の歯番号
+  activeTeeth: string[];
+};
 
 export default function PatientBookingPage() {
   const [step, setStep] = useState<Step>("select_type");
@@ -22,6 +39,11 @@ export default function PatientBookingPage() {
   const [form, setForm] = useState({ name_kanji: "", name_kana: "", date_of_birth: "", phone: "", insurance_type: "社保", burden_ratio: "0.3" });
   const [lookupForm, setLookupForm] = useState({ name_kanji: "", date_of_birth: "", phone: "" });
   const [matchedPatient, setMatchedPatient] = useState<{ id: string; name_kanji: string } | null>(null);
+
+  // 治療サマリー
+  const [treatmentSummary, setTreatmentSummary] = useState<TreatmentSummary | null>(null);
+  const [visitReason, setVisitReason] = useState<"continuing" | "new_complaint" | "">(""); // 継続治療 or 新しい主訴
+  const [newComplaint, setNewComplaint] = useState(""); // 新しい主訴の内容
 
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
@@ -56,28 +78,19 @@ export default function PatientBookingPage() {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    today.setHours(0, 0, 0, 0);
 
-    // 2ヶ月先まで予約可能
     const maxDate = new Date();
     maxDate.setMonth(maxDate.getMonth() + 2);
 
     const days: {
-      date: Date | null;
-      day: number;
-      iso: string;
-      isToday: boolean;
-      isPast: boolean;
-      isClosed: boolean;
-      isBeyondMax: boolean;
+      date: Date | null; day: number; iso: string;
+      isToday: boolean; isPast: boolean; isClosed: boolean; isBeyondMax: boolean;
     }[] = [];
 
-    // 前月の空白
     for (let i = 0; i < startDayOfWeek; i++) {
       days.push({ date: null, day: 0, iso: "", isToday: false, isPast: false, isClosed: false, isBeyondMax: false });
     }
 
-    // 当月の日付
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(year, month, d);
       const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -85,19 +98,15 @@ export default function PatientBookingPage() {
       const isPast = date < today;
       const isClosed = config ? config.closedDays.includes(date.getDay()) : false;
       const isBeyondMax = date > maxDate;
-
       days.push({ date, day: d, iso, isToday, isPast, isClosed, isBeyondMax });
     }
-
     return days;
   }
 
   function prevMonth() {
     setCalendarMonth((prev) => {
       const now = new Date();
-      const minYear = now.getFullYear();
-      const minMonth = now.getMonth();
-      if (prev.year === minYear && prev.month <= minMonth) return prev;
+      if (prev.year === now.getFullYear() && prev.month <= now.getMonth()) return prev;
       if (prev.month === 0) return { year: prev.year - 1, month: 11 };
       return { year: prev.year, month: prev.month - 1 };
     });
@@ -107,9 +116,7 @@ export default function PatientBookingPage() {
     setCalendarMonth((prev) => {
       const maxDate = new Date();
       maxDate.setMonth(maxDate.getMonth() + 2);
-      const maxYear = maxDate.getFullYear();
-      const maxMonth = maxDate.getMonth();
-      if (prev.year === maxYear && prev.month >= maxMonth) return prev;
+      if (prev.year === maxDate.getFullYear() && prev.month >= maxDate.getMonth()) return prev;
       if (prev.month === 11) return { year: prev.year + 1, month: 0 };
       return { year: prev.year, month: prev.month + 1 };
     });
@@ -131,14 +138,99 @@ export default function PatientBookingPage() {
     setStep("select_time");
   }
 
+  // ============================================================
+  // 通院患者照合 + 治療サマリー取得
+  // ============================================================
   async function lookupPatient() {
     setLoading(true); setError("");
-    const { data, error: err } = await supabase.from("patients").select("id, name_kanji")
-      .eq("name_kanji", lookupForm.name_kanji).eq("date_of_birth", lookupForm.date_of_birth).eq("phone", lookupForm.phone).single();
-    if (err || !data) { setError("患者情報が見つかりませんでした。入力内容をご確認いただくか、「はじめての方」からご予約ください。"); setLoading(false); return; }
-    setMatchedPatient(data); setStep("select_date"); setLoading(false);
+    try {
+      // 1. 患者照合
+      const { data: patient, error: err } = await supabase.from("patients").select("id, name_kanji")
+        .eq("name_kanji", lookupForm.name_kanji).eq("date_of_birth", lookupForm.date_of_birth).eq("phone", lookupForm.phone).single();
+      if (err || !patient) {
+        setError("患者情報が見つかりませんでした。入力内容をご確認いただくか、「はじめての方」からご予約ください。");
+        setLoading(false); return;
+      }
+      setMatchedPatient(patient);
+
+      // 2. 治療サマリー取得
+      const summary = await fetchTreatmentSummary(patient.id);
+      setTreatmentSummary(summary);
+
+      // 3. 治療サマリー画面へ遷移
+      setStep("treatment_summary");
+    } catch {
+      setError("エラーが発生しました。");
+    }
+    setLoading(false);
   }
 
+  // ============================================================
+  // 治療サマリー情報をDBから取得
+  // ============================================================
+  async function fetchTreatmentSummary(patientId: string): Promise<TreatmentSummary> {
+    // (a) 現在の傷病名（outcome が null = 治療中）
+    const { data: diagData } = await supabase
+      .from("patient_diagnoses")
+      .select("diagnosis_name, tooth_number, start_date, outcome")
+      .eq("patient_id", patientId)
+      .is("outcome", null)
+      .order("start_date", { ascending: false });
+
+    const diagnoses = (diagData || []).map((d: { diagnosis_name: string; tooth_number: string; start_date: string }) => ({
+      name: d.diagnosis_name,
+      tooth_number: d.tooth_number || "",
+      start_date: d.start_date || "",
+    }));
+
+    // 治療中の歯番号を抽出
+    const activeTeeth = Array.from(
+      new Set(diagnoses.map((d: { tooth_number: string }) => d.tooth_number).filter(Boolean))
+    );
+
+    // (b) 前回の来院情報（completed の最新1件）
+    const { data: lastApt } = await supabase
+      .from("appointments")
+      .select("scheduled_at, medical_records ( soap_a, soap_p, procedures_text )")
+      .eq("patient_id", patientId)
+      .eq("status", "completed")
+      .order("scheduled_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    let lastVisit = null;
+    let nextPlan = "";
+
+    if (lastApt) {
+      const mr = (lastApt.medical_records as unknown as { soap_a: string; soap_p: string; procedures_text: string }[])?.[0];
+      const soapP = mr?.soap_p || "";
+      const soapA = mr?.soap_a || "";
+
+      // P欄から「次回」以降のテキストを抽出
+      const nextMatch = soapP.match(/次回[：:\s]*(.+)/);
+      nextPlan = nextMatch ? nextMatch[1].trim() : "";
+
+      // P欄から処置内容を抽出（「次回」より前の部分）
+      const proceduresPart = nextMatch ? soapP.substring(0, nextMatch.index) : soapP;
+      const procedures = proceduresPart
+        .split(/[・、,\s]+/)
+        .map((s: string) => s.trim())
+        .filter((s: string) => s && s !== "次回" && s.length < 20);
+
+      lastVisit = {
+        date: lastApt.scheduled_at,
+        soap_p: soapP,
+        soap_a: soapA,
+        procedures,
+      };
+    }
+
+    return { diagnoses, lastVisit, nextPlan, activeTeeth };
+  }
+
+  // ============================================================
+  // 予約確定
+  // ============================================================
   async function confirmBooking() {
     setLoading(true); setError("");
     try {
@@ -157,9 +249,24 @@ export default function PatientBookingPage() {
         patient_id: patientId, clinic_id: config?.clinicId, doctor_id: selectedDoctor || null,
         scheduled_at: scheduledAt, patient_type: patientType === "new" ? "new" : "returning",
         status: "reserved", duration_min: config?.slotDurationMin || 30,
+        // 通院中の場合、来院目的をメモとして保存
+        ...(patientType === "returning" && visitReason === "new_complaint" && newComplaint
+          ? { notes: `【新しい主訴】${newComplaint}` }
+          : patientType === "returning" && visitReason === "continuing" && treatmentSummary?.nextPlan
+          ? { notes: `【継続治療】${treatmentSummary.nextPlan}` }
+          : {}),
       }).select("id").single();
       if (aptErr || !appointment) { setError("予約の登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
-      await supabase.from("medical_records").insert({ appointment_id: appointment.id, patient_id: patientId, status: "draft" });
+
+      // medical_record作成 — 継続の場合は前回のP欄を引き継ぎ
+      const mrData: Record<string, unknown> = {
+        appointment_id: appointment.id, patient_id: patientId, status: "draft",
+      };
+      if (patientType === "returning" && visitReason === "new_complaint" && newComplaint) {
+        mrData.soap_s = `【主訴】${newComplaint}`;
+      }
+      await supabase.from("medical_records").insert(mrData);
+
       setCreatedAppointmentId(appointment.id);
       setStep("complete");
     } catch { setError("エラーが発生しました。お電話にてご予約ください。"); }
@@ -171,8 +278,25 @@ export default function PatientBookingPage() {
   function getProgress() {
     const steps: Step[] = patientType === "new"
       ? ["select_type", "new_patient_info", "select_date", "select_time", "confirm", "complete"]
-      : ["select_type", "returning_lookup", "select_date", "select_time", "confirm", "complete"];
+      : ["select_type", "returning_lookup", "treatment_summary", "select_date", "select_time", "confirm", "complete"];
     return Math.round(((steps.indexOf(step) + 1) / steps.length) * 100);
+  }
+
+  function formatDateJP(dateStr: string) {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+  }
+
+  // FDI歯番号を日本語で表示
+  function toothLabel(tooth: string) {
+    if (!tooth) return "";
+    const num = parseInt(tooth);
+    if (isNaN(num)) return tooth;
+    const quadrant = Math.floor(num / 10);
+    const position = num % 10;
+    const qLabel = quadrant === 1 ? "右上" : quadrant === 2 ? "左上" : quadrant === 3 ? "左下" : quadrant === 4 ? "右下" : "";
+    return `${qLabel}${position}番`;
   }
 
   if (configLoading) return <div className="min-h-screen bg-white flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
@@ -301,13 +425,160 @@ export default function PatientBookingPage() {
           </div>
         )}
 
+        {/* ============================================================ */}
+        {/* ===== 治療サマリー + 継続/新規分岐（★新規追加）===== */}
+        {/* ============================================================ */}
+        {step === "treatment_summary" && treatmentSummary && (
+          <div>
+            {/* 患者確認ヘッダー */}
+            <div className="bg-green-50 border border-green-200 rounded-2xl p-4 mb-5">
+              <div className="flex items-center gap-3">
+                <div className="bg-green-100 w-11 h-11 rounded-full flex items-center justify-center text-xl">✅</div>
+                <div>
+                  <p className="text-sm text-green-700">患者情報が確認できました</p>
+                  <p className="text-lg font-bold text-gray-900">{matchedPatient?.name_kanji} 様</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 治療サマリーカード */}
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden mb-5">
+              <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                <p className="text-sm font-bold text-gray-900">📋 現在の治療状況</p>
+              </div>
+
+              <div className="p-4 space-y-4">
+                {/* 現在の傷病名 */}
+                {treatmentSummary.diagnoses.length > 0 ? (
+                  <div>
+                    <p className="text-xs font-bold text-gray-400 mb-2">治療中の症状</p>
+                    <div className="space-y-1.5">
+                      {treatmentSummary.diagnoses.map((d, i) => (
+                        <div key={i} className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                          {d.tooth_number && (
+                            <span className="bg-orange-200 text-orange-800 text-xs font-bold px-2 py-0.5 rounded">
+                              #{d.tooth_number} {toothLabel(d.tooth_number)}
+                            </span>
+                          )}
+                          <span className="text-sm font-bold text-gray-800">{d.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <p className="text-sm text-gray-400">現在治療中の傷病名はありません</p>
+                  </div>
+                )}
+
+                {/* 前回の来院 */}
+                {treatmentSummary.lastVisit && (
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs font-bold text-gray-400 mb-2">前回のご来院</p>
+                    <div className="bg-sky-50 border border-sky-100 rounded-lg px-3 py-2.5">
+                      <p className="text-xs text-sky-600 mb-1">
+                        {formatDateJP(treatmentSummary.lastVisit.date)}
+                      </p>
+                      {treatmentSummary.lastVisit.procedures.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {treatmentSummary.lastVisit.procedures.slice(0, 5).map((p, i) => (
+                            <span key={i} className="bg-sky-100 text-sky-700 text-xs font-bold px-2 py-0.5 rounded">{p}</span>
+                          ))}
+                        </div>
+                      )}
+                      {treatmentSummary.lastVisit.soap_a && (
+                        <p className="text-xs text-gray-600">{treatmentSummary.lastVisit.soap_a}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 次回の予定 */}
+                {treatmentSummary.nextPlan && (
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs font-bold text-gray-400 mb-2">次回の予定</p>
+                    <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2.5">
+                      <p className="text-sm font-bold text-purple-800">{treatmentSummary.nextPlan}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 来院目的の選択 */}
+            <h3 className="text-base font-bold text-gray-900 mb-3">今回のご来院の目的を選んでください</h3>
+            <div className="space-y-3 mb-5">
+              {/* 継続治療 */}
+              <button onClick={() => { setVisitReason("continuing"); setNewComplaint(""); }}
+                className={`w-full text-left border-2 rounded-2xl p-4 transition-all active:scale-[0.98] ${
+                  visitReason === "continuing" ? "border-sky-400 bg-sky-50" : "border-gray-200 bg-white hover:border-sky-300"}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${
+                    visitReason === "continuing" ? "bg-sky-200" : "bg-gray-100"}`}>🔄</div>
+                  <div>
+                    <p className="font-bold text-gray-900 text-sm">前回の治療の続き</p>
+                    {treatmentSummary.nextPlan ? (
+                      <p className="text-xs text-gray-500 mt-0.5">予定: {treatmentSummary.nextPlan}</p>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-0.5">前回からの継続治療</p>
+                    )}
+                  </div>
+                  {visitReason === "continuing" && (
+                    <span className="ml-auto bg-sky-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">✓</span>
+                  )}
+                </div>
+              </button>
+
+              {/* 新しい主訴 */}
+              <button onClick={() => setVisitReason("new_complaint")}
+                className={`w-full text-left border-2 rounded-2xl p-4 transition-all active:scale-[0.98] ${
+                  visitReason === "new_complaint" ? "border-sky-400 bg-sky-50" : "border-gray-200 bg-white hover:border-sky-300"}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${
+                    visitReason === "new_complaint" ? "bg-sky-200" : "bg-gray-100"}`}>🆕</div>
+                  <div>
+                    <p className="font-bold text-gray-900 text-sm">別の場所が気になる・新しい症状</p>
+                    <p className="text-xs text-gray-500 mt-0.5">治療中の内容とは別のご相談</p>
+                  </div>
+                  {visitReason === "new_complaint" && (
+                    <span className="ml-auto bg-sky-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">✓</span>
+                  )}
+                </div>
+              </button>
+            </div>
+
+            {/* 新しい主訴の場合：具体的な内容入力 */}
+            {visitReason === "new_complaint" && (
+              <div className="mb-5">
+                <label className="block text-sm font-bold text-gray-700 mb-1.5">具体的な症状を教えてください</label>
+                <textarea value={newComplaint} onChange={(e) => setNewComplaint(e.target.value)}
+                  placeholder="例: 左上の奥歯が3日前から痛い"
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 resize-none" />
+              </div>
+            )}
+
+            {error && <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4"><p className="text-red-600 text-sm">{error}</p></div>}
+
+            <div className="flex gap-3">
+              <button onClick={() => { setStep("returning_lookup"); setVisitReason(""); setNewComplaint(""); setError(""); }}
+                className="flex-1 bg-gray-100 text-gray-600 py-3.5 rounded-xl font-bold">戻る</button>
+              <button onClick={() => {
+                if (!visitReason) { setError("来院目的を選択してください"); return; }
+                if (visitReason === "new_complaint" && !newComplaint.trim()) { setError("症状の内容をご記入ください"); return; }
+                setError(""); setStep("select_date");
+              }} disabled={!visitReason}
+                className="flex-1 bg-sky-600 text-white py-3.5 rounded-xl font-bold hover:bg-sky-700 disabled:opacity-50">日時を選ぶ</button>
+            </div>
+          </div>
+        )}
+
         {/* ===== 日付選択：カレンダー形式 ===== */}
         {step === "select_date" && (
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-1">ご希望の日付を選択</h2>
             <p className="text-sm text-gray-500 mb-4">ご都合の良い日をタップしてください</p>
 
-            {/* カレンダーヘッダー */}
             <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
                 <button onClick={prevMonth} className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-200 text-gray-600 font-bold">◀</button>
@@ -315,45 +586,28 @@ export default function PatientBookingPage() {
                 <button onClick={nextMonth} className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-200 text-gray-600 font-bold">▶</button>
               </div>
 
-              {/* 曜日ヘッダー */}
               <div className="grid grid-cols-7 border-b border-gray-100">
                 {weekdayLabels.map((w, i) => (
                   <div key={w} className={`py-2 text-center text-xs font-bold ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-gray-400"}`}>{w}</div>
                 ))}
               </div>
 
-              {/* カレンダー本体 */}
               <div className="grid grid-cols-7 p-1">
                 {calendarDays.map((d, idx) => {
                   if (!d.date) return <div key={`empty-${idx}`} className="p-1" />;
-
                   const isDisabled = d.isPast || d.isClosed || d.isBeyondMax;
                   const dayOfWeek = d.date.getDay();
-
                   return (
                     <div key={d.iso} className="p-0.5">
-                      <button
-                        disabled={isDisabled}
-                        onClick={() => onSelectDate(d.iso)}
+                      <button disabled={isDisabled} onClick={() => onSelectDate(d.iso)}
                         className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all ${
-                          isDisabled
-                            ? "text-gray-200 cursor-not-allowed"
-                            : d.isToday
-                            ? "bg-sky-50 text-sky-600 border-2 border-sky-300 hover:bg-sky-100"
+                          isDisabled ? "text-gray-200 cursor-not-allowed"
+                            : d.isToday ? "bg-sky-50 text-sky-600 border-2 border-sky-300 hover:bg-sky-100"
                             : "hover:bg-sky-50 hover:text-sky-600 active:scale-[0.93]"
-                        } ${
-                          !isDisabled && dayOfWeek === 0 ? "text-red-500" :
-                          !isDisabled && dayOfWeek === 6 ? "text-blue-500" :
-                          !isDisabled ? "text-gray-800" : ""
-                        }`}
-                      >
+                        } ${!isDisabled && dayOfWeek === 0 ? "text-red-500" : !isDisabled && dayOfWeek === 6 ? "text-blue-500" : !isDisabled ? "text-gray-800" : ""}`}>
                         <span>{d.day}</span>
-                        {d.isClosed && !d.isPast && (
-                          <span className="text-[8px] text-red-300 leading-none mt-0.5">休</span>
-                        )}
-                        {d.isToday && (
-                          <span className="text-[8px] text-sky-400 leading-none mt-0.5">今日</span>
-                        )}
+                        {d.isClosed && !d.isPast && <span className="text-[8px] text-red-300 leading-none mt-0.5">休</span>}
+                        {d.isToday && <span className="text-[8px] text-sky-400 leading-none mt-0.5">今日</span>}
                       </button>
                     </div>
                   );
@@ -361,14 +615,13 @@ export default function PatientBookingPage() {
               </div>
             </div>
 
-            {/* 凡例 */}
             <div className="flex items-center gap-4 mt-3 justify-center text-xs text-gray-400">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-300" /> 休診日</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> 今日</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-200" /> 予約不可</span>
             </div>
 
-            <button onClick={() => setStep(patientType === "new" ? "new_patient_info" : "returning_lookup")}
+            <button onClick={() => setStep(patientType === "new" ? "new_patient_info" : "treatment_summary")}
               className="w-full mt-6 bg-gray-100 text-gray-600 py-3.5 rounded-xl font-bold">戻る</button>
           </div>
         )}
@@ -452,6 +705,25 @@ export default function PatientBookingPage() {
                 <div className="border-t border-gray-200 pt-4"><p className="text-xs text-gray-400 mb-0.5">担当医</p><p className="font-bold text-gray-900">{doctors.find((d) => d.id === selectedDoctor)?.name}</p></div>
               )}
               <div className="border-t border-gray-200 pt-4"><p className="text-xs text-gray-400 mb-0.5">区分</p><p className="font-bold text-gray-900">{patientType === "new" ? "初診" : "再診"}</p></div>
+              {/* 通院中の場合：来院目的を表示 */}
+              {patientType === "returning" && visitReason && (
+                <div className="border-t border-gray-200 pt-4">
+                  <p className="text-xs text-gray-400 mb-0.5">来院目的</p>
+                  {visitReason === "continuing" ? (
+                    <div>
+                      <p className="font-bold text-gray-900">前回の治療の続き</p>
+                      {treatmentSummary?.nextPlan && (
+                        <p className="text-sm text-purple-600 mt-0.5">予定: {treatmentSummary.nextPlan}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="font-bold text-gray-900">新しい症状のご相談</p>
+                      <p className="text-sm text-gray-600 mt-0.5">{newComplaint}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {error && <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4"><p className="text-red-600 text-sm">{error}</p></div>}
             <div className="space-y-3">
@@ -476,9 +748,14 @@ export default function PatientBookingPage() {
               {selectedDoctor && doctors.find((d) => d.id === selectedDoctor) && (
                 <div><p className="text-xs text-gray-400">担当医</p><p className="font-bold text-gray-900">{doctors.find((d) => d.id === selectedDoctor)?.name}</p></div>
               )}
+              {patientType === "returning" && visitReason && (
+                <div>
+                  <p className="text-xs text-gray-400">来院目的</p>
+                  <p className="font-bold text-gray-900">{visitReason === "continuing" ? "前回の治療の続き" : "新しい症状のご相談"}</p>
+                </div>
+              )}
             </div>
 
-            {/* WEB問診票リンク */}
             {createdAppointmentId && (
               <div className="bg-sky-50 border border-sky-200 rounded-2xl p-5 mb-6">
                 <p className="text-sm font-bold text-sky-900 mb-2">📋 WEB問診票にご回答ください</p>
