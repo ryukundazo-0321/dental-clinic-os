@@ -370,8 +370,12 @@ export async function POST(request: NextRequest) {
 
       // === RE レコード（レセプト共通） ===
       // [A-1] 1患者につき1つのREレコードのみ出力（統合済み）
+      // レセプト種別: 保険種別(1桁) + 本人/家族(1桁) + 負担割合(1桁) + 入外区分(1桁)
+      // 公費がある場合: 4桁目以降に公費種別を追加
+      // 例: 社保本人3割外来 = "1132", 公費1件あり = "1132" + 公費レセプト種別
+      const reInsType = `${insCode}1${burdenCode}2`;
       lines.push(
-        `RE,${receiptNo},${insCode}1${burdenCode}2,${yearMonth},${pat.name_kanji || ""},${sexCode},${dob},${burdenCode * 10},,,,1,,,,,${pat.name_kana || ""},`
+        `RE,${receiptNo},${reInsType},${yearMonth},${pat.name_kanji || ""},${sexCode},${dob},${burdenCode * 10},,,,1,,,,,${pat.name_kana || ""},`
       );
 
       // ============================================================
@@ -387,14 +391,50 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // === KO レコード（公費） ===
-      if (pat.public_expense_type) {
-        const publicInsurer = String(pat.public_expense_type).padStart(8, "0");
-        const publicRecipient = pat.public_expense_recipient ? String(pat.public_expense_recipient).padStart(7, "0") : "";
+      // ============================================================
+      // KO レコード（公費）— 最大4件まで対応
+      // 公費負担者番号(8桁) + 受給者番号(7桁)
+      // 負担区分: 1=公費1, 2=公費2, 3=公費3, 4=公費4
+      // ============================================================
+      const publicExpenses: { insurer: string; recipient: string; kubun: string }[] = [];
+      if (pat.public_insurer) {
+        publicExpenses.push({
+          insurer: String(pat.public_insurer).padStart(8, "0"),
+          recipient: pat.public_recipient ? String(pat.public_recipient).padStart(7, "0") : "",
+          kubun: "1",
+        });
+      }
+      if (pat.public_insurer_2) {
+        publicExpenses.push({
+          insurer: String(pat.public_insurer_2).padStart(8, "0"),
+          recipient: pat.public_recipient_2 ? String(pat.public_recipient_2).padStart(7, "0") : "",
+          kubun: "2",
+        });
+      }
+      if (pat.public_insurer_3) {
+        publicExpenses.push({
+          insurer: String(pat.public_insurer_3).padStart(8, "0"),
+          recipient: pat.public_recipient_3 ? String(pat.public_recipient_3).padStart(7, "0") : "",
+          kubun: "3",
+        });
+      }
+      if (pat.public_insurer_4) {
+        publicExpenses.push({
+          insurer: String(pat.public_insurer_4).padStart(8, "0"),
+          recipient: pat.public_recipient_4 ? String(pat.public_recipient_4).padStart(7, "0") : "",
+          kubun: "4",
+        });
+      }
+
+      for (const pe of publicExpenses) {
+        // KO,公費負担者番号,受給者番号,,負担区分番号,合計点数,,,,
         lines.push(
-          `KO,${publicInsurer},${publicRecipient},,1,${patientTotalPoints},,,,`
+          `KO,${pe.insurer},${pe.recipient},,${pe.kubun},${patientTotalPoints},,,,`
         );
       }
+      const hasPublicExpense = publicExpenses.length > 0;
+      // 負担区分コード: 公費1件="1", 2件="1 2", 公費なし=""
+      const futanKubunAll = publicExpenses.map(pe => pe.kubun).join(" ");
 
       // ============================================================
       // [A-4] SY レコード（傷病名部位）— 公式マスタコード変換
@@ -549,7 +589,7 @@ export async function POST(request: NextRequest) {
             teethStr = converted.join(" ");
           }
 
-          const futanKubun = pat.public_expense_type ? "1" : "";
+          const futanKubun = hasPublicExpense ? futanKubunAll : "";
 
           // SI,診療識別,負担区分,診療行為コード(9桁),歯式(6桁),,点数,回数
           lines.push(
@@ -574,7 +614,7 @@ export async function POST(request: NextRequest) {
           (drugMasterData || []).map((d: { yj_code: string; receipt_code: string; dosage_form: string; name: string; unit_price: number; unit: string }) => [d.yj_code, d])
         );
 
-        const futanKubun = pat.public_expense_type ? "1" : "";
+        const futanKubun = hasPublicExpense ? futanKubunAll : "";
 
         for (const dp of drugProcs) {
           const yjCode = dp.code.replace("DRUG-", "");
@@ -635,7 +675,7 @@ export async function POST(request: NextRequest) {
           (matMasterData || []).map((m: { material_code: string; receipt_code: string; shinryo_shikibetsu: string; unit: string; unit_price: number; default_quantity: number }) => [m.material_code, m])
         );
 
-        const futanKubun = pat.public_expense_type ? "1" : "";
+        const futanKubun = hasPublicExpense ? futanKubunAll : "";
 
         for (const mp of matProcs) {
           const matCode = mp.code.replace("MAT-", "");
