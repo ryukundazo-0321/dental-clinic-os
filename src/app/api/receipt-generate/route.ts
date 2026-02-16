@@ -36,6 +36,8 @@ const CODE_MAP: Record<string, { rc: string; sk: string }> = {
   "F200": { rc: "306000710", sk: "21" },       // 処方料 42pt
   "F400": { rc: "306000610", sk: "21" },       // 処方料（7種以上）29pt
   "F500": { rc: "306001810", sk: "21" },       // 調剤技術基本料 14pt
+  "F-shoho": { rc: "306000710", sk: "21" },    // 処方料（旧コード互換）42pt
+  "F-chozai": { rc: "306000110", sk: "21" },   // 調剤料（旧コード互換）11pt
   // 処置 (診療識別: 41)
   "I000-1": { rc: "309000110", sk: "41" },     // う蝕処置 18pt
   "I000-2": { rc: "309000210", sk: "41" },     // 咬合調整（10歯未満）40pt
@@ -462,6 +464,12 @@ export async function POST(request: NextRequest) {
             });
             continue;
           }
+
+          // [B-2] MAT-プレフィックスの項目はTOレコードで別途出力するためスキップ
+          if (proc.code.startsWith("MAT-")) continue;
+
+          // F-yaku-1は薬剤料のプレースホルダー（0pt）、IYレコードで出力済みのためスキップ
+          if (proc.code === "F-yaku-1") continue;
 
           // 1) CODE_MAPから検索（最優先・最も確実）
           let receiptCode = "";
