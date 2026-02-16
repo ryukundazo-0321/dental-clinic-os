@@ -458,7 +458,7 @@ export async function POST(request: NextRequest) {
       if (soapAll.includes("パノラマ")) { addItem("E100-pan"); addItem("E-diag"); }
       if (soapAll.includes("デンタル")) { addItem("E100-1"); addItem("E100-1-diag"); }
       if (soapAll.includes("麻酔") || soapAll.includes("浸潤")) { addItem("K001-1", 1, extractedTeeth); }
-      if (soapAll.includes("処方")) { addItem("F-shoho"); addItem("F-chozai"); addItem("F-yaku-1"); }
+      // 投薬の技術料はprescribedDrugs検出時に F100/F200 で自動追加（後段ロジック）
     }
 
     // ============================================================
