@@ -79,22 +79,20 @@ function QuestionnaireContent() {
   const [patientName, setPatientName] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [saving, setSaving] = useState(false);
-  const [formPage, setFormPage] = useState(1); // 1=基本, 2=症状, 3=既往歴
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [formPage, setFormPage] = useState(1);
 
   const [form, setForm] = useState({
-    // --- ページ1: 基本情報 ---
     sex: "",
     postal_code: "",
     address: "",
     occupation: "",
-    // --- ページ2: 症状 ---
     visit_reasons: [] as string[],
     chief_complaint: "",
     pain_location: "",
     pain_type: [] as string[],
     symptom_onset: "",
     pain_level: 5,
-    // --- ページ3: 既往歴・生活 ---
     medical_history: [] as string[],
     medical_history_other: "",
     current_medications: "",
@@ -121,7 +119,6 @@ function QuestionnaireContent() {
     const p = apt.patients as unknown as { name_kanji: string; sex?: string; postal_code?: string; address?: string; occupation?: string };
     setPatientName(p?.name_kanji || "");
     setAppointmentDate(new Date(apt.scheduled_at).toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" }));
-    // 既存情報をプリフィル
     if (p?.sex) setForm(f => ({ ...f, sex: p.sex || "" }));
     if (p?.postal_code) setForm(f => ({ ...f, postal_code: p.postal_code || "" }));
     if (p?.address) setForm(f => ({ ...f, address: p.address || "" }));
@@ -132,10 +129,27 @@ function QuestionnaireContent() {
     setStep("intro");
   }
 
+  async function fetchAddress(zipcode: string) {
+    const clean = zipcode.replace(/[^0-9]/g, "");
+    if (clean.length !== 7) return;
+    setAddressLoading(true);
+    try {
+      const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${clean}`);
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        const r = data.results[0];
+        const addr = `${r.address1}${r.address2}${r.address3}`;
+        setForm(f => ({ ...f, address: addr }));
+      }
+    } catch (e) {
+      console.error("住所検索エラー:", e);
+    }
+    setAddressLoading(false);
+  }
+
   function toggleArray(field: "pain_type" | "medical_history" | "allergies" | "visit_reasons", id: string) {
     setForm(prev => {
       const arr = prev[field] as string[];
-      // 「なし」選択時は他をクリア
       if (field === "allergies" && id === "none") return { ...prev, [field]: arr.includes("none") ? [] : ["none"] };
       if (field === "allergies" && arr.includes("none")) return { ...prev, [field]: [id] };
       return { ...prev, [field]: arr.includes(id) ? arr.filter(t => t !== id) : [...arr, id] };
@@ -147,7 +161,6 @@ function QuestionnaireContent() {
     const { data: apt } = await supabase.from("appointments").select("patient_id").eq("id", appointmentId).single();
     if (!apt) { setSaving(false); return; }
 
-    // 1) 問診回答を保存
     const medHistLabels = form.medical_history.map(id => MEDICAL_HISTORY_OPTIONS.find(o => o.id === id)?.label).filter(Boolean);
     const medHistText = [...medHistLabels, form.medical_history_other].filter(Boolean).join("、") || "なし";
     const allergyLabels = form.allergies.filter(a => a !== "none" && a !== "other").map(id => ALLERGY_OPTIONS.find(o => o.id === id)?.label).filter(Boolean);
@@ -168,7 +181,6 @@ function QuestionnaireContent() {
       additional_notes: form.additional_notes,
     });
 
-    // 2) SOAP-Sに自動反映
     const painTypeLabels = form.pain_type.map(id => PAIN_TYPES.find(p => p.id === id)?.label).filter(Boolean).join("、");
     const painLocationLabel = PAIN_LOCATIONS.find(l => l.id === form.pain_location)?.label || "";
     const visitReasonLabels = form.visit_reasons.map(id => VISIT_REASONS.find(r => r.id === id)?.label).filter(Boolean).join("、");
@@ -195,7 +207,6 @@ function QuestionnaireContent() {
     await supabase.from("medical_records").update({ soap_s: soapS }).eq("appointment_id", appointmentId);
     await supabase.from("questionnaire_responses").update({ synced_to_soap: true }).eq("appointment_id", appointmentId);
 
-    // 3) 患者マスタに自動反映
     const patientUpdate: Record<string, unknown> = {};
     if (form.sex) patientUpdate.sex = form.sex;
     if (form.postal_code) patientUpdate.postal_code = form.postal_code;
@@ -212,7 +223,6 @@ function QuestionnaireContent() {
     setStep("complete");
   }
 
-  // 共通ボタンスタイル
   const btnSelected = "bg-sky-600 text-white shadow-sm";
   const btnDefault = "bg-white border border-gray-200 text-gray-700 hover:border-sky-300";
   const progressPct = formPage === 1 ? 33 : formPage === 2 ? 66 : 100;
@@ -260,7 +270,6 @@ function QuestionnaireContent() {
 
         {step === "form" && (
           <div className="space-y-6">
-            {/* プログレスバー */}
             <div>
               <div className="flex justify-between text-[11px] text-gray-400 mb-1.5">
                 <span className={formPage >= 1 ? "text-sky-600 font-bold" : ""}>1. 基本情報</span>
@@ -290,8 +299,13 @@ function QuestionnaireContent() {
                 <div className="grid grid-cols-3 gap-3">
                   <div className="col-span-1">
                     <label className="block text-sm font-bold text-gray-900 mb-2">〒 郵便番号</label>
-                    <input value={form.postal_code} onChange={e => setForm({ ...form, postal_code: e.target.value })}
+                    <input value={form.postal_code} onChange={e => {
+                      const v = e.target.value;
+                      setForm({ ...form, postal_code: v });
+                      fetchAddress(v);
+                    }}
                       placeholder="123-4567" className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:border-sky-400" />
+                    {addressLoading && <p className="text-[10px] text-sky-500 mt-1">🔍 住所を検索中...</p>}
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-bold text-gray-900 mb-2">住所</label>
@@ -479,7 +493,6 @@ function QuestionnaireContent() {
           </div>
         )}
 
-        {/* 確認 */}
         {step === "confirm" && (() => {
           const medLabels = form.medical_history.map(id => MEDICAL_HISTORY_OPTIONS.find(o => o.id === id)?.label).filter(Boolean);
           const allLabels = form.allergies.filter(a => a !== "other").map(id => ALLERGY_OPTIONS.find(o => o.id === id)?.label).filter(Boolean);
@@ -524,7 +537,6 @@ function QuestionnaireContent() {
           );
         })()}
 
-        {/* 完了 */}
         {step === "complete" && (
           <div className="text-center py-8">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
