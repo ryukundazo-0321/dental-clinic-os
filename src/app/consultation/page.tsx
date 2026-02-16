@@ -30,6 +30,8 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8);
 
+type ViewMode = "doctor" | "chair";
+
 // 日本時間の今日の日付をYYYY-MM-DD形式で取得
 function getTodayJST(): string {
   const now = new Date();
@@ -45,6 +47,7 @@ export default function ConsultationPage() {
   const [selectedDate, setSelectedDate] = useState(getTodayJST);
   const [loading, setLoading] = useState(true);
   const [selectedApt, setSelectedApt] = useState<Appointment | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("doctor");
 
   useEffect(() => {
     async function init() {
@@ -141,29 +144,32 @@ export default function ConsultationPage() {
   function goPrev() { const d = new Date(selectedDate + "T12:00:00"); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split("T")[0]); }
   function goNext() { const d = new Date(selectedDate + "T12:00:00"); d.setDate(d.getDate() + 1); setSelectedDate(d.toISOString().split("T")[0]); }
 
-  // カラム: 担当医 → なければユニット → なければ1カラム + 常に未割当
+  // カラム: viewModeに応じて担当医別 or チェア別
   const columns = useMemo(() => {
     const cols: { id: string; label: string }[] = [];
-    if (doctors.length > 0) {
-      doctors.forEach(d => cols.push({ id: d.id, label: d.name }));
-    } else if (units.length > 0) {
-      units.forEach(u => cols.push({ id: u.id, label: u.name }));
+    if (viewMode === "doctor") {
+      if (doctors.length > 0) {
+        doctors.forEach(d => cols.push({ id: d.id, label: d.name }));
+      }
+    } else {
+      if (units.length > 0) {
+        units.forEach(u => cols.push({ id: u.id, label: u.name }));
+      }
     }
     cols.push({ id: "__unassigned__", label: "未割当" });
     return cols;
-  }, [doctors, units]);
+  }, [doctors, units, viewMode]);
 
   const aptsByColumn = useMemo(() => {
     const map = new Map<string, Appointment[]>();
     columns.forEach(c => map.set(c.id, []));
-    const useDoctors = doctors.length > 0;
     appointments.forEach(apt => {
-      const key = useDoctors ? apt.doctor_id : apt.unit_id;
+      const key = viewMode === "doctor" ? apt.doctor_id : apt.unit_id;
       const target = key && map.has(key) ? key : "__unassigned__";
       map.get(target)?.push(apt);
     });
     return map;
-  }, [appointments, columns, doctors]);
+  }, [appointments, columns, viewMode]);
 
   // ミニカレンダー
   const miniCalDays = useMemo(() => {
@@ -212,6 +218,30 @@ export default function ConsultationPage() {
             </div>
           </div>
         </header>
+
+        {/* ビュー切替タブ */}
+        <div className="bg-white border-b border-gray-200 px-4 py-1.5 flex items-center gap-1">
+          <button
+            onClick={() => setViewMode("doctor")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              viewMode === "doctor"
+                ? "bg-sky-500 text-white shadow-sm"
+                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            }`}
+          >
+            👨‍⚕️ 担当医別
+          </button>
+          <button
+            onClick={() => setViewMode("chair")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              viewMode === "chair"
+                ? "bg-emerald-500 text-white shadow-sm"
+                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            }`}
+          >
+            🪥 チェア別
+          </button>
+        </div>
 
         {/* タイムテーブル */}
         <div className="flex-1 overflow-auto">
@@ -265,8 +295,12 @@ export default function ConsultationPage() {
                               {blockHeight > 55 && (
                                 <div className="flex flex-wrap gap-1 mt-0.5">
                                   {apt.patient_type === "new" && <span className="text-[8px] font-bold bg-red-100 text-red-600 px-1 rounded">初診</span>}
-                                  {doctorName && <span className="text-[8px] bg-indigo-50 text-indigo-600 px-1 rounded">{doctorName}</span>}
-                                  {unitName && <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1 rounded">{unitName}</span>}
+                                  {viewMode === "chair" && doctorName && (
+                                    <span className="text-[8px] bg-indigo-50 text-indigo-600 px-1 rounded">{doctorName}</span>
+                                  )}
+                                  {viewMode === "doctor" && unitName && (
+                                    <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1 rounded">{unitName}</span>
+                                  )}
                                 </div>
                               )}
                             </div>
