@@ -224,19 +224,42 @@ function SessionContent() {
       streamRef.current = stream;
       chunksRef.current = [];
       recordingStartRef.current = Date.now();
-      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+      // ★ ブラウザ互換性: 最適なMIMEタイプを選択
+      const mimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "audio/wav",
+      ];
+      let selectedMime = "";
+      for (const mime of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          selectedMime = mime;
+          break;
+        }
+      }
+      console.log("Selected MIME:", selectedMime || "default");
+
+      const mrOptions: MediaRecorderOptions = {};
+      if (selectedMime) mrOptions.mimeType = selectedMime;
+      const mr = new MediaRecorder(stream, mrOptions);
       mediaRecorderRef.current = mr;
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        // ★ 録音時のMIMEタイプを使用
+        const actualMime = mr.mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: actualMime });
         stream.getTracks().forEach(t => t.stop());
+        console.log("Recording stopped:", { size: blob.size, type: actualMime, chunks: chunksRef.current.length });
         if (blob.size > 1000) {
           await transcribeAudio(blob);
         } else {
           showMsg("⚠️ 音声が短すぎます。もう少し長く録音してください。");
         }
       };
-      mr.start();
+      mr.start(1000); // ★ 1秒ごとにデータチャンクを取得（互換性向上）
       setIsRecording(true);
       startTimer();
       showMsg("🔴 録音中...");
@@ -272,18 +295,58 @@ function SessionContent() {
     }
   }
 
+  // ★ フロントエンド側ハルシネーション検出
+  function detectHallucination(text: string): boolean {
+    const patterns = [
+      "購読ボタン", "チャンネル登録", "ご視聴ありがとう",
+      "いいねボタン", "この動画", "次の動画",
+      "Thank you for watching", "Subscribe",
+      "Subtitles by", "字幕"
+    ];
+    for (const p of patterns) {
+      if (text.includes(p)) return true;
+    }
+    // 同じフレーズの大量繰り返し検出
+    const segments = text.split(/[。！!？?\s]+/).filter(s => s.length > 2);
+    if (segments.length >= 3) {
+      const freq: Record<string, number> = {};
+      for (const s of segments) { freq[s] = (freq[s] || 0) + 1; }
+      for (const count of Object.values(freq)) {
+        if (count >= 3 && count / segments.length > 0.4) return true;
+      }
+    }
+    return false;
+  }
+
   // Step 1: 音声 → Whisper → 文字起こしテキスト → DB保存
   async function transcribeAudio(blob: Blob) {
     setTranscribing(true);
     showMsg("📝 文字起こし中...");
     try {
+      // ★ BlobのMIMEタイプに応じたファイル名を設定
+      const mimeType = blob.type || "audio/webm";
+      let fileName = "recording.webm";
+      if (mimeType.includes("mp4") || mimeType.includes("m4a")) fileName = "recording.m4a";
+      else if (mimeType.includes("ogg")) fileName = "recording.ogg";
+      else if (mimeType.includes("wav")) fileName = "recording.wav";
+
+      console.log("Sending to API:", { size: blob.size, type: mimeType, fileName });
+
       const fd = new FormData();
-      fd.append("audio", blob, "recording.webm");
+      fd.append("audio", blob, fileName);
       fd.append("whisper_only", "true");
       const res = await fetch("/api/voice-analyze", { method: "POST", body: fd });
       const data = await res.json();
 
       if (data.success && data.transcript && data.transcript.trim().length >= 5) {
+        // ★ フロントエンド側でもハルシネーションチェック
+        const t = data.transcript;
+        const isHallucination = detectHallucination(t);
+        if (isHallucination) {
+          showMsg("⚠️ 音声をうまく認識できませんでした。マイクに近づいてはっきり話してみてください。");
+          return;
+        }
+
         const durationSec = Math.round((Date.now() - recordingStartRef.current) / 1000);
         const nextNum = transcripts.length + 1;
 
