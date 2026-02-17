@@ -80,6 +80,7 @@ function SessionContent() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
 
   // ★ 文字起こし蓄積（新フロー）
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
@@ -246,8 +247,28 @@ function SessionContent() {
 
   function stopRecording() {
     if (mediaRecorderRef.current && isRecording) {
+      if (isPaused) mediaRecorderRef.current.resume(); // 一時停止中なら再開してからstop
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setIsPaused(false);
+    }
+  }
+
+  function pauseRecording() {
+    if (mediaRecorderRef.current && isRecording && !isPaused) {
+      mediaRecorderRef.current.pause();
+      setIsPaused(true);
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; setTimerRunning(false); }
+      showMsg("⏸️ 一時停止中");
+    }
+  }
+
+  function resumeRecording() {
+    if (mediaRecorderRef.current && isRecording && isPaused) {
+      mediaRecorderRef.current.resume();
+      setIsPaused(false);
+      startTimer();
+      showMsg("🔴 録音再開");
     }
   }
 
@@ -465,7 +486,14 @@ function SessionContent() {
             {transcribing ? (
               <div className="bg-amber-100 text-amber-700 px-5 py-2.5 rounded-full text-sm font-bold flex items-center gap-2"><span className="animate-spin">⚙️</span> 文字起こし中...</div>
             ) : isRecording ? (
-              <button onClick={stopRecording} className="bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg shadow-red-200 animate-pulse">⏹️ 録音停止</button>
+              <div className="flex items-center gap-2">
+                {isPaused ? (
+                  <button onClick={resumeRecording} className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2.5 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg shadow-sky-200">▶️ 再開</button>
+                ) : (
+                  <button onClick={pauseRecording} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg shadow-amber-200">⏸️ 一時停止</button>
+                )}
+                <button onClick={stopRecording} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg shadow-red-200">⏹️ 録音停止</button>
+              </div>
             ) : (
               <button onClick={startRecording} className="bg-sky-600 hover:bg-sky-700 text-white px-5 py-2.5 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg shadow-sky-200">🎙️ 録音開始</button>
             )}
