@@ -164,9 +164,10 @@ export async function POST(request: NextRequest) {
 }
 
 // ★ SOAP生成を独立関数に切り出し（チャンク分割・full_transcriptモード両対応）
-async function generateSOAP(apiKey: string, transcript: string, existingSoapS: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let soapData: any = null;
+async function generateSOAP(apiKey: string, transcript: string, existingSoapS: string): Promise<NextResponse> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  var soapData: any = null;
+  var gptSuccess = false;
   try {
       const systemPrompt = `あなたは日本の歯科診療所で使用される電子カルテのAIアシスタントです。
 歯科医師の診察会話を正確にSOAPノートに変換する専門家です。
@@ -227,11 +228,34 @@ async function generateSOAP(apiKey: string, transcript: string, existingSoapS: s
 - 印象: 型取り → procedures: ["印象"]
 - 浸潤麻酔: 浸麻 → procedures: ["浸麻"]
 
-## 診断名（傷病名）のルール
-- 会話中に明示的に言及された診断のみを記録する
-- 推測で診断名を追加しない
-- 「C2」と言ったらC2のみ。「歯周炎」と言及していないのに歯周炎を追加しない
-- 複数の診断が言及された場合は全て記録する
+## 診断名（傷病名）のルール — ★精度向上★
+傷病名は保険請求に必須です。漏れなく記録すること。
+
+### 明示的な傷病名
+会話中で直接言及された診断名は必ず全て記録する:
+- 「C2です」→ う蝕（C2）
+- 「歯髄炎ですね」→ 歯髄炎（Pul）
+- 「Pも進んでますね」→ 辺縁性歯周炎（P）
+
+### 処置から推定される傷病名（★重要★）
+処置を行うには根拠となる傷病名が必要。以下のルールで自動追加する:
+- 抜髄・根管治療 → 「歯髄炎（Pul）」を追加（歯髄炎がないと抜髄できない）
+- 感根治 → 「根尖性歯周炎（Per）」を追加
+- CR充填・インレー・FMC → 「う蝕（C2）」を追加（う蝕がないと修復できない）※ただし明示的にC1,C3,C4と言われた場合はそちらを使う
+- SC・SRP → 「歯周炎（P）」を追加
+- 抜歯（親知らず以外）→ 該当する傷病名を追加（例: C4で抜歯→「う蝕（C4）」）
+- 親知らず抜歯 → 「智歯周囲炎（Perico）」を追加
+- 義歯関連 → 「欠損歯」を追加
+
+### 複数歯の処置
+- 複数の歯に処置した場合、各歯ごとに傷病名を記録する
+  例: #45 CR充填 + #46 FMC形成 → diagnoses に #45 C2 と #46 C2 の両方を記録
+- 同じ歯に複数の傷病がある場合も全て記録する
+  例: #46 に C2 + P → 両方記録
+
+### 注意
+- 全く関係のない傷病名は追加しない（例: 前歯のCR充填なのに歯周炎を追加、はNG）
+- 迷った場合は「処置に必要な最低限の傷病名」を追加する
 
 ## SOAP記載のルール
 S（主観）: 患者の主訴・訴え。「痛い」「しみる」「取れた」等の患者の言葉
@@ -265,10 +289,13 @@ ${transcript}
 }
 
 diagnoses注意事項:
-- 会話中に明示的に言及された傷病名のみを含める
-- 推測で追加しない。例: C2と診断されたのに歯周炎(P)も追加、はNG
+- ★ 保険請求には全ての処置に対応する傷病名が必要。漏れなく記録すること。
+- 明示的に言及された傷病名は必ず記録する
+- 処置から推定される傷病名も追加する（例: FMC形成 → う蝕(C2)を追加）
+- 複数の歯に処置がある場合、各歯ごとに傷病名を記録する
 - toothはFDI番号（2桁）。全顎的な場合は空文字
 - 主要コード: K020=CO, K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K041=歯髄壊死, K045=Per, K046=歯根嚢胞, K050=G, K051=P, K052=歯周膿瘍, K054=P1, K055=P2, K056=P3, K081=Perico, K083=埋伏歯, K076=TMD, K120=Hys, K130=咬合性外傷, K003=破折, K001=欠損, K300=補綴物不適合, K301=二次う蝕
+- ★ 例: 「右下6番C2でFMC形成、左上3番にCR充填」→ diagnoses: [{"name":"う蝕(C2)","tooth":"46","code":"K022"}, {"name":"う蝕(C2)","tooth":"23","code":"K022"}]
 
 tooth_updatesの値: caries / in_treatment / treated / crown / missing / implant / bridge
 
@@ -298,7 +325,6 @@ FMC, CAD/CAM冠, 前装冠, インレー, CR充填, ブリッジ, 抜髄, 感根
 
       // GPT-4oで試行、失敗したらGPT-4o-miniにフォールバック
       const models = ["gpt-4o", "gpt-4o-mini"];
-      let gptSuccess = false;
 
       for (const model of models) {
         try {
