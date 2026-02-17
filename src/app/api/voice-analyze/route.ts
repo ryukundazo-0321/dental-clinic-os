@@ -25,53 +25,46 @@ export async function POST(request: NextRequest) {
     // ===== Step 1: Whisper API で音声→テキスト変換 =====
     let transcript = "";
     try {
+      console.log("Audio file info:", {
+        name: audioFile.name,
+        size: audioFile.size,
+        type: audioFile.type
+      });
+
+      if (audioFile.size < 1000) {
+        return NextResponse.json({
+          error: "音声ファイルが小さすぎます。もう少し長く録音してください。",
+          detail: `File size: ${audioFile.size} bytes`
+        }, { status: 400 });
+      }
+
+      // ★ MIMEタイプに応じた拡張子を決定
+      const mimeType = audioFile.type || "audio/webm";
+      let fileName = "recording.webm";
+      if (mimeType.includes("mp4") || mimeType.includes("m4a")) fileName = "recording.m4a";
+      else if (mimeType.includes("ogg")) fileName = "recording.ogg";
+      else if (mimeType.includes("wav")) fileName = "recording.wav";
+
+      // ★ audioFileをBufferに変換してBlobとして送信（互換性向上）
+      const arrayBuffer = await audioFile.arrayBuffer();
+      const audioBlob = new Blob([arrayBuffer], { type: mimeType });
+
       const whisperFormData = new FormData();
-      whisperFormData.append("file", audioFile, "recording.webm");
+      whisperFormData.append("file", audioBlob, fileName);
       whisperFormData.append("model", "whisper-1");
       whisperFormData.append("language", "ja");
-      // ★ Whisperプロンプト改善: 会話例+誤認識しやすい用語を重点配置
-      whisperFormData.append("prompt", [
-        "以下は歯科診療所での歯科医師と患者の診察中の会話です。歯科専門用語が頻出します。",
-        "医師「右下6番を見ますね。C2ですね、FMC形成しましょう。浸麻します。」",
-        "患者「はい、お願いします。」",
-        "医師「左上3番もCR充填が必要ですね。」",
 
-        "1番 2番 3番 4番 5番 6番 7番 8番",
-        "右上 左上 右下 左下",
-        "右上1番 右上2番 右上3番 右上4番 右上5番 右上6番 右上7番 右上8番",
-        "左上1番 左上2番 左上3番 左上4番 左上5番 左上6番 左上7番 左上8番",
-        "右下1番 右下2番 右下3番 右下4番 右下5番 右下6番 右下7番 右下8番",
-        "左下1番 左下2番 左下3番 左下4番 左下5番 左下6番 左下7番 左下8番",
-
-        "う蝕 C1 C2 C3 C4 シーワン シーツー シーサン シーフォー",
-        "FMC エフエムシー 全部金属冠",
-        "CR充填 シーアールじゅうてん コンポジットレジン レジン充填",
-        "CAD/CAM冠 キャドキャムかん",
-        "TEK テック 仮歯",
-        "抜髄 ばつずい 根管治療 こんかんちりょう 根治 感根治",
-        "根充 こんじゅう 根管充填",
-        "SRP エスアールピー ルートプレーニング",
-        "SC スケーリング 歯石除去",
-        "PMTC ピーエムティーシー",
-        "BOP ビーオーピー プロービング 歯周ポケット",
-        "浸潤麻酔 浸麻 しんま 伝達麻酔",
-        "印象 いんしょう 型取り 連合印象 精密印象 アルジネート シリコン",
-        "咬合採得 バイト 咬合紙",
-        "装着 セット 合着 セメント",
-        "インレー メタルインレー クラウン ブリッジ Br",
-        "前装冠 メタルボンド ジルコニア",
-        "支台築造 コア メタルコア ファイバーポスト",
-        "歯周病 歯周炎 歯肉炎 P Peri ペリオ",
-        "抜歯 ばっし 普通抜歯 難抜歯 埋伏歯",
-        "親知らず 智歯 智歯周囲炎 ペリコ",
-        "切開 排膿 縫合 抜糸",
-        "打診痛 冷水痛 温熱痛 自発痛 咬合痛",
-        "パノラマ デンタル X線 レントゲン",
-        "歯周組織検査 P検 6点法 動揺度",
-        "処方 ロキソニン カロナール フロモックス ムコスタ サワシリン",
-        "TBI 歯磨き指導 PCR 口腔衛生指導",
-        "二次カリエス 二次う蝕 不適合 脱離 PZ脱離",
-      ].join("\n"));
+      // ★ Whisperプロンプト: 短めにして会話形式を重視（長すぎるプロンプトはハルシネーションの原因になる）
+      whisperFormData.append("prompt", 
+        "歯科診療所での歯科医師と患者の診察会話。" +
+        "「右下6番、C2ですね。FMC形成しましょう。浸麻します。」" +
+        "「左上3番のCR充填をします。」" +
+        "「痛みはどうですか？」「冷たいものがしみます。」" +
+        "う蝕 C1 C2 C3 C4 FMC CR充填 抜髄 根管治療 感根治 根充 SC SRP " +
+        "インレー クラウン ブリッジ TEK 印象 連合印象 咬合採得 浸麻 " +
+        "歯周病 歯周炎 抜歯 智歯周囲炎 ペリコ 装着 セット " +
+        "右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番"
+      );
 
       // ★ temperature=0で最も安定した認識結果
       whisperFormData.append("temperature", "0");
@@ -85,7 +78,7 @@ export async function POST(request: NextRequest) {
       if (!whisperResponse.ok) {
         const errText = await whisperResponse.text();
         console.error("Whisper error:", errText);
-        return NextResponse.json({ 
+        return NextResponse.json({
           error: `音声認識エラー: ${whisperResponse.status}。APIキーとクレジット残高を確認してください。`,
           detail: errText
         }, { status: 500 });
@@ -93,19 +86,24 @@ export async function POST(request: NextRequest) {
 
       const whisperResult = await whisperResponse.json();
       transcript = whisperResult.text || "";
+      console.log("Whisper raw result:", { length: transcript.length, text: transcript.substring(0, 200) });
+
     } catch (whisperErr) {
       console.error("Whisper exception:", whisperErr);
       return NextResponse.json({ error: "音声認識処理でエラーが発生しました" }, { status: 500 });
     }
 
+    // ===== Step 1.1: ★ ハルシネーション検出 =====
+    transcript = filterHallucinations(transcript);
+
     if (!transcript || transcript.trim().length < 5) {
-      return NextResponse.json({ 
-        error: "音声が短すぎるか認識できませんでした。もう少し長く、はっきり話してみてください。",
+      return NextResponse.json({
+        error: "音声を認識できませんでした。もう少しはっきり話してみてください。マイクが正しく接続されているか確認してください。",
         transcript: transcript || "(認識テキストなし)"
       }, { status: 400 });
     }
 
-    // ===== Step 1.5: ★新規★ 文字起こし自動補正AI =====
+    // ===== Step 1.5: ★ 文字起こし自動補正AI =====
     transcript = await correctTranscript(apiKey, transcript);
 
     // whisper_onlyモード: 補正済みテキストを返す
@@ -123,8 +121,66 @@ export async function POST(request: NextRequest) {
 }
 
 // =====================================================
-// ★ 新規: 文字起こし自動補正AI（Step 1.5）
-// Whisperの誤認識を歯科専門用語に補正する
+// ★★★ 新規: ハルシネーション検出・除去
+// Whisperが無音区間で生成する偽テキストを検出
+// =====================================================
+function filterHallucinations(text: string): string {
+  if (!text) return "";
+
+  // ★ 既知のハルシネーションパターン（日本語・英語）
+  const HALLUCINATION_PATTERNS = [
+    /【購読ボタンを押してね[!！]?】/g,
+    /チャンネル登録.*お願い/g,
+    /ご視聴.*ありがとう/g,
+    /字幕.*作成/g,
+    /Thank you for watching/gi,
+    /Subscribe.*channel/gi,
+    /Subtitles by/gi,
+    /Amara\.org/gi,
+    /Please subscribe/gi,
+    /いいねボタン/g,
+    /コメント欄/g,
+    /チャンネル登録/g,
+    /この動画/g,
+    /次の動画/g,
+    /最後まで.*見て/g,
+  ];
+
+  let filtered = text;
+  for (const pattern of HALLUCINATION_PATTERNS) {
+    filtered = filtered.replace(pattern, "");
+  }
+
+  // ★ 同じフレーズの繰り返しを検出（3回以上の繰り返しはハルシネーション）
+  // 例: 「購読ボタンを押してね!」が10回繰り返される
+  const words = filtered.split(/[\s、。！!]+/).filter(w => w.length > 0);
+  if (words.length > 0) {
+    const freq: Record<string, number> = {};
+    for (const w of words) {
+      freq[w] = (freq[w] || 0) + 1;
+    }
+    const totalWords = words.length;
+    for (const [word, count] of Object.entries(freq)) {
+      // 同じ単語/フレーズが全体の50%以上 → ハルシネーション
+      if (count >= 3 && count / totalWords > 0.5) {
+        console.log(`Hallucination detected: "${word}" appears ${count}/${totalWords} times`);
+        return ""; // 全体がハルシネーション
+      }
+    }
+  }
+
+  // ★ テキスト全体が短い定型文の繰り返しかチェック
+  const uniqueChars = new Set(filtered.replace(/[\s、。！!？?]/g, "")).size;
+  if (filtered.length > 20 && uniqueChars < 10) {
+    console.log(`Hallucination detected: only ${uniqueChars} unique chars in ${filtered.length} char text`);
+    return "";
+  }
+
+  return filtered.trim();
+}
+
+// =====================================================
+// ★ 文字起こし自動補正AI（Step 1.5）
 // =====================================================
 async function correctTranscript(apiKey: string, rawTranscript: string): Promise<string> {
   try {
@@ -139,33 +195,32 @@ async function correctTranscript(apiKey: string, rawTranscript: string): Promise
             content: `あなたは歯科診療の音声書き起こしを補正する専門家です。
 Whisper APIの出力を受け取り、歯科用語の誤認識のみを最小限に修正します。
 
-## 補正ルール
+## 最重要ルール
+- 原文の意味・内容は絶対に変えない
+- 誤認識の修正のみ行う
+- 歯科と無関係なフレーズ（「チャンネル登録」「購読ボタン」「ご視聴ありがとう」等）はWhisperのハルシネーションなので削除する
 
-### 歯番号の補正（最重要）
+## 歯番号の補正
 - 「市場にばん」→「4番2番」、「五番」→「5番」、「6版」→「6番」
 - 「右下の6」→「右下6番」（「番」を補完）
-- 数字+「番」パターンは必ず保持
 
-### 歯科専門用語の補正
+## 歯科専門用語の補正
 - 「えふえむしー」「FMS」→「FMC」
 - 「CR中点」「CR充電」→「CR充填」
 - 「浸魔」「新魔」→「浸麻」
 - 「罰随」「抜水」→「抜髄」
 - 「コン中」→「根充」
-- 「感根地」「感根知」→「感根治」
+- 「感根地」→「感根治」
 - 「印傷」→「印象」
-- 「咬合再得」→「咬合採得」
 - 「テク」→「TEK」
 - 「P県」→「P検」
-- 「VOP」→「BOP」
 
-### 薬名の補正
+## 薬名の補正
 - 「録そにん」→「ロキソニン」
 - 「フロモクス」→「フロモックス」
-- 「むこすた」→「ムコスタ」
 
 ## 出力
-補正後のテキストのみ出力。説明不要。原文の意味・内容は絶対に変えない。`
+補正後のテキストのみ出力。説明不要。`
           },
           { role: "user", content: rawTranscript }
         ],
@@ -181,7 +236,7 @@ Whisper APIの出力を受け取り、歯科用語の誤認識のみを最小限
 
     const result = await res.json();
     const corrected = result.choices?.[0]?.message?.content?.trim();
-    return (corrected && corrected.length > 5) ? corrected : rawTranscript;
+    return (corrected && corrected.length > 3) ? corrected : rawTranscript;
   } catch (err) {
     console.error("Transcript correction error:", err);
     return rawTranscript;
@@ -204,6 +259,7 @@ async function generateSOAP(apiKey: string, transcript: string, existingSoapS: s
 1. 会話中の全ての処置・診断・歯番号を漏れなく記録する
 2. 保険請求に必要な傷病名を処置に対応させて全て記録する
 3. 歯番号は会話中の発話をそのまま使い、推測で変更しない
+4. ★ 会話テキストが歯科診療の内容を含まない場合（ハルシネーション等）は、全フィールドを空にする
 
 ## 歯番号のルール（FDI表記）
 右上: 18,17,16,15,14,13,12,11
@@ -213,56 +269,41 @@ async function generateSOAP(apiKey: string, transcript: string, existingSoapS: s
 
 「右下5番」→ 45、「左上6番」→ 26、「右上1番」→ 11
 番号が明示されている場合は必ずその番号を使用。変更禁止。
-位置の言及がない場合のみ文脈から推測可。
 
 ## 処置の分類
 
 【歯冠修復・補綴】
-- FMC: 形成+印象+次回セット = 2回以上 → procedures: ["FMC形成"] or ["FMCセット"]
-- CAD/CAM冠: キャドキャム冠
-- インレー: 金属の詰め物
-- CR充填: レジン修復、光重合 = 1回完結 → procedures: ["CR充填"]
-- ブリッジ: Br
+- FMC: 形成+印象+次回セット = 2回以上
+- CR充填: レジン修復、光重合 = 1回完結
+- インレー / CAD/CAM冠 / ブリッジ
 
 【歯内療法】
-- 抜髄: 麻酔抜髄 → procedures: ["抜髄"]
-- 感根治: 感染根管治療 → procedures: ["感根治"]
-- 根充: 根管充填 → procedures: ["根充"]
+- 抜髄 / 感根治 / 根充
 
 【歯周治療】
-- SC: スケーリング → procedures: ["SC"]
-- SRP: ルートプレーニング → procedures: ["SRP"]
-- P検: 歯周組織検査 → procedures: ["P検"]
-- TBI: 歯磨き指導 → procedures: ["TBI"]
-- PMTC: 機械的歯面清掃 → procedures: ["PMTC"]
+- SC / SRP / P検 / TBI / PMTC
 
 【外科】
 - 普通抜歯 / 難抜歯 / 切開排膿
 
 【その他】
-- 装着: セット → procedures: ["装着"]
-- TEK: 仮歯 → procedures: ["TEK"]
-- 印象 / 連合印象 / 咬合採得 / 浸麻 / 伝麻 / 処方
+- 装着 / TEK / 印象 / 連合印象 / 咬合採得 / 浸麻 / 伝麻 / 処方
 
-## 傷病名（診断名）のルール ★保険請求のため漏れ厳禁★
+## 傷病名のルール ★保険請求のため漏れ厳禁★
 
-### 明示的な傷病名: 会話で言及されたものは全て記録
 ### 処置から推定される傷病名（★必須追加★）:
 - FMC/インレー/CR充填 → う蝕(C2) ※C1/C3/C4が明示されていればそちら
 - 抜髄 → 歯髄炎(Pul)
 - 感根治 → 根尖性歯周炎(Per)
 - SC/SRP → 歯周炎(P)
-- 普通抜歯（親知らず以外）→ 該当傷病名
 - 親知らず抜歯 → 智歯周囲炎(Perico)
-- 装着（FMCセット等）→ 対応する歯の傷病名を継続
+- 装着 → 対応する歯の傷病名を継続
 
 ### 複数歯は各歯ごとに記録
-#45 CR充填 + #46 FMC形成 → 2つの傷病名を記録
 
 ## SOAP記載ルール
-
 S: 患者の主訴・訴え。複数あれば全て記録。
-O: 医師の所見+実施した処置の詳細。歯番号+所見、処置内容を全て記録。略語OK。
+O: 医師の所見+実施した処置の詳細。歯番号+所見、処置内容を全て記録。
 A: 歯番号+診断名を全て列挙。
 P: 本日の処置（全て）+ 処方薬（薬名・用量・日数）+ 次回予定。
 
@@ -270,7 +311,9 @@ P: 本日の処置（全て）+ 処方薬（薬名・用量・日数）+ 次回�
 必ずJSON形式のみ出力。説明文やマークダウン禁止。`;
 
     const userPrompt = `以下の歯科診察の会話テキストをSOAPノートに変換してください。
-★ 会話中の全ての処置・診断・歯番号を漏れなく記録すること。1つでも漏れたらNG。
+★ 会話中の全ての処置・診断・歯番号を漏れなく記録すること。
+
+★★ 重要: テキストが歯科診療と無関係な内容の場合（ハルシネーション等）は、全フィールドを空文字列にしてください。
 
 【既存のSOAP-S（問診票から入力済み）】
 ${existingSoapS || "（なし）"}
@@ -280,32 +323,27 @@ ${transcript}
 
 JSON形式で出力:
 {
-  "soap_s": "患者の主訴と自覚症状（既存のSOAP-Sも統合）",
-  "soap_o": "全ての検査所見・口腔内所見・実施した処置の詳細",
+  "soap_s": "患者の主訴と自覚症状",
+  "soap_o": "全ての検査所見・実施した処置の詳細",
   "soap_a": "全ての歯番号+診断名",
-  "soap_p": "全ての本日処置 + 処方薬（薬名・用量・日数）+ 次回予定",
+  "soap_p": "全ての本日処置 + 処方薬 + 次回予定",
   "tooth_updates": {"46": "in_treatment", "45": "treated"},
-  "procedures": ["FMC形成", "連合印象", "浸麻", "CR充填", "SC"],
+  "procedures": ["FMC形成", "CR充填", "浸麻"],
   "diagnoses": [
-    {"name": "う蝕(C2)", "tooth": "46", "code": "K022"},
-    {"name": "う蝕(C2)", "tooth": "45", "code": "K022"},
-    {"name": "歯周炎(P)", "tooth": "", "code": "K051"}
+    {"name": "う蝕(C2)", "tooth": "46", "code": "K022"}
   ]
 }
 
-★ diagnoses:
-- 全処置に対応する傷病名を記録。漏れ厳禁。
-- 処置した歯ごとに1つ以上の傷病名
-- コード: K020=CO, K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K045=Per, K046=歯根嚢胞, K050=G, K051=P, K052=歯周膿瘍, K081=Perico, K083=埋伏歯, K076=TMD, K120=Hys, K003=破折, K001=欠損, K300=不適合, K301=二次う蝕
+★ diagnoses: 全処置に対応する傷病名を記録。漏れ厳禁。
+コード: K020=CO, K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K045=Per, K050=G, K051=P, K081=Perico, K083=埋伏歯, K120=Hys, K003=破折
 
-★ procedures: 会話中の全処置を記録。正確な名称を使用:
-FMC, FMCセット, CAD/CAM冠, インレー, CR充填, ブリッジ, 抜髄, 感根治, 根充, 根管貼薬, SC, SRP, PMTC, P検, TBI, 普通抜歯, 難抜歯, 装着, TEK, 印象, 連合印象, 浸麻, 伝麻, 咬合採得, 処方, 切開排膿, 縫合, 抜糸
+★ procedures: 正確な名称を使用:
+FMC, FMCセット, CAD/CAM冠, インレー, CR充填, ブリッジ, 抜髄, 感根治, 根充, SC, SRP, PMTC, P検, TBI, 普通抜歯, 難抜歯, 装着, TEK, 印象, 連合印象, 浸麻, 伝麻, 咬合採得, 処方
 
-★ tooth_updates: caries / in_treatment / treated / crown / missing / implant / bridge
-- in_treatment: FMC形成, インレー形成, 抜髄, 感根治, 根充, TEK, 印象, SRP
+★ tooth_updates: caries / in_treatment / treated / crown / missing
+- in_treatment: FMC形成, 抜髄, 感根治, 根充, TEK, 印象, SRP
 - treated: CR充填, SC, PMTC, TBI, P検
-- crown: FMCセット, クラウンセット, インレーセット, 装着
-- caries: 未治療う蝕の発見`;
+- crown: FMCセット, インレーセット, 装着`;
 
     const models = ["gpt-4o", "gpt-4o-mini"];
     for (const model of models) {
