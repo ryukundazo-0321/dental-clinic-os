@@ -5,8 +5,10 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File;
     const existingSoapS = formData.get("existing_soap_s") as string || "";
+    const whisperOnly = formData.get("whisper_only") as string || "";
+    const fullTranscript = formData.get("full_transcript") as string || "";
 
-    if (!audioFile) {
+    if (!audioFile && !fullTranscript) {
       return NextResponse.json({ error: "音声ファイルがありません" }, { status: 400 });
     }
 
@@ -15,8 +17,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "OpenAI APIキーが設定されていません。Vercelの環境変数を確認してください。" }, { status: 500 });
     }
 
+    // ★ full_transcriptモード: テキストが既にある場合、Whisperスキップ → SOAP生成のみ
+    if (fullTranscript && fullTranscript.trim().length > 5) {
+      const transcript = fullTranscript;
+      // Step 2に直接進む（SOAP生成）
+      return await generateSOAP(apiKey, transcript, existingSoapS);
+    }
+
     // ===== Step 1: Whisper API で音声→テキスト変換 =====
-    // 歯科専門用語を網羅的にプロンプトに含めることで認識精度を大幅に向上
     let transcript = "";
     try {
       const whisperFormData = new FormData();
@@ -141,8 +149,22 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // ★ whisper_onlyモード: テキスト化のみでSOAP生成しない（チャンク分割用）
+    if (whisperOnly === "true") {
+      return NextResponse.json({ success: true, transcript });
+    }
+
     // ===== Step 2: GPT-4o でテキスト→SOAP+歯式変換 =====
-    let soapData = null;
+    return await generateSOAP(apiKey, transcript, existingSoapS);
+
+  } catch (error) {
+    console.error("Voice analyze error:", error);
+    return NextResponse.json({ error: "サーバーエラーが発生しました" }, { status: 500 });
+  }
+}
+
+// ★ SOAP生成を独立関数に切り出し（チャンク分割・full_transcriptモード両対応）
+async function generateSOAP(apiKey: string, transcript: string, existingSoapS: string) {
     try {
       const systemPrompt = `あなたは日本の歯科診療所で使用される電子カルテのAIアシスタントです。
 歯科医師の診察会話を正確にSOAPノートに変換する専門家です。
@@ -233,7 +255,7 @@ ${transcript}
   "soap_o": "検査所見・口腔内所見（略語使用OK）",
   "soap_a": "歯番号+診断名",
   "soap_p": "本日の処置内容 + 処方薬（薬名・用量・日数）+ 次回の予定",
-  "tooth_updates": {"45": "treated"},
+  "tooth_updates": {"45": "in_treatment"},
   "procedures": ["FMC形成", "連合印象", "浸麻", "処方"],
   "diagnoses": [
     {"name": "う蝕（C2）", "tooth": "45", "code": "K022"}
@@ -246,7 +268,27 @@ diagnoses注意事項:
 - toothはFDI番号（2桁）。全顎的な場合は空文字
 - 主要コード: K020=CO, K021=C1, K022=C2, K023=C3, K024=C4, K040=Pul, K041=歯髄壊死, K045=Per, K046=歯根嚢胞, K050=G, K051=P, K052=歯周膿瘍, K054=P1, K055=P2, K056=P3, K081=Perico, K083=埋伏歯, K076=TMD, K120=Hys, K130=咬合性外傷, K003=破折, K001=欠損, K300=補綴物不適合, K301=二次う蝕
 
-tooth_updatesの値: caries / treated / crown / missing / implant / bridge
+tooth_updatesの値: caries / in_treatment / treated / crown / missing / implant / bridge
+
+★★ tooth_updates のステータス判定ルール（超重要）★★
+- in_treatment（治療中）: 今後も来院が必要な場合。以下は必ず in_treatment にする:
+  FMC形成, インレー形成, クラウン形成 → in_treatment（次回セットが必要）
+  抜髄, 感根治, 根管治療, 根管形成, 根管貼薬 → in_treatment（根管治療は複数回かかる）
+  根充 → in_treatment（この後コア・クラウンが必要）
+  コアセット, 支台築造 → in_treatment（この後クラウンが必要）
+  TEK, 仮歯 → in_treatment（仮の状態）
+  印象, 連合印象, 型取り → in_treatment（補綴物製作待ち）
+  SRP → in_treatment（歯周治療は継続）
+
+- treated（処置済）: 1回の来院で治療が完結した場合のみ:
+  CR充填（光重合で即日完了）→ treated
+  SC, スケーリング（単発の歯石除去）→ treated
+  抜歯後の治癒 → treated
+
+- crown（冠）: 最終補綴物がセットされた時のみ:
+  FMCセット, クラウンセット, 装着 → crown
+
+- caries: 未治療のう蝕を発見した時（まだ治療していない）
 
 proceduresに含める処置名は、auto-billing（自動算定）のキーワードマッチに使われます。
 正確な処置名を使用してください:
@@ -337,9 +379,4 @@ FMC, CAD/CAM冠, 前装冠, インレー, CR充填, ブリッジ, 抜髄, 感根
       procedures: soapData.procedures || [],
       diagnoses: soapData.diagnoses || [],
     });
-
-  } catch (error) {
-    console.error("Voice analyze error:", error);
-    return NextResponse.json({ error: "サーバーエラーが発生しました" }, { status: 500 });
-  }
 }
