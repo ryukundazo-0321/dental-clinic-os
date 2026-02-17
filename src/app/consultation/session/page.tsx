@@ -104,13 +104,29 @@ function SessionContent() {
   // ★ loadSession拡張: patient_type + 前回カルテ取得
   async function loadSession() {
     setLoading(true);
-    const { data: apt } = await supabase
+    // patient_typeが存在しない場合に備えてtry-catchで安全に取得
+    let aptData: Record<string, unknown> | null = null;
+    
+    // まずpatient_type付きで試行
+    const { data: apt1, error: err1 } = await supabase
       .from("appointments")
-      .select(`id, patient_id, patient_type, notes, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio )`)
+      .select(`id, patient_id, patient_type, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio )`)
       .eq("id", appointmentId).single();
-    if (apt) {
-      setPatient(apt.patients as unknown as Patient);
-      setPatientType((apt as Record<string, unknown>).patient_type as string || "new");
+    
+    if (apt1 && !err1) {
+      aptData = apt1 as Record<string, unknown>;
+    } else {
+      // patient_typeカラムがない場合、なしで再試行
+      const { data: apt2 } = await supabase
+        .from("appointments")
+        .select(`id, patient_id, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio )`)
+        .eq("id", appointmentId).single();
+      if (apt2) aptData = apt2 as Record<string, unknown>;
+    }
+    
+    if (aptData) {
+      setPatient(aptData.patients as unknown as Patient);
+      setPatientType(String(aptData.patient_type || "new"));
       const { data: rec } = await supabase.from("medical_records").select("*").eq("appointment_id", appointmentId).limit(1).single();
       if (rec) {
         setRecord(rec as unknown as MedicalRecord);
@@ -118,8 +134,8 @@ function SessionContent() {
         if (billing) { setBillingItems((billing.procedures_detail || []) as BillingItem[]); setBillingTotal(billing.total_points || 0); }
       }
       // ★ 再診: 前回カルテ取得
-      if ((apt as Record<string, unknown>).patient_type === "returning") {
-        await loadPreviousVisit((apt.patients as unknown as Patient).id);
+      if (String(aptData.patient_type || "") === "returning") {
+        await loadPreviousVisit((aptData.patients as unknown as Patient).id);
       }
     }
     setLoading(false);
