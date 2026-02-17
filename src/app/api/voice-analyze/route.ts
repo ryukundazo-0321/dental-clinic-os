@@ -165,7 +165,9 @@ export async function POST(request: NextRequest) {
 
 // ★ SOAP生成を独立関数に切り出し（チャンク分割・full_transcriptモード両対応）
 async function generateSOAP(apiKey: string, transcript: string, existingSoapS: string) {
-    try {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let soapData: any = null;
+  try {
       const systemPrompt = `あなたは日本の歯科診療所で使用される電子カルテのAIアシスタントです。
 歯科医師の診察会話を正確にSOAPノートに変換する専門家です。
 
