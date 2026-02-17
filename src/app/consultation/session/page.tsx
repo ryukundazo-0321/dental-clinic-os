@@ -68,13 +68,6 @@ function SessionContent() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  // ★ チャンク分割用
-  const CHUNK_INTERVAL_MS = 10 * 60 * 1000; // 10分ごとに分割
-  const chunkTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const transcriptChunksRef = useRef<string[]>([]); // 蓄積テキスト
-  const isChunkSendingRef = useRef(false); // チャンク送信中フラグ
-  const [chunkCount, setChunkCount] = useState(0); // 送信済みチャンク数
-  const [chunkStatus, setChunkStatus] = useState(""); // チャンク送信状況表示
   const [editingTooth, setEditingTooth] = useState<string | null>(null);
   const [dentitionMode, setDentitionMode] = useState<DentitionMode>("permanent");
   const [checkMode, setCheckMode] = useState(false);
@@ -105,7 +98,6 @@ function SessionContent() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (chunkTimerRef.current) clearInterval(chunkTimerRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
@@ -210,170 +202,74 @@ function SessionContent() {
   function formatTimer(s: number) { return `${Math.floor(s/60).toString().padStart(2,"0")}:${(s%60).toString().padStart(2,"0")}`; }
   function formatDateJP(dateStr: string) { if (!dateStr) return ""; return new Date(dateStr).toLocaleDateString("ja-JP", { month: "short", day: "numeric" }); }
 
-  // ★ チャンク送信: Whisperでテキスト化のみ（SOAP生成しない）
-  async function sendChunkToWhisper(blob: Blob): Promise<string> {
-    try {
-      const fd = new FormData();
-      fd.append("audio", blob, "chunk.webm");
-      fd.append("whisper_only", "true");
-      fd.append("existing_soap_s", "");
-      const res = await fetch("/api/voice-analyze", { method: "POST", body: fd });
-      const data = await res.json();
-      if (data.success && data.transcript) return data.transcript;
-      if (data.transcript) return data.transcript;
-      return "";
-    } catch { return ""; }
-  }
-
-  // ★ 中間チャンクを切り出して送信（録音は継続）
-  async function flushCurrentChunk() {
-    if (isChunkSendingRef.current) return;
-    if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== "recording") return;
-    isChunkSendingRef.current = true;
-
-    // 現在のMediaRecorderを停止→Blob化→すぐ再開
-    const currentChunks = [...chunksRef.current];
-    chunksRef.current = [];
-
-    // stopして新しいデータを確定させる
-    mediaRecorderRef.current.stop();
-
-    // 少し待ってBlobを作成
-    await new Promise(r => setTimeout(r, 200));
-
-    const blob = new Blob(currentChunks, { type: "audio/webm" });
-
-    // すぐ録音再開（同じstreamを使う）
-    if (streamRef.current && streamRef.current.active) {
-      const mr = new MediaRecorder(streamRef.current, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = mr;
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {}; // 中間チャンクではonStopで何もしない
-      mr.start();
-    }
-
-    // Whisperに送信
-    if (blob.size > 1000) {
-      const num = chunkCount + 1;
-      setChunkStatus(`📡 チャンク${num}送信中...`);
-      const text = await sendChunkToWhisper(blob);
-      if (text) {
-        transcriptChunksRef.current.push(text);
-        setChunkCount(num);
-        setChunkStatus(`✅ チャンク${num}完了`);
-      } else {
-        setChunkStatus(`⚠️ チャンク${num}：認識テキストなし`);
-      }
-      setTimeout(() => setChunkStatus(""), 3000);
-    }
-
-    isChunkSendingRef.current = false;
-  }
-
+  // ===== 録音 =====
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       chunksRef.current = [];
-      transcriptChunksRef.current = [];
-      setChunkCount(0);
-      setChunkStatus("");
-
       const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = mr;
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {}; // onstopは後でfinalizeで処理
-      mr.start(1000); // 1秒ごとにデータ取得（チャンク分割のため）
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = () => {
+        // 録音停止時にBlobを作成してAPI送信
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        stream.getTracks().forEach(t => t.stop());
+        if (blob.size > 1000) {
+          analyzeAudio(blob);
+        } else {
+          setSaveMsg("⚠️ 音声が短すぎます。もう少し長く録音してください。");
+          setTimeout(() => setSaveMsg(""), 3000);
+        }
+      };
+      mr.start();
       setIsRecording(true);
       startTimer();
-
-      // ★ 10分ごとに自動チャンク送信
-      chunkTimerRef.current = setInterval(() => {
-        flushCurrentChunk();
-      }, CHUNK_INTERVAL_MS);
-    } catch { setSaveMsg("⚠️ マイクへのアクセスが拒否されました"); setTimeout(() => setSaveMsg(""), 3000); }
+    } catch (err) {
+      console.error("マイクアクセスエラー:", err);
+      setSaveMsg("⚠️ マイクへのアクセスが拒否されました。ブラウザの設定を確認してください。");
+      setTimeout(() => setSaveMsg(""), 5000);
+    }
   }
 
-  async function stopRecording() {
-    if (!mediaRecorderRef.current || !isRecording) return;
-    setIsRecording(false);
-
-    // チャンクタイマー停止
-    if (chunkTimerRef.current) { clearInterval(chunkTimerRef.current); chunkTimerRef.current = null; }
-
-    // 最後のチャンクを取得
-    const finalChunks = [...chunksRef.current];
-    mediaRecorderRef.current.stop();
-    await new Promise(r => setTimeout(r, 300));
-
-    // ストリーム停止
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
-
-    // 最後のチャンクをWhisperに送信
-    const lastBlob = new Blob(finalChunks, { type: "audio/webm" });
-    let lastText = "";
-    if (lastBlob.size > 1000) {
-      setChunkStatus("📡 最終チャンク送信中...");
-      lastText = await sendChunkToWhisper(lastBlob);
-      if (lastText) transcriptChunksRef.current.push(lastText);
+  function stopRecording() {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
     }
-
-    // 全テキストを結合
-    const fullTranscript = transcriptChunksRef.current.join("\n");
-    setChunkStatus("");
-
-    if (!fullTranscript || fullTranscript.trim().length < 5) {
-      setSaveMsg("⚠️ 音声が短すぎるか認識できませんでした");
-      setTimeout(() => setSaveMsg(""), 3000);
-      return;
-    }
-
-    // 全テキストでSOAP生成
-    await analyzeFullTranscript(fullTranscript);
-  }
-
-  // ★ 全テキストからSOAP生成（GPT-4o）
-  async function analyzeFullTranscript(fullTranscript: string) {
-    setAnalyzing(true);
-    setSaveMsg("🤖 AI分析中...");
-    setTranscript(fullTranscript);
-    try {
-      const fd = new FormData();
-      // テキストを直接送信するためにダミー音声は送らず、transcript_onlyモードを使う
-      const blob = new Blob([fullTranscript], { type: "text/plain" });
-      fd.append("audio", blob, "transcript.webm");
-      fd.append("existing_soap_s", record?.soap_s || "");
-      fd.append("full_transcript", fullTranscript);
-      const res = await fetch("/api/voice-analyze", { method: "POST", body: fd });
-      const data = await res.json();
-      if (data.success) {
-        setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates, procedures: data.procedures, diagnoses: data.diagnoses || [] });
-        setShowAiPreview(true);
-        setSaveMsg(data.warning ? `⚠️ ${data.warning}` : "✅ AI分析完了！");
-      } else {
-        setSaveMsg(`❌ ${data.error || "分析失敗"}`);
-      }
-    } catch { setSaveMsg("❌ AI分析に失敗しました"); }
-    setAnalyzing(false);
-    setTimeout(() => setSaveMsg(""), 5000);
   }
 
   async function analyzeAudio(blob: Blob) {
-    // 後方互換: 単発録音の場合（10分以内）
     setAnalyzing(true);
-    setSaveMsg("🤖 AI分析中...");
+    setSaveMsg("🤖 AI分析中... しばらくお待ちください");
     try {
-      const fd = new FormData(); fd.append("audio", blob, "recording.webm"); fd.append("existing_soap_s", record?.soap_s || "");
+      const fd = new FormData();
+      fd.append("audio", blob, "recording.webm");
+      fd.append("existing_soap_s", record?.soap_s || "");
       const res = await fetch("/api/voice-analyze", { method: "POST", body: fd });
       const data = await res.json();
       if (data.success) {
-        setTranscript(data.transcript);
-        setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates, procedures: data.procedures, diagnoses: data.diagnoses || [] });
+        setTranscript(data.transcript || "");
+        setAiResult({
+          soap: data.soap,
+          tooth_updates: data.tooth_updates || {},
+          procedures: data.procedures || [],
+          diagnoses: data.diagnoses || [],
+        });
         setShowAiPreview(true);
-        setSaveMsg(data.warning ? `⚠️ ${data.warning}` : "✅ AI分析完了！");
-      } else { setSaveMsg(`❌ ${data.error || "分析失敗"}`); if (data.transcript) setTranscript(data.transcript); }
-    } catch { setSaveMsg("❌ AI分析に失敗しました"); }
-    setAnalyzing(false); setTimeout(() => setSaveMsg(""), 5000);
+        setSaveMsg(data.warning ? `⚠️ ${data.warning}` : "✅ AI分析完了！内容を確認してください");
+      } else {
+        setSaveMsg(`❌ ${data.error || "分析失敗"}`);
+        if (data.transcript) setTranscript(data.transcript);
+      }
+    } catch (err) {
+      console.error("AI分析エラー:", err);
+      setSaveMsg("❌ AI分析に失敗しました。ネットワーク接続を確認してください。");
+    }
+    setAnalyzing(false);
+    setTimeout(() => setSaveMsg(""), 8000);
   }
 
   async function applyAiResult() {
@@ -486,8 +382,6 @@ function SessionContent() {
           </div>
           <div className="flex items-center gap-3">
             {saveMsg && <span className="text-sm font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full">{saveMsg}</span>}
-            {chunkStatus && <span className="text-sm font-bold text-purple-600 bg-purple-50 px-3 py-1 rounded-full">{chunkStatus}</span>}
-            {isRecording && chunkCount > 0 && <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-full">📦 {chunkCount}チャンク送信済</span>}
             <div className={`flex items-center gap-2 px-4 py-2 rounded-full font-mono text-lg font-bold ${isRecording ? "bg-red-50 text-red-600 border border-red-200" : "bg-gray-100 text-gray-600"}`}>
               {isRecording && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />}
               {formatTimer(elapsedSeconds)}
