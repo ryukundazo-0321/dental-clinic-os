@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// ★ Vercelサーバーレス関数のタイムアウトを60秒に設定
+// Hobbyプラン: Fluid Compute有効で最大60秒
+// Proプラン: 最大300秒
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
