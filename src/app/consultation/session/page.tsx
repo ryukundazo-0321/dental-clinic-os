@@ -257,8 +257,8 @@ function SessionContent() {
           return;
         }
 
-        // ★ 10MB以上なら圧縮+自動分割処理
-        if (sizeMB > 10) {
+        // ★ 3MB以上（約3-4分以上の録音）なら圧縮+5分分割処理
+        if (sizeMB > 3) {
           await compressAndTranscribe(blob);
         } else {
           await transcribeAudio(blob);
@@ -293,28 +293,29 @@ function SessionContent() {
       audioCtx.close();
 
       const samples = rendered.getChannelData(0);
-      const bytesPerSample = 2; // 16bit
-      const totalBytes = samples.length * bytesPerSample + 44; // +WAV header
-      const maxBytes = 24 * 1024 * 1024; // 24MB（余裕を持たせる）
+      const durationMin = rendered.duration / 60;
+      console.log("Audio duration:", durationMin.toFixed(1) + "min, samples:", samples.length);
 
-      if (totalBytes <= maxBytes) {
-        // ★ 25MB以下: そのまま1回で送信
+      // ★★★ 5分ごとに時間ベースで分割（Whisperは長い音声で後半が崩れるため）
+      const chunkDurationSec = 5 * 60; // 5分
+      const samplesPerChunk = chunkDurationSec * targetSampleRate;
+
+      if (samples.length <= samplesPerChunk) {
+        // 5分以下: そのまま1回で送信
         const wavBlob = audioBufferToWav(rendered);
-        console.log("Compressed to single WAV:", (wavBlob.size / 1024 / 1024).toFixed(1) + "MB");
+        console.log("Single WAV:", (wavBlob.size / 1024 / 1024).toFixed(1) + "MB");
         await transcribeAudio(wavBlob);
       } else {
-        // ★ 25MB超: 分割して複数回送信
-        const samplesPerChunk = Math.floor((maxBytes - 44) / bytesPerSample);
+        // 5分超: 5分ごとに分割して送信
         const numChunks = Math.ceil(samples.length / samplesPerChunk);
-        console.log("Splitting into", numChunks, "chunks");
-        showMsg(`📝 音声を${numChunks}分割で処理中...`);
+        console.log("Splitting into", numChunks, "chunks of ~5min each");
+        showMsg(`📝 ${durationMin.toFixed(0)}分の音声を${numChunks}分割で処理中...`);
 
         for (let i = 0; i < numChunks; i++) {
           const start = i * samplesPerChunk;
           const end = Math.min(start + samplesPerChunk, samples.length);
           const chunkSamples = samples.slice(start, end);
 
-          // チャンク用のAudioBufferを作成
           const chunkBuffer = new AudioBuffer({
             numberOfChannels: 1,
             length: chunkSamples.length,
@@ -323,14 +324,15 @@ function SessionContent() {
           chunkBuffer.getChannelData(0).set(chunkSamples);
 
           const wavBlob = audioBufferToWav(chunkBuffer);
-          console.log(`Chunk ${i + 1}/${numChunks}:`, (wavBlob.size / 1024 / 1024).toFixed(1) + "MB");
+          const chunkMin = (chunkSamples.length / targetSampleRate / 60).toFixed(1);
+          console.log(`Chunk ${i + 1}/${numChunks}: ${chunkMin}min, ${(wavBlob.size / 1024 / 1024).toFixed(1)}MB`);
           showMsg(`📝 文字起こし中... (${i + 1}/${numChunks})`);
           await transcribeAudio(wavBlob);
         }
+        showMsg(`✅ ${numChunks}件の文字起こし完了`);
       }
     } catch (e) {
       console.error("Audio processing failed:", e);
-      // 圧縮失敗時はそのまま送信を試みる
       if (blob.size < 24 * 1024 * 1024) {
         await transcribeAudio(blob);
       } else {
