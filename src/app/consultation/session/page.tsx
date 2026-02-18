@@ -123,7 +123,6 @@ function SessionContent() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (autoSplitTimerRef.current) clearTimeout(autoSplitTimerRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
@@ -219,20 +218,16 @@ function SessionContent() {
   // ★★★ 新録音フロー: 録音 → 文字起こし → DB保存 → 画面表示 ★★★
   // ===================================================================
 
-  // ★★★ セグメント分割録音
-  // 一時停止ごとにセグメントをWhisperに送信。再開時は新しい録音を開始。
-  // これにより1セグメントが短くなり、Whisper 25MB制限を回避。
-  // ユーザー体験は変わらない（一時停止→再開するだけ）。
-  const segmentStartRef = useRef<number>(0);
-  const selectedMimeRef = useRef<string>("");
+  // ★★★ シンプルな録音（一時停止=MediaRecorder.pause、データは壊さない）
+  // 停止時に一括でBlobを作成。大きすぎる場合はダウンサンプリングで圧縮。
 
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      chunksRef.current = [];
       recordingStartRef.current = Date.now();
 
-      // ブラウザ互換性: 最適なMIMEタイプを選択
       const mimeTypes = [
         "audio/webm;codecs=opus",
         "audio/webm",
@@ -240,17 +235,37 @@ function SessionContent() {
         "audio/mp4",
         "audio/wav",
       ];
-      selectedMimeRef.current = "";
+      let selectedMime = "";
       for (const mime of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mime)) {
-          selectedMimeRef.current = mime;
-          break;
-        }
+        if (MediaRecorder.isTypeSupported(mime)) { selectedMime = mime; break; }
       }
 
-      startNewSegment(stream);
+      const mrOptions: MediaRecorderOptions = {};
+      if (selectedMime) mrOptions.mimeType = selectedMime;
+      const mr = new MediaRecorder(stream, mrOptions);
+      mediaRecorderRef.current = mr;
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        const actualMime = mr.mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: actualMime });
+        stream.getTracks().forEach(t => t.stop());
+        const sizeMB = blob.size / 1024 / 1024;
+        console.log("Recording stopped:", { sizeMB: sizeMB.toFixed(1) + "MB", type: actualMime });
+
+        if (blob.size < 1000) {
+          showMsg("⚠️ 音声が短すぎます。もう少し長く録音してください。");
+          return;
+        }
+
+        // ★ 10MB以上なら圧縮+自動分割処理
+        if (sizeMB > 10) {
+          await compressAndTranscribe(blob);
+        } else {
+          await transcribeAudio(blob);
+        }
+      };
+      mr.start(1000);
       setIsRecording(true);
-      setIsPaused(false);
       startTimer();
       showMsg("🔴 録音中...");
     } catch {
@@ -258,93 +273,132 @@ function SessionContent() {
     }
   }
 
-  // 新しいセグメント（MediaRecorder）を開始
-  const autoSplitTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // ★ 音声圧縮: WebAudioAPIで16kHz monoのWAVに変換
+  // 25MB超えの場合は分割して複数回Whisperに送る
+  async function compressAndTranscribe(blob: Blob) {
+    showMsg("📝 音声を処理中...");
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-  function startNewSegment(stream: MediaStream) {
-    chunksRef.current = [];
-    segmentStartRef.current = Date.now();
+      // 16kHz mono にリサンプリング
+      const targetSampleRate = 16000;
+      const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(offlineCtx.destination);
+      source.start(0);
+      const rendered = await offlineCtx.startRendering();
+      audioCtx.close();
 
-    const mrOptions: MediaRecorderOptions = {};
-    if (selectedMimeRef.current) mrOptions.mimeType = selectedMimeRef.current;
-    const mr = new MediaRecorder(stream, mrOptions);
-    mediaRecorderRef.current = mr;
+      const samples = rendered.getChannelData(0);
+      const bytesPerSample = 2; // 16bit
+      const totalBytes = samples.length * bytesPerSample + 44; // +WAV header
+      const maxBytes = 24 * 1024 * 1024; // 24MB（余裕を持たせる）
 
-    mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    mr.onstop = async () => {
-      const actualMime = mr.mimeType || "audio/webm";
-      const blob = new Blob(chunksRef.current, { type: actualMime });
-      const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
-      console.log("Segment stopped:", { size: blob.size, sizeMB: sizeMB + "MB", type: actualMime });
-      if (blob.size > 1000) {
-        await transcribeAudio(blob);
-      }
-    };
-    mr.start(1000);
+      if (totalBytes <= maxBytes) {
+        // ★ 25MB以下: そのまま1回で送信
+        const wavBlob = audioBufferToWav(rendered);
+        console.log("Compressed to single WAV:", (wavBlob.size / 1024 / 1024).toFixed(1) + "MB");
+        await transcribeAudio(wavBlob);
+      } else {
+        // ★ 25MB超: 分割して複数回送信
+        const samplesPerChunk = Math.floor((maxBytes - 44) / bytesPerSample);
+        const numChunks = Math.ceil(samples.length / samplesPerChunk);
+        console.log("Splitting into", numChunks, "chunks");
+        showMsg(`📝 音声を${numChunks}分割で処理中...`);
 
-    // ★ 安全策: 8分連続録音で自動分割（一時停止なしで長時間録音した場合の保険）
-    if (autoSplitTimerRef.current) clearTimeout(autoSplitTimerRef.current);
-    autoSplitTimerRef.current = setTimeout(() => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        console.log("Auto-split at 8 minutes");
-        mediaRecorderRef.current.stop(); // onstop → transcribeAudio
-        // 新しいセグメントを自動開始
-        if (streamRef.current) {
-          const tracks = streamRef.current.getAudioTracks();
-          if (tracks.length > 0 && tracks[0].readyState === "live") {
-            startNewSegment(streamRef.current);
-            showMsg("🔴 録音中...（自動保存しました）");
-          }
+        for (let i = 0; i < numChunks; i++) {
+          const start = i * samplesPerChunk;
+          const end = Math.min(start + samplesPerChunk, samples.length);
+          const chunkSamples = samples.slice(start, end);
+
+          // チャンク用のAudioBufferを作成
+          const chunkBuffer = new AudioBuffer({
+            numberOfChannels: 1,
+            length: chunkSamples.length,
+            sampleRate: targetSampleRate,
+          });
+          chunkBuffer.getChannelData(0).set(chunkSamples);
+
+          const wavBlob = audioBufferToWav(chunkBuffer);
+          console.log(`Chunk ${i + 1}/${numChunks}:`, (wavBlob.size / 1024 / 1024).toFixed(1) + "MB");
+          showMsg(`📝 文字起こし中... (${i + 1}/${numChunks})`);
+          await transcribeAudio(wavBlob);
         }
       }
-    }, 8 * 60 * 1000); // 8分
+    } catch (e) {
+      console.error("Audio processing failed:", e);
+      // 圧縮失敗時はそのまま送信を試みる
+      if (blob.size < 24 * 1024 * 1024) {
+        await transcribeAudio(blob);
+      } else {
+        showMsg("❌ 音声ファイルの処理に失敗しました。録音を短くしてみてください。");
+      }
+    }
+  }
+
+  // AudioBuffer → WAV Blob
+  function audioBufferToWav(buffer: AudioBuffer): Blob {
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    const samples = buffer.getChannelData(0);
+    const dataLength = samples.length * (bitDepth / 8);
+    const headerLength = 44;
+    const totalLength = headerLength + dataLength;
+
+    const wav = new ArrayBuffer(totalLength);
+    const view = new DataView(wav);
+
+    const writeString = (offset: number, str: string) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+    writeString(0, "RIFF");
+    view.setUint32(4, totalLength - 8, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * (bitDepth / 8), true);
+    view.setUint16(32, numChannels * (bitDepth / 8), true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, "data");
+    view.setUint32(40, dataLength, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return new Blob([wav], { type: "audio/wav" });
   }
 
   function stopRecording() {
-    if (autoSplitTimerRef.current) { clearTimeout(autoSplitTimerRef.current); autoSplitTimerRef.current = null; }
     if (mediaRecorderRef.current && isRecording) {
-      if (isPaused) {
-        // 一時停止中 → 既にセグメント送信済み。ストリームだけ止める。
-      } else {
-        // 録音中 → 最後のセグメントを送信
-        mediaRecorderRef.current.stop();
-      }
-      // ストリーム停止
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-      }
+      if (isPaused) mediaRecorderRef.current.resume();
+      mediaRecorderRef.current.stop();
       setIsRecording(false);
       setIsPaused(false);
     }
   }
 
-  // ★ 一時停止 = セグメントを送信
   function pauseRecording() {
     if (mediaRecorderRef.current && isRecording && !isPaused) {
-      // MediaRecorderを停止（onstopが発火 → transcribeAudio）
-      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.pause();
       setIsPaused(true);
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; setTimerRunning(false); }
-      showMsg("⏸️ 一時停止（文字起こし送信中...）");
+      showMsg("⏸️ 一時停止中");
     }
   }
 
-  // ★ 再開 = 新しいセグメントで録音開始
   function resumeRecording() {
-    if (isRecording && isPaused && streamRef.current) {
-      // ストリームがまだ生きているか確認
-      const tracks = streamRef.current.getAudioTracks();
-      if (tracks.length > 0 && tracks[0].readyState === "live") {
-        startNewSegment(streamRef.current);
-      } else {
-        // ストリームが死んでいたら新しく取得
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-          streamRef.current = stream;
-          startNewSegment(stream);
-        }).catch(() => {
-          showMsg("⚠️ マイクを再取得できませんでした。録音を停止して再開してください。");
-        });
-      }
+    if (mediaRecorderRef.current && isRecording && isPaused) {
+      mediaRecorderRef.current.resume();
       setIsPaused(false);
       startTimer();
       showMsg("🔴 録音再開");
