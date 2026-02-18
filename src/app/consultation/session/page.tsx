@@ -123,6 +123,7 @@ function SessionContent() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (autoSplitTimerRef.current) clearTimeout(autoSplitTimerRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
@@ -218,14 +219,20 @@ function SessionContent() {
   // ★★★ 新録音フロー: 録音 → 文字起こし → DB保存 → 画面表示 ★★★
   // ===================================================================
 
+  // ★★★ セグメント分割録音
+  // 一時停止ごとにセグメントをWhisperに送信。再開時は新しい録音を開始。
+  // これにより1セグメントが短くなり、Whisper 25MB制限を回避。
+  // ユーザー体験は変わらない（一時停止→再開するだけ）。
+  const segmentStartRef = useRef<number>(0);
+  const selectedMimeRef = useRef<string>("");
+
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      chunksRef.current = [];
       recordingStartRef.current = Date.now();
 
-      // ★ ブラウザ互換性: 最適なMIMEタイプを選択
+      // ブラウザ互換性: 最適なMIMEタイプを選択
       const mimeTypes = [
         "audio/webm;codecs=opus",
         "audio/webm",
@@ -233,34 +240,17 @@ function SessionContent() {
         "audio/mp4",
         "audio/wav",
       ];
-      let selectedMime = "";
+      selectedMimeRef.current = "";
       for (const mime of mimeTypes) {
         if (MediaRecorder.isTypeSupported(mime)) {
-          selectedMime = mime;
+          selectedMimeRef.current = mime;
           break;
         }
       }
-      console.log("Selected MIME:", selectedMime || "default");
 
-      const mrOptions: MediaRecorderOptions = {};
-      if (selectedMime) mrOptions.mimeType = selectedMime;
-      const mr = new MediaRecorder(stream, mrOptions);
-      mediaRecorderRef.current = mr;
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        // ★ 録音時のMIMEタイプを使用
-        const actualMime = mr.mimeType || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type: actualMime });
-        stream.getTracks().forEach(t => t.stop());
-        console.log("Recording stopped:", { size: blob.size, type: actualMime, chunks: chunksRef.current.length });
-        if (blob.size > 1000) {
-          await transcribeAudio(blob);
-        } else {
-          showMsg("⚠️ 音声が短すぎます。もう少し長く録音してください。");
-        }
-      };
-      mr.start(1000); // ★ 1秒ごとにデータチャンクを取得（互換性向上）
+      startNewSegment(stream);
       setIsRecording(true);
+      setIsPaused(false);
       startTimer();
       showMsg("🔴 録音中...");
     } catch {
@@ -268,27 +258,93 @@ function SessionContent() {
     }
   }
 
+  // 新しいセグメント（MediaRecorder）を開始
+  const autoSplitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  function startNewSegment(stream: MediaStream) {
+    chunksRef.current = [];
+    segmentStartRef.current = Date.now();
+
+    const mrOptions: MediaRecorderOptions = {};
+    if (selectedMimeRef.current) mrOptions.mimeType = selectedMimeRef.current;
+    const mr = new MediaRecorder(stream, mrOptions);
+    mediaRecorderRef.current = mr;
+
+    mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mr.onstop = async () => {
+      const actualMime = mr.mimeType || "audio/webm";
+      const blob = new Blob(chunksRef.current, { type: actualMime });
+      const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+      console.log("Segment stopped:", { size: blob.size, sizeMB: sizeMB + "MB", type: actualMime });
+      if (blob.size > 1000) {
+        await transcribeAudio(blob);
+      }
+    };
+    mr.start(1000);
+
+    // ★ 安全策: 8分連続録音で自動分割（一時停止なしで長時間録音した場合の保険）
+    if (autoSplitTimerRef.current) clearTimeout(autoSplitTimerRef.current);
+    autoSplitTimerRef.current = setTimeout(() => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        console.log("Auto-split at 8 minutes");
+        mediaRecorderRef.current.stop(); // onstop → transcribeAudio
+        // 新しいセグメントを自動開始
+        if (streamRef.current) {
+          const tracks = streamRef.current.getAudioTracks();
+          if (tracks.length > 0 && tracks[0].readyState === "live") {
+            startNewSegment(streamRef.current);
+            showMsg("🔴 録音中...（自動保存しました）");
+          }
+        }
+      }
+    }, 8 * 60 * 1000); // 8分
+  }
+
   function stopRecording() {
+    if (autoSplitTimerRef.current) { clearTimeout(autoSplitTimerRef.current); autoSplitTimerRef.current = null; }
     if (mediaRecorderRef.current && isRecording) {
-      if (isPaused) mediaRecorderRef.current.resume(); // 一時停止中なら再開してからstop
-      mediaRecorderRef.current.stop();
+      if (isPaused) {
+        // 一時停止中 → 既にセグメント送信済み。ストリームだけ止める。
+      } else {
+        // 録音中 → 最後のセグメントを送信
+        mediaRecorderRef.current.stop();
+      }
+      // ストリーム停止
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+      }
       setIsRecording(false);
       setIsPaused(false);
     }
   }
 
+  // ★ 一時停止 = セグメントを送信
   function pauseRecording() {
     if (mediaRecorderRef.current && isRecording && !isPaused) {
-      mediaRecorderRef.current.pause();
+      // MediaRecorderを停止（onstopが発火 → transcribeAudio）
+      mediaRecorderRef.current.stop();
       setIsPaused(true);
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; setTimerRunning(false); }
-      showMsg("⏸️ 一時停止中");
+      showMsg("⏸️ 一時停止（文字起こし送信中...）");
     }
   }
 
+  // ★ 再開 = 新しいセグメントで録音開始
   function resumeRecording() {
-    if (mediaRecorderRef.current && isRecording && isPaused) {
-      mediaRecorderRef.current.resume();
+    if (isRecording && isPaused && streamRef.current) {
+      // ストリームがまだ生きているか確認
+      const tracks = streamRef.current.getAudioTracks();
+      if (tracks.length > 0 && tracks[0].readyState === "live") {
+        startNewSegment(streamRef.current);
+      } else {
+        // ストリームが死んでいたら新しく取得
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+          streamRef.current = stream;
+          startNewSegment(stream);
+        }).catch(() => {
+          showMsg("⚠️ マイクを再取得できませんでした。録音を停止して再開してください。");
+        });
+      }
       setIsPaused(false);
       startTimer();
       showMsg("🔴 録音再開");
