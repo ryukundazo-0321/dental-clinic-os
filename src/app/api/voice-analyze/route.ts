@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
 
       // SOAP生成（full_transcript）
       if (json.full_transcript && json.full_transcript.trim().length > 5) {
+        console.log("SOAP generation request - transcript length:", json.full_transcript.length, "chars");
         return await generateSOAP(apiKey, json.full_transcript, json.existing_soap_s || "");
       }
 
@@ -354,7 +355,7 @@ ${transcript}
               { role: "user", content: userPrompt },
             ],
             temperature: 0.1,
-            max_tokens: 3000,
+            max_tokens: 4096,
             response_format: { type: "json_object" },
           }),
         });
@@ -366,6 +367,8 @@ ${transcript}
 
         const result = await res.json();
         const content = result.choices?.[0]?.message?.content || "";
+        console.log("GPT raw response length:", content.length, "chars");
+        console.log("GPT response preview:", content.substring(0, 300));
         const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
         soapData = JSON.parse(jsonStr);
 
@@ -376,7 +379,7 @@ ${transcript}
         break;
 
       } catch (modelErr) {
-        console.error(`${model} failed:`, modelErr);
+        console.error(`${model} failed:`, modelErr instanceof Error ? modelErr.message : modelErr);
         continue;
       }
     }
