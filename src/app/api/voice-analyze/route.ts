@@ -6,6 +6,37 @@ export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "OpenAI APIキーが設定されていません。Vercelの環境変数を確認してください。" }, { status: 500 });
+    }
+
+    const contentType = request.headers.get("content-type") || "";
+
+    // ★★★ JSONモード: フロントエンドから補正リクエスト or SOAP生成
+    // 音声データを含まないのでVercelの4.5MB制限に引っかからない
+    if (contentType.includes("application/json")) {
+      const json = await request.json();
+
+      // テキスト補正のみ（whisper_only + raw_transcript）
+      if (json.whisper_only && json.raw_transcript) {
+        const filtered = filterHallucinations(json.raw_transcript);
+        if (!filtered || filtered.trim().length < 3) {
+          return NextResponse.json({ success: true, transcript: "" });
+        }
+        const corrected = await quickCorrect(apiKey, filtered);
+        return NextResponse.json({ success: true, transcript: corrected });
+      }
+
+      // SOAP生成（full_transcript）
+      if (json.full_transcript && json.full_transcript.trim().length > 5) {
+        return await generateSOAP(apiKey, json.full_transcript, json.existing_soap_s || "");
+      }
+
+      return NextResponse.json({ error: "不正なリクエスト" }, { status: 400 });
+    }
+
+    // ★ FormDataモード（従来互換: 小さい音声ファイルをVercel経由で処理）
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File;
     const existingSoapS = formData.get("existing_soap_s") as string || "";
@@ -16,12 +47,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "音声ファイルがありません" }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "OpenAI APIキーが設定されていません。Vercelの環境変数を確認してください。" }, { status: 500 });
-    }
-
-    // ★ full_transcriptモード: Whisperスキップ → 統合SOAP生成
+    // full_transcriptモード: Whisperスキップ → 統合SOAP生成
     if (fullTranscript && fullTranscript.trim().length > 5) {
       return await generateSOAP(apiKey, fullTranscript, existingSoapS);
     }
