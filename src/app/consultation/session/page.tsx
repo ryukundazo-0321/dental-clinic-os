@@ -275,9 +275,56 @@ function SessionContent() {
 
   // ★ 音声圧縮: WebAudioAPIで16kHz monoのWAVに変換
   // 25MB超えの場合は分割して複数回Whisperに送る
+  // ★ Whisperだけ呼ぶ（DB保存しない）。チャンク分割時に使用。
+  async function whisperTranscribe(blob: Blob, apiKey: string): Promise<string> {
+    const mimeType = blob.type || "audio/wav";
+    let fileName = "recording.wav";
+    if (mimeType.includes("webm")) fileName = "recording.webm";
+    else if (mimeType.includes("mp4") || mimeType.includes("m4a")) fileName = "recording.m4a";
+    else if (mimeType.includes("ogg")) fileName = "recording.ogg";
+
+    const whisperFd = new FormData();
+    whisperFd.append("file", blob, fileName);
+    whisperFd.append("model", "whisper-1");
+    whisperFd.append("language", "ja");
+    whisperFd.append("prompt",
+      "歯科診療所での医師と患者の会話。" +
+      "「右下6番、C2ですね。CR充填しましょう。浸麻します。」" +
+      "「痛みはどうですか？」「冷たいものがしみます。」" +
+      "う蝕 FMC CR充填 抜髄 根管治療 SC SRP インレー 印象 " +
+      "右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番"
+    );
+    whisperFd.append("temperature", "0");
+
+    const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: whisperFd,
+    });
+
+    if (!whisperRes.ok) {
+      const errText = await whisperRes.text();
+      console.error("Whisper error:", whisperRes.status, errText);
+      return "";
+    }
+
+    const result = await whisperRes.json();
+    return result.text || "";
+  }
+
   async function compressAndTranscribe(blob: Blob) {
+    setTranscribing(true);
     showMsg("📝 音声を処理中...");
     try {
+      // APIキーを先に取得
+      const tokenRes = await fetch("/api/whisper-token");
+      const tokenData = await tokenRes.json();
+      if (!tokenData.key) {
+        showMsg("❌ APIキーの取得に失敗しました");
+        setTranscribing(false);
+        return;
+      }
+
       const arrayBuffer = await blob.arrayBuffer();
       const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -299,46 +346,94 @@ function SessionContent() {
       // ★★★ 5分ごとに時間ベースで分割（Whisperは長い音声で後半が崩れるため）
       const chunkDurationSec = 5 * 60; // 5分
       const samplesPerChunk = chunkDurationSec * targetSampleRate;
+      const numChunks = Math.ceil(samples.length / samplesPerChunk);
+      const allTexts: string[] = [];
 
-      if (samples.length <= samplesPerChunk) {
-        // 5分以下: そのまま1回で送信
-        const wavBlob = audioBufferToWav(rendered);
-        console.log("Single WAV:", (wavBlob.size / 1024 / 1024).toFixed(1) + "MB");
-        await transcribeAudio(wavBlob);
+      if (numChunks === 1) {
+        showMsg("📝 文字起こし中...");
       } else {
-        // 5分超: 5分ごとに分割して送信
-        const numChunks = Math.ceil(samples.length / samplesPerChunk);
-        console.log("Splitting into", numChunks, "chunks of ~5min each");
         showMsg(`📝 ${durationMin.toFixed(0)}分の音声を${numChunks}分割で処理中...`);
+      }
 
-        for (let i = 0; i < numChunks; i++) {
-          const start = i * samplesPerChunk;
-          const end = Math.min(start + samplesPerChunk, samples.length);
-          const chunkSamples = samples.slice(start, end);
+      for (let i = 0; i < numChunks; i++) {
+        const start = i * samplesPerChunk;
+        const end = Math.min(start + samplesPerChunk, samples.length);
+        const chunkSamples = samples.slice(start, end);
 
-          const chunkBuffer = new AudioBuffer({
-            numberOfChannels: 1,
-            length: chunkSamples.length,
-            sampleRate: targetSampleRate,
-          });
-          chunkBuffer.getChannelData(0).set(chunkSamples);
+        const chunkBuffer = new AudioBuffer({
+          numberOfChannels: 1,
+          length: chunkSamples.length,
+          sampleRate: targetSampleRate,
+        });
+        chunkBuffer.getChannelData(0).set(chunkSamples);
 
-          const wavBlob = audioBufferToWav(chunkBuffer);
-          const chunkMin = (chunkSamples.length / targetSampleRate / 60).toFixed(1);
-          console.log(`Chunk ${i + 1}/${numChunks}: ${chunkMin}min, ${(wavBlob.size / 1024 / 1024).toFixed(1)}MB`);
+        const wavBlob = audioBufferToWav(chunkBuffer);
+        if (numChunks > 1) {
           showMsg(`📝 文字起こし中... (${i + 1}/${numChunks})`);
-          await transcribeAudio(wavBlob);
         }
-        showMsg(`✅ ${numChunks}件の文字起こし完了`);
+
+        const text = await whisperTranscribe(wavBlob, tokenData.key);
+        if (text && !detectHallucination(text)) {
+          allTexts.push(text);
+        }
+        console.log(`Chunk ${i + 1}/${numChunks}: ${text.length}文字`);
+      }
+
+      // ★★★ 全チャンクを結合して1つの「録音」としてDB保存
+      const combinedText = allTexts.join("\n");
+      if (!combinedText || combinedText.trim().length < 5) {
+        showMsg("⚠️ 音声を認識できませんでした。");
+        setTranscribing(false);
+        return;
+      }
+
+      // テキスト補正
+      let correctedTranscript = combinedText;
+      try {
+        const corrRes = await fetch("/api/voice-analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ whisper_only: true, raw_transcript: combinedText }),
+        });
+        if (corrRes.ok) {
+          const corrData = await corrRes.json();
+          if (corrData.success && corrData.transcript && corrData.transcript.length > 3) {
+            correctedTranscript = corrData.transcript;
+          }
+        }
+      } catch (e) {
+        console.log("Correction skipped:", e);
+      }
+
+      const durationSec = Math.round((Date.now() - recordingStartRef.current) / 1000);
+      const nextNum = transcripts.length + 1;
+
+      // 1つの「録音N」としてDB保存
+      const { data: saved, error } = await supabase.from("consultation_transcripts").insert({
+        appointment_id: appointmentId,
+        patient_id: patient?.id,
+        recording_number: nextNum,
+        transcript_text: correctedTranscript,
+        duration_seconds: durationSec,
+      }).select().single();
+
+      if (saved && !error) {
+        setTranscripts(prev => [...prev, saved as TranscriptEntry]);
+        showMsg(`✅ 録音${nextNum}の文字起こし完了（${formatTimer(durationSec)}）`);
+      } else {
+        console.error("DB保存エラー:", error);
+        showMsg("⚠️ 文字起こしは成功しましたがDB保存に失敗しました");
       }
     } catch (e) {
       console.error("Audio processing failed:", e);
+      // 圧縮失敗時はそのまま送信を試みる
       if (blob.size < 24 * 1024 * 1024) {
         await transcribeAudio(blob);
       } else {
         showMsg("❌ 音声ファイルの処理に失敗しました。録音を短くしてみてください。");
       }
     }
+    setTranscribing(false);
   }
 
   // AudioBuffer → WAV Blob
