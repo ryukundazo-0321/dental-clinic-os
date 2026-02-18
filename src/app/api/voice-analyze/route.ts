@@ -232,7 +232,7 @@ async function quickCorrect(apiKey: string, raw: string): Promise<string> {
           { role: "user", content: raw }
         ],
         temperature: 0,
-        max_tokens: 4000,
+        max_tokens: 16384,
       }),
     });
     if (!res.ok) return raw;
@@ -355,7 +355,7 @@ ${transcript}
               { role: "user", content: userPrompt },
             ],
             temperature: 0.1,
-            max_tokens: 4096,
+            max_tokens: 16384,
             response_format: { type: "json_object" },
           }),
         });
