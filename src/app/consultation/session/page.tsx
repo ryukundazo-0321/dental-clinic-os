@@ -318,58 +318,111 @@ function SessionContent() {
     return false;
   }
 
-  // Step 1: 音声 → Whisper → 文字起こしテキスト → DB保存
+  // Step 1: 音声 → Whisper（フロントエンドから直接） → 文字起こし → DB保存
+  // ★★★ Vercelの4.5MB制限を回避するため、ブラウザから直接OpenAI APIを呼ぶ
   async function transcribeAudio(blob: Blob) {
     setTranscribing(true);
     showMsg("📝 文字起こし中...");
     try {
-      // ★ BlobのMIMEタイプに応じたファイル名を設定
       const mimeType = blob.type || "audio/webm";
       let fileName = "recording.webm";
       if (mimeType.includes("mp4") || mimeType.includes("m4a")) fileName = "recording.m4a";
       else if (mimeType.includes("ogg")) fileName = "recording.ogg";
       else if (mimeType.includes("wav")) fileName = "recording.wav";
 
-      console.log("Sending to API:", { size: blob.size, type: mimeType, fileName });
+      console.log("Audio blob:", { size: blob.size, type: mimeType, sizeMB: (blob.size / 1024 / 1024).toFixed(2) + "MB" });
 
-      const fd = new FormData();
-      fd.append("audio", blob, fileName);
-      fd.append("whisper_only", "true");
-      const res = await fetch("/api/voice-analyze", { method: "POST", body: fd });
-      const data = await res.json();
+      // ★ Step 1a: APIキーを取得
+      const tokenRes = await fetch("/api/whisper-token");
+      const tokenData = await tokenRes.json();
+      if (!tokenData.key) {
+        showMsg("❌ APIキーの取得に失敗しました");
+        setTranscribing(false);
+        return;
+      }
 
-      if (data.success && data.transcript && data.transcript.trim().length >= 5) {
-        // ★ フロントエンド側でもハルシネーションチェック
-        const t = data.transcript;
-        const isHallucination = detectHallucination(t);
-        if (isHallucination) {
-          showMsg("⚠️ 音声をうまく認識できませんでした。マイクに近づいてはっきり話してみてください。");
-          return;
-        }
+      // ★ Step 1b: ブラウザから直接Whisper APIを呼ぶ（4.5MB制限なし！）
+      const whisperFd = new FormData();
+      whisperFd.append("file", blob, fileName);
+      whisperFd.append("model", "whisper-1");
+      whisperFd.append("language", "ja");
+      whisperFd.append("prompt",
+        "歯科診療所での医師と患者の会話。" +
+        "「右下6番、C2ですね。CR充填しましょう。浸麻します。」" +
+        "「痛みはどうですか？」「冷たいものがしみます。」" +
+        "う蝕 FMC CR充填 抜髄 根管治療 SC SRP インレー 印象 " +
+        "右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番"
+      );
+      whisperFd.append("temperature", "0");
 
-        const durationSec = Math.round((Date.now() - recordingStartRef.current) / 1000);
-        const nextNum = transcripts.length + 1;
+      const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokenData.key}` },
+        body: whisperFd,
+      });
 
-        // DB保存
-        const { data: saved, error } = await supabase.from("consultation_transcripts").insert({
-          appointment_id: appointmentId,
-          patient_id: patient?.id,
-          recording_number: nextNum,
-          transcript_text: data.transcript,
-          duration_seconds: durationSec,
-        }).select().single();
+      if (!whisperRes.ok) {
+        const errText = await whisperRes.text();
+        console.error("Whisper error:", whisperRes.status, errText);
+        showMsg(`❌ 音声認識エラー（${whisperRes.status}）`);
+        setTranscribing(false);
+        return;
+      }
 
-        if (saved && !error) {
-          setTranscripts(prev => [...prev, saved as TranscriptEntry]);
-          showMsg(`✅ 録音${nextNum}の文字起こし完了（${formatTimer(durationSec)}）`);
-        } else {
-          console.error("DB保存エラー:", error);
-          showMsg("⚠️ 文字起こしは成功しましたがDB保存に失敗しました");
-        }
-      } else if (data.error) {
-        showMsg(`❌ ${data.error}`);
-      } else {
+      const whisperResult = await whisperRes.json();
+      const transcript = whisperResult.text || "";
+      console.log("Whisper result:", { len: transcript.length, text: transcript.substring(0, 150) });
+
+      if (!transcript || transcript.trim().length < 5) {
         showMsg("⚠️ 音声を認識できませんでした。もう少しはっきり話してみてください。");
+        setTranscribing(false);
+        return;
+      }
+
+      // ★ フロントエンド側ハルシネーションチェック
+      if (detectHallucination(transcript)) {
+        showMsg("⚠️ 音声をうまく認識できませんでした。マイクに近づいてはっきり話してみてください。");
+        setTranscribing(false);
+        return;
+      }
+
+      // ★ Step 1c: 軽量テキスト補正（バックエンドに送信。テキストのみなので4.5MB制限に余裕で収まる）
+      let correctedTranscript = transcript;
+      try {
+        const corrRes = await fetch("/api/voice-analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ whisper_only: true, raw_transcript: transcript }),
+        });
+        if (corrRes.ok) {
+          const corrData = await corrRes.json();
+          if (corrData.success && corrData.transcript && corrData.transcript.length > 3) {
+            correctedTranscript = corrData.transcript;
+          }
+        }
+      } catch (e) {
+        console.log("Correction skipped:", e);
+        // 補正失敗時はWhisperの生テキストをそのまま使う（問題なし）
+      }
+
+      const durationSec = Math.round((Date.now() - recordingStartRef.current) / 1000);
+      const nextNum = transcripts.length + 1;
+
+      // DB保存
+      const { data: saved, error } = await supabase.from("consultation_transcripts").insert({
+        appointment_id: appointmentId,
+        patient_id: patient?.id,
+        recording_number: nextNum,
+        transcript_text: correctedTranscript,
+        duration_seconds: durationSec,
+      }).select().single();
+
+      if (saved && !error) {
+        setTranscripts(prev => [...prev, saved as TranscriptEntry]);
+        showMsg(`✅ 録音${nextNum}の文字起こし完了（${formatTimer(durationSec)}）`);
+      } else {
+        console.error("DB保存エラー:", error);
+        showMsg("⚠️ 文字起こしは成功しましたがDB保存に失敗しました");
       }
     } catch (err) {
       console.error("文字起こしエラー:", err);
@@ -407,11 +460,15 @@ function SessionContent() {
     setGeneratingSOAP(true);
     showMsg("🤖 SOAP生成中...");
     try {
-      const fd = new FormData();
-      fd.append("audio", new Blob(["dummy"], { type: "text/plain" }), "dummy.webm");
-      fd.append("existing_soap_s", record?.soap_s || "");
-      fd.append("full_transcript", fullText);
-      const res = await fetch("/api/voice-analyze", { method: "POST", body: fd });
+      // ★ JSON送信（テキストのみなのでVercel 4.5MB制限に余裕で収まる）
+      const res = await fetch("/api/voice-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          full_transcript: fullText,
+          existing_soap_s: record?.soap_s || "",
+        }),
+      });
       const data = await res.json();
       if (data.success) {
         setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates || {}, procedures: data.procedures || [], diagnoses: data.diagnoses || [] });
