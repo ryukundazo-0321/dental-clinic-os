@@ -372,14 +372,28 @@ function SessionContent() {
           showMsg(`📝 文字起こし中... (${i + 1}/${numChunks})`);
         }
 
-        const text = await whisperTranscribe(wavBlob, tokenData.key);
+        let text = await whisperTranscribe(wavBlob, tokenData.key);
         if (text && !detectHallucination(text)) {
+          // ★ チャンクごとに補正（全体を一括で補正すると壊れるため）
+          try {
+            const corrRes = await fetch("/api/voice-analyze", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ whisper_only: true, raw_transcript: text }),
+            });
+            if (corrRes.ok) {
+              const corrData = await corrRes.json();
+              if (corrData.success && corrData.transcript && corrData.transcript.length > text.length * 0.4) {
+                text = corrData.transcript;
+              }
+            }
+          } catch (e) { console.log("Chunk correction skipped:", e); }
           allTexts.push(text);
         }
         console.log(`Chunk ${i + 1}/${numChunks}: ${text.length}文字`);
       }
 
-      // ★★★ 全チャンクを結合して1つの「録音」としてDB保存
+      // ★★★ 全チャンクを結合して1つの「録音」としてDB保存（★補正済みなので再補正しない）
       const combinedText = allTexts.join("\n");
       if (!combinedText || combinedText.trim().length < 5) {
         showMsg("⚠️ 音声を認識できませんでした。");
@@ -387,23 +401,7 @@ function SessionContent() {
         return;
       }
 
-      // テキスト補正
-      let correctedTranscript = combinedText;
-      try {
-        const corrRes = await fetch("/api/voice-analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ whisper_only: true, raw_transcript: combinedText }),
-        });
-        if (corrRes.ok) {
-          const corrData = await corrRes.json();
-          if (corrData.success && corrData.transcript && corrData.transcript.length > 3) {
-            correctedTranscript = corrData.transcript;
-          }
-        }
-      } catch (e) {
-        console.log("Correction skipped:", e);
-      }
+      const correctedTranscript = combinedText; // ★ チャンクごとに補正済み
 
       const durationSec = Math.round((Date.now() - recordingStartRef.current) / 1000);
       const nextNum = transcripts.length + 1;
