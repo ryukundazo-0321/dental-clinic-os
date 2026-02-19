@@ -5,586 +5,225 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-// ===== 型定義 =====
 type Patient = {
-  id: string;
-  patient_number: string | null;
-  name_kanji: string;
-  name_kana: string;
-  date_of_birth: string | null;
-  sex: string | null;
-  phone: string | null;
-  email: string | null;
-  insurance_type: string | null;
-  burden_ratio: number | null;
-  patient_status: string | null;
-  allergies: unknown;
-  medications: unknown;
-  is_new: boolean;
-  created_at: string;
-  postal_code: string | null;
-  address: string | null;
-  occupation: string | null;
-  notes: string | null;
+  id: string; patient_number: string | null; name_kanji: string; name_kana: string;
+  date_of_birth: string | null; sex: string | null; phone: string | null; email: string | null;
+  insurance_type: string | null; burden_ratio: number | null; patient_status: string | null;
+  allergies: unknown; medications: unknown; is_new: boolean; created_at: string;
+  postal_code: string | null; address: string | null; occupation: string | null; notes: string | null;
   current_tooth_chart: Record<string, ToothData> | null;
   current_perio_chart: Record<string, unknown> | null;
-  insurer_number: string | null;
-  insured_number: string | null;
-  insured_symbol: string | null;
+  insurer_number: string | null; insured_number: string | null; insured_symbol: string | null;
 };
-
-type ToothData = {
-  status?: string;
-  pocket?: { buccal?: number[]; lingual?: number[] };
-  bop?: boolean;
-  mobility?: number;
-  note?: string;
-};
-
+type ToothData = { status?: string; pocket?: { buccal?: number[]; lingual?: number[] }; bop?: boolean; mobility?: number; note?: string };
 type MedicalRecord = {
-  id: string;
-  appointment_id: string;
-  patient_id: string;
-  status: string;
-  soap_s: string | null;
-  soap_o: string | null;
-  soap_a: string | null;
-  soap_p: string | null;
+  id: string; appointment_id: string; patient_id: string; status: string;
+  soap_s: string | null; soap_o: string | null; soap_a: string | null; soap_p: string | null;
   tooth_chart: Record<string, string> | null;
-  tooth_changes: ToothChange[] | null;
-  doctor_confirmed: boolean;
-  created_at: string;
+  tooth_changes: { tooth: string; from: string; to: string; treatment?: string }[] | null;
+  doctor_confirmed: boolean; created_at: string;
   appointments: { scheduled_at: string; patient_type: string; doctor_id: string | null } | null;
 };
-
-type ToothChange = {
-  tooth: string;
-  from: string;
-  to: string;
-  treatment?: string;
-};
-
 type ToothHistoryEntry = {
-  id: string;
-  tooth_number: string;
-  change_type: string;
-  previous_status: string | null;
-  new_status: string | null;
-  treatment_detail: string | null;
-  pocket_buccal: number[] | null;
-  pocket_lingual: number[] | null;
-  bop: boolean | null;
-  mobility: number | null;
-  note: string | null;
-  created_at: string;
+  id: string; tooth_number: string; change_type: string;
+  previous_status: string | null; new_status: string | null; treatment_detail: string | null;
+  pocket_buccal: number[] | null; pocket_lingual: number[] | null;
+  bop: boolean | null; mobility: number | null; note: string | null; created_at: string;
+};
+type PerioSnapshot = {
+  id: string; perio_data: Record<string, unknown>; total_teeth_probed: number | null;
+  deep_4mm_plus: number | null; deep_6mm_plus: number | null;
+  bop_positive: number | null; bop_total: number | null; bop_rate: number | null;
+  stage: string | null; created_at: string;
 };
 
-// ===== 歯式定数 =====
-const UPPER_RIGHT = ["18","17","16","15","14","13","12","11"];
-const UPPER_LEFT  = ["21","22","23","24","25","26","27","28"];
-const LOWER_RIGHT = ["48","47","46","45","44","43","42","41"];
-const LOWER_LEFT  = ["31","32","33","34","35","36","37","38"];
+const UR = ["18","17","16","15","14","13","12","11"];
+const UL = ["21","22","23","24","25","26","27","28"];
+const LR = ["48","47","46","45","44","43","42","41"];
+const LL = ["31","32","33","34","35","36","37","38"];
+const ALL_TEETH = [...UR,...UL,...LR,...LL];
 
-const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  normal:       { label: "健全",   color: "text-gray-500",   bg: "bg-white",       border: "border-gray-200" },
-  caries:       { label: "C",      color: "text-red-700",    bg: "bg-red-50",      border: "border-red-300" },
-  in_treatment: { label: "治療中", color: "text-orange-700", bg: "bg-orange-50",   border: "border-orange-300" },
-  treated:      { label: "処置済", color: "text-blue-700",   bg: "bg-blue-50",     border: "border-blue-300" },
-  crown:        { label: "冠",     color: "text-yellow-700", bg: "bg-yellow-50",   border: "border-yellow-300" },
-  missing:      { label: "欠損",   color: "text-gray-400",   bg: "bg-gray-100",    border: "border-gray-300" },
-  implant:      { label: "Imp",    color: "text-purple-700", bg: "bg-purple-50",   border: "border-purple-300" },
-  bridge:       { label: "Br",     color: "text-orange-700", bg: "bg-orange-50",   border: "border-orange-300" },
-  root_remain:  { label: "残根",   color: "text-red-500",    bg: "bg-red-50",      border: "border-red-200" },
-  inlay:        { label: "In",     color: "text-cyan-700",   bg: "bg-cyan-50",     border: "border-cyan-300" },
-  watch:        { label: "要注意", color: "text-amber-700",  bg: "bg-amber-50",    border: "border-amber-300" },
+const TS: Record<string, { label: string; sl: string; color: string; bg: string; border: string; cbg: string }> = {
+  normal:       { label: "健全",  sl: "",   color: "text-gray-500",   bg: "bg-white",     border: "border-gray-200", cbg: "bg-white" },
+  caries:       { label: "要治療",sl: "C",  color: "text-red-700",    bg: "bg-red-50",    border: "border-red-400",  cbg: "bg-red-100" },
+  in_treatment: { label: "治療中",sl: "🔧", color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-400",cbg: "bg-orange-100" },
+  treated:      { label: "完了",  sl: "✓",  color: "text-green-700",  bg: "bg-green-50",  border: "border-green-400",cbg: "bg-green-100" },
+  crown:        { label: "冠",    sl: "冠", color: "text-yellow-700", bg: "bg-yellow-50", border: "border-yellow-400",cbg: "bg-yellow-100" },
+  missing:      { label: "欠損",  sl: "×",  color: "text-gray-400",   bg: "bg-gray-100",  border: "border-gray-300", cbg: "bg-gray-200" },
+  implant:      { label: "Imp",   sl: "I",  color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-400",cbg: "bg-purple-100" },
+  bridge:       { label: "Br",    sl: "Br", color: "text-teal-700",   bg: "bg-teal-50",   border: "border-teal-400", cbg: "bg-teal-100" },
+  root_remain:  { label: "残根",  sl: "残", color: "text-pink-700",   bg: "bg-pink-50",   border: "border-pink-400", cbg: "bg-pink-100" },
+  watch:        { label: "観察",  sl: "△",  color: "text-amber-700",  bg: "bg-amber-50",  border: "border-amber-400",cbg: "bg-amber-100" },
+  inlay:        { label: "In",    sl: "In", color: "text-cyan-700",   bg: "bg-cyan-50",   border: "border-cyan-400", cbg: "bg-cyan-100" },
 };
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  active:    { label: "通院中", color: "text-green-700",  bg: "bg-green-100" },
-  inactive:  { label: "中断",   color: "text-orange-700", bg: "bg-orange-100" },
-  suspended: { label: "休止",   color: "text-red-700",    bg: "bg-red-100" },
-  completed: { label: "完了",   color: "text-gray-500",   bg: "bg-gray-100" },
+const PS: Record<string, { label: string; color: string; bg: string }> = {
+  active: { label: "通院中", color: "text-green-700", bg: "bg-green-100" },
+  inactive: { label: "中断", color: "text-orange-700", bg: "bg-orange-100" },
+  suspended: { label: "休止", color: "text-red-700", bg: "bg-red-100" },
+  completed: { label: "完了", color: "text-gray-500", bg: "bg-gray-100" },
 };
 
-type TabType = "records" | "tooth_changes" | "perio" | "info";
+type Tab = "records"|"timeline"|"perio"|"info";
+type CM = "status"|"perio";
 
-function calcAge(dob: string | null): string {
-  if (!dob) return "-";
-  const birth = new Date(dob);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return `${age}歳`;
-}
+function age(d: string|null){if(!d)return"-";const b=new Date(d),t=new Date();let a=t.getFullYear()-b.getFullYear();if(t.getMonth()<b.getMonth()||(t.getMonth()===b.getMonth()&&t.getDate()<b.getDate()))a--;return`${a}歳`}
+function fd(d:string|null){if(!d)return"-";try{const dt=new Date(d);return`${dt.getFullYear()}/${String(dt.getMonth()+1).padStart(2,"0")}/${String(dt.getDate()).padStart(2,"0")}`}catch{return"-"}}
+function tl(t:string){const n=parseInt(t);if(isNaN(n))return t;const q=Math.floor(n/10),p=n%10;return`${q===1?"右上":q===2?"左上":q===3?"左下":q===4?"右下":""}${p}番`}
+function hd(v:unknown){if(!v)return false;if(Array.isArray(v))return v.length>0;if(typeof v==="object")return Object.keys(v as object).length>0;return false}
+function pc(v:number){if(v>=6)return"bg-red-500 text-white";if(v>=4)return"bg-red-200 text-red-800";return"text-gray-600"}
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "-";
-  try { const d = new Date(dateStr); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`; }
-  catch { return "-"; }
-}
+export default function PatientDetailPage(){
+  const params=useParams();const pid=params.id as string;
+  const[patient,setPatient]=useState<Patient|null>(null);
+  const[records,setRecords]=useState<MedicalRecord[]>([]);
+  const[th,setTH]=useState<ToothHistoryEntry[]>([]);
+  const[ps,setPS2]=useState<PerioSnapshot[]>([]);
+  const[loading,setLoading]=useState(true);
+  const[tab,setTab]=useState<Tab>("records");
+  const[cm,setCM]=useState<CM>("status");
+  const[sel,setSel]=useState<string|null>(null);
+  const[es,setES]=useState(false);
 
-function toothLabel(tooth: string): string {
-  const num = parseInt(tooth);
-  if (isNaN(num)) return tooth;
-  const q = Math.floor(num / 10);
-  const p = num % 10;
-  const qLabel = q === 1 ? "右上" : q === 2 ? "左上" : q === 3 ? "左下" : q === 4 ? "右下" : "";
-  return `${qLabel}${p}番`;
-}
-
-function hasData(val: unknown): boolean {
-  if (!val) return false;
-  if (Array.isArray(val)) return val.length > 0;
-  if (typeof val === "object") return Object.keys(val as object).length > 0;
-  return false;
-}
-
-// ===== メインコンポーネント =====
-export default function PatientDetailPage() {
-  const params = useParams();
-  const patientId = params.id as string;
-
-  const [patient, setPatient] = useState<Patient | null>(null);
-  const [records, setRecords] = useState<MedicalRecord[]>([]);
-  const [toothHistory, setToothHistory] = useState<ToothHistoryEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabType>("records");
-  const [selectedTooth, setSelectedTooth] = useState<string | null>(null);
-  const [selectedToothHistory, setSelectedToothHistory] = useState<ToothHistoryEntry[]>([]);
-  const [editingStatus, setEditingStatus] = useState(false);
-
-  const fetchAll = useCallback(async () => {
+  const fetch=useCallback(async()=>{
     setLoading(true);
-
-    // 患者情報
-    const { data: pData } = await supabase
-      .from("patients")
-      .select("*")
-      .eq("id", patientId)
-      .single();
-
-    if (pData) setPatient(pData);
-
-    // カルテ履歴
-    const { data: rData } = await supabase
-      .from("medical_records")
-      .select("*, appointments(scheduled_at, patient_type, doctor_id)")
-      .eq("patient_id", patientId)
-      .order("created_at", { ascending: false });
-
-    if (rData) setRecords(rData);
-
-    // 歯の変遷履歴
-    const { data: thData } = await supabase
-      .from("tooth_history")
-      .select("*")
-      .eq("patient_id", patientId)
-      .order("created_at", { ascending: false });
-
-    if (thData) setToothHistory(thData);
-
+    const[p,r,t,s]=await Promise.all([
+      supabase.from("patients").select("*").eq("id",pid).single(),
+      supabase.from("medical_records").select("*, appointments(scheduled_at, patient_type, doctor_id)").eq("patient_id",pid).order("created_at",{ascending:false}),
+      supabase.from("tooth_history").select("*").eq("patient_id",pid).order("created_at",{ascending:false}),
+      supabase.from("perio_snapshots").select("*").eq("patient_id",pid).order("created_at",{ascending:false}),
+    ]);
+    if(p.data)setPatient(p.data);if(r.data)setRecords(r.data);if(t.data)setTH(t.data);if(s.data)setPS2(s.data);
     setLoading(false);
-  }, [patientId]);
+  },[pid]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(()=>{fetch()},[fetch]);
 
-  // 歯タップ → その歯の履歴を表示
-  function handleToothClick(toothNum: string) {
-    setSelectedTooth(toothNum);
-    const history = toothHistory.filter(h => h.tooth_number === toothNum);
-    setSelectedToothHistory(history);
-  }
+  async function chgStatus(s:string){if(!patient)return;await supabase.from("patients").update({patient_status:s}).eq("id",patient.id);setPatient({...patient,patient_status:s});setES(false)}
 
-  // ステータス変更
-  async function handleStatusChange(newStatus: string) {
-    if (!patient) return;
-    await supabase.from("patients").update({ patient_status: newStatus }).eq("id", patient.id);
-    setPatient({ ...patient, patient_status: newStatus });
-    setEditingStatus(false);
-  }
+  if(loading)return<div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-sm text-gray-400">⏳ 読み込み中...</p></div>;
+  if(!patient)return<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><p className="text-sm text-gray-500">❌ 患者が見つかりません</p><Link href="/patients" className="text-sm text-sky-600 mt-2 inline-block hover:underline">← 戻る</Link></div></div>;
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-3xl mb-2">⏳</div>
-          <p className="text-sm text-gray-400">読み込み中...</p>
-        </div>
-      </div>
-    );
-  }
+  const st=PS[patient.patient_status||"active"]||PS.active;
+  const tc=(patient.current_tooth_chart||{}) as Record<string,ToothData>;
 
-  if (!patient) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-3xl mb-2">❌</div>
-          <p className="text-sm text-gray-500">患者が見つかりません</p>
-          <Link href="/patients" className="text-sm text-sky-600 mt-2 inline-block hover:underline">← 患者一覧に戻る</Link>
-        </div>
-      </div>
-    );
-  }
+  let cC=0,iT=0,tC=0,mC=0,pC=0,bP=0,bT=0,p4=0,moC=0;
+  ALL_TEETH.forEach(t=>{const d=tc[t];const s=d?.status||"normal";if(s==="caries")cC++;if(s==="in_treatment")iT++;if(s==="treated"||s==="crown"||s==="inlay")tC++;if(s==="missing")mC++;if(s!=="missing")pC++;if(d?.bop){bP++;bT++}else if(d?.pocket)bT++;if(d?.mobility&&d.mobility>0)moC++;if(d?.pocket){[...(d.pocket.buccal||[]),...(d.pocket.lingual||[])].forEach(v=>{if(v>=4)p4++})}});
+  const bR=bT>0?Math.round(bP/bT*1000)/10:0;
+  const tS=ALL_TEETH.reduce((s,t)=>{const d=tc[t];if(!d?.pocket)return s;return s+(d.pocket.buccal?.length||0)+(d.pocket.lingual?.length||0)},0);
+  const p4p=tS>0?Math.round(p4/tS*1000)/10:0;
 
-  const status = STATUS_CONFIG[patient.patient_status || "active"] || STATUS_CONFIG.active;
-  const toothChart = (patient.current_tooth_chart || {}) as Record<string, ToothData>;
+  const selH=sel?th.filter(h=>h.tooth_number===sel):[];
+  const selD=sel?tc[sel]:null;
 
-  // 歯式サマリ計算
-  const allTeeth = [...UPPER_RIGHT, ...UPPER_LEFT, ...LOWER_RIGHT, ...LOWER_LEFT];
-  let treatedCount = 0, cariesCount = 0, missingCount = 0, implantCount = 0;
-  allTeeth.forEach(t => {
-    const s = toothChart[t]?.status;
-    if (s === "treated" || s === "crown" || s === "inlay") treatedCount++;
-    if (s === "caries" || s === "in_treatment") cariesCount++;
-    if (s === "missing") missingCount++;
-    if (s === "implant") implantCount++;
-  });
-
-  return (
+  return(
     <div className="min-h-screen bg-gray-50">
-      {/* ヘッダー */}
       <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href="/patients" className="text-sm text-gray-400 hover:text-gray-600">← 患者一覧</Link>
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center text-lg font-bold">
-                {patient.name_kanji?.charAt(0) || "?"}
-              </div>
+              <div className="w-11 h-11 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center text-lg font-bold">{patient.name_kanji?.charAt(0)||"?"}</div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-bold text-gray-900">{patient.name_kanji}</h1>
-                  <span className="text-xs text-gray-400">{patient.name_kana}</span>
-                  {patient.is_new && <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">新患</span>}
-                </div>
+                <div className="flex items-center gap-2"><h1 className="text-lg font-bold text-gray-900">{patient.name_kanji}</h1><span className="text-xs text-gray-400">{patient.name_kana}</span>{patient.is_new&&<span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">新患</span>}</div>
                 <div className="flex items-center gap-3 text-xs text-gray-400">
-                  <span className="font-mono">{patient.patient_number || "-"}</span>
-                  <span>{calcAge(patient.date_of_birth)} {patient.sex === "男" ? "♂" : patient.sex === "女" ? "♀" : ""}</span>
-                  <span>{patient.insurance_type || "-"}</span>
-                  {/* ステータス */}
-                  <div className="relative">
-                    <button onClick={() => setEditingStatus(!editingStatus)} className={`${status.bg} ${status.color} text-[10px] font-bold px-2 py-0.5 rounded cursor-pointer hover:opacity-80`}>
-                      {status.label} ▾
-                    </button>
-                    {editingStatus && (
-                      <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 min-w-[120px]">
-                        {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                          <button key={key} onClick={() => handleStatusChange(key)} className={`block w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${cfg.color} font-bold`}>
-                            {cfg.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                  <span className="font-mono">{patient.patient_number||"-"}</span><span>{age(patient.date_of_birth)} {patient.sex==="男"?"♂":patient.sex==="女"?"♀":""}</span><span>{patient.insurance_type||"-"}</span>
+                  <div className="relative"><button onClick={()=>setES(!es)} className={`${st.bg} ${st.color} text-[10px] font-bold px-2 py-0.5 rounded hover:opacity-80`}>{st.label} ▾</button>
+                    {es&&<div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 min-w-[100px]">{Object.entries(PS).map(([k,c])=>(<button key={k} onClick={()=>chgStatus(k)} className={`block w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${c.color} font-bold`}>{c.label}</button>))}</div>}
                   </div>
                 </div>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {hasData(patient.allergies) && (
-              <span className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold">⚠ アレルギーあり</span>
-            )}
+            {hd(patient.allergies)&&<span className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold">⚠ アレルギー</span>}
             <Link href={`/consultation?patient=${patient.id}`} className="bg-orange-500 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-orange-600">🩺 診察開始</Link>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* ===== 歯式チャート ===== */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-gray-900">🦷 歯式チャート</h2>
-            <div className="flex items-center gap-4 text-xs">
-              <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-50 border border-red-300"></span> C</div>
-              <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300"></span> 処置済</div>
-              <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-300"></span> 欠損</div>
-              <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-50 border border-purple-300"></span> Imp</div>
+      <main className="max-w-7xl mx-auto px-4 py-5">
+        {/* 全顎チャート */}
+        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-5">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-sm font-bold text-gray-900">● 全顎チャート</h2>
+            <div className="flex items-center gap-2">
+              <div className="flex bg-gray-100 rounded-lg p-0.5">
+                <button onClick={()=>setCM("status")} className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${cm==="status"?"bg-white text-gray-900 shadow-sm":"text-gray-500"}`}>🦷 ステータス</button>
+                <button onClick={()=>setCM("perio")} className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${cm==="perio"?"bg-white text-gray-900 shadow-sm":"text-gray-500"}`}>📊 P検</button>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] ml-2">{cm==="status"?<><L c="bg-red-100 border-red-400" t="要治療"/><L c="bg-orange-100 border-orange-400" t="治療中"/><L c="bg-green-100 border-green-400" t="完了"/><L c="bg-amber-100 border-amber-400" t="観察"/><L c="bg-pink-100 border-pink-400" t="残根"/><L c="bg-gray-200 border-gray-300" t="欠損"/></>:<><span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-500"></span>BOP(+)</span><span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-200"></span>PPD≧4</span><span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-500"></span>PPD≧6</span></>}</div>
             </div>
           </div>
 
-          {/* 上顎 */}
-          <div className="flex justify-center gap-[2px] mb-1">
-            {[...UPPER_RIGHT, ...UPPER_LEFT].map(t => {
-              const data = toothChart[t];
-              const s = data?.status || "normal";
-              const cfg = TOOTH_STATUS[s] || TOOTH_STATUS.normal;
-              return (
-                <button key={t} onClick={() => handleToothClick(t)}
-                  className={`w-9 h-11 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-110 hover:shadow-md ${cfg.bg} ${cfg.border} ${cfg.color} ${selectedTooth === t ? "ring-2 ring-sky-400 scale-110" : ""}`}
-                >
-                  <span className="text-[7px] text-gray-400">{t}</span>
-                  <span>{cfg.label}</span>
-                </button>
-              );
-            })}
-          </div>
-          {/* 中央線 */}
-          <div className="flex justify-center my-1">
-            <div className="w-[590px] h-[1px] bg-gray-300 relative">
-              <div className="absolute left-1/2 -translate-x-1/2 -top-2 text-[8px] text-gray-300 font-bold">R ← → L</div>
-            </div>
-          </div>
-          {/* 下顎 */}
-          <div className="flex justify-center gap-[2px] mt-1">
-            {[...LOWER_RIGHT, ...LOWER_LEFT].map(t => {
-              const data = toothChart[t];
-              const s = data?.status || "normal";
-              const cfg = TOOTH_STATUS[s] || TOOTH_STATUS.normal;
-              return (
-                <button key={t} onClick={() => handleToothClick(t)}
-                  className={`w-9 h-11 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-110 hover:shadow-md ${cfg.bg} ${cfg.border} ${cfg.color} ${selectedTooth === t ? "ring-2 ring-sky-400 scale-110" : ""}`}
-                >
-                  <span>{cfg.label}</span>
-                  <span className="text-[7px] text-gray-400">{t}</span>
-                </button>
-              );
-            })}
-          </div>
+          <div className="text-[9px] text-gray-400 mb-0.5 ml-1">上顎 MAXILLA ← R</div>
+          <div className="overflow-x-auto"><div className="flex justify-center min-w-[640px]"><TR teeth={[...UR,...UL]} tc={tc} cm={cm} sel={sel} setSel={setSel} jaw="upper"/></div></div>
+          <div className="text-[9px] text-gray-400 mt-2 mb-0.5 ml-1">下顎 MANDIBLE ← R</div>
+          <div className="overflow-x-auto"><div className="flex justify-center min-w-[640px]"><TR teeth={[...LR,...LL]} tc={tc} cm={cm} sel={sel} setSel={setSel} jaw="lower"/></div></div>
 
-          {/* サマリカード */}
-          <div className="grid grid-cols-4 gap-3 mt-4">
-            <div className="bg-red-50 rounded-lg p-3 text-center">
-              <p className="text-[10px] text-red-400">未処置C</p>
-              <p className="text-2xl font-bold text-red-600">{cariesCount}</p>
-            </div>
-            <div className="bg-blue-50 rounded-lg p-3 text-center">
-              <p className="text-[10px] text-blue-400">処置済</p>
-              <p className="text-2xl font-bold text-blue-600">{treatedCount}</p>
-            </div>
-            <div className="bg-gray-50 rounded-lg p-3 text-center">
-              <p className="text-[10px] text-gray-400">欠損</p>
-              <p className="text-2xl font-bold text-gray-500">{missingCount}</p>
-            </div>
-            <div className="bg-purple-50 rounded-lg p-3 text-center">
-              <p className="text-[10px] text-purple-400">Imp</p>
-              <p className="text-2xl font-bold text-purple-600">{implantCount}</p>
-            </div>
+          <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-100 text-[11px] flex-wrap">
+            <SB l="要治療" v={`${cC}歯`} c="text-red-600" b="bg-red-50"/>
+            <SB l="治療中" v={`${iT}歯`} c="text-orange-600" b="bg-orange-50"/>
+            <SB l="完了" v={`${tC}歯`} c="text-green-600" b="bg-green-50"/>
+            <SB l="残存歯" v={`${pC}/32`} c="text-gray-700" b="bg-gray-50"/>
+            {bT>0&&<SB l="BOP率" v={`${bR}%`} c={bR>30?"text-red-600":"text-green-600"} b={bR>30?"bg-red-50":"bg-green-50"}/>}
+            {tS>0&&<SB l="PPD≧4mm" v={`${p4p}%`} c={p4p>30?"text-red-600":"text-gray-600"} b="bg-gray-50"/>}
+            {moC>0&&<SB l="動揺歯" v={`${moC}歯`} c="text-amber-600" b="bg-amber-50"/>}
           </div>
         </div>
 
-        {/* ===== 歯タップモーダル ===== */}
-        {selectedTooth && (
-          <div className="bg-white rounded-xl border border-sky-200 p-5 mb-6 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-900">
-                🦷 #{selectedTooth}（{toothLabel(selectedTooth)}）の履歴
-              </h3>
-              <button onClick={() => setSelectedTooth(null)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+        {/* 歯クリック詳細 */}
+        {sel&&(
+          <div className="bg-white rounded-xl border-2 border-sky-200 p-5 mb-5 shadow-sm">
+            <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-gray-900">🦷 #{sel}（{tl(sel)}）</h3><button onClick={()=>setSel(null)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-gray-50 rounded-lg p-4"><h4 className="text-[11px] font-bold text-blue-600 mb-2">● 現在状態 CURRENT</h4><div className="space-y-1 text-sm"><div><span className="text-gray-500">状態:</span> <span className="font-bold">{selD?(TS[selD.status||"normal"]?.label||"健全"):"健全"}</span></div>{selD?.pocket&&<div><span className="text-gray-500">歯周:</span> PPD 頬側[{selD.pocket.buccal?.join(",")||"-"}] 舌側[{selD.pocket.lingual?.join(",")||"-"}]</div>}<div><span className="text-gray-500">BOP:</span> <span className={`font-bold ${selD?.bop?"text-red-600":"text-green-600"}`}>{selD?.bop?"(+)":"(-)"}</span></div>{selD?.mobility!==undefined&&(selD?.mobility||0)>0&&<div><span className="text-gray-500">動揺度:</span> <span className="font-bold">{selD.mobility}</span></div>}{selD?.note&&<div><span className="text-gray-500">メモ:</span> {selD.note}</div>}</div></div>
+              <div className="bg-gray-50 rounded-lg p-4"><h4 className="text-[11px] font-bold text-red-600 mb-2">● ポケット推移 PPD TREND</h4>{selH.filter(h=>h.change_type==="perio_update").length===0?<p className="text-xs text-gray-400">P検データなし</p>:<table className="text-[10px] w-full"><thead><tr className="text-gray-400"><th className="text-left pr-2">日付</th><th>MB</th><th>B</th><th>DB</th><th>ML</th><th>L</th><th>DL</th></tr></thead><tbody>{selH.filter(h=>h.change_type==="perio_update").slice(0,5).map(h=>(<tr key={h.id} className="border-t border-gray-100"><td className="text-gray-600 font-bold pr-2 py-0.5">{fd(h.created_at).slice(5)}</td>{(h.pocket_buccal||[0,0,0]).map((v,i)=><td key={`b${i}`} className={`text-center font-bold py-0.5 ${pc(v)}`}>{v}</td>)}{(h.pocket_lingual||[0,0,0]).map((v,i)=><td key={`l${i}`} className={`text-center font-bold py-0.5 ${pc(v)}`}>{v}</td>)}</tr>))}</tbody></table>}</div>
+              <div className="bg-gray-50 rounded-lg p-4"><h4 className="text-[11px] font-bold text-red-600 mb-2">● 出血(BOP)推移</h4>{selH.filter(h=>h.change_type==="perio_update").length===0?<p className="text-xs text-gray-400">P検データなし</p>:<div className="flex flex-wrap gap-2">{selH.filter(h=>h.change_type==="perio_update").slice(0,5).map(h=>(<div key={h.id} className="text-xs"><span className="text-gray-500 font-bold">{fd(h.created_at).slice(5)}:</span><span className={`ml-1 font-bold ${h.bop?"text-red-600":"text-green-600"}`}>{h.bop?"(+)":"(-)"}</span></div>))}</div>}</div>
+              <div className="bg-gray-50 rounded-lg p-4"><h4 className="text-[11px] font-bold text-blue-600 mb-2">● 履歴 HISTORY</h4>{selH.length===0?<p className="text-xs text-gray-400">履歴なし</p>:<div className="space-y-1.5">{selH.slice(0,8).map(h=>(<div key={h.id} className="text-xs"><span className="text-gray-500 font-bold">{fd(h.created_at)}</span>{h.change_type==="baseline"&&<span className="ml-1 text-amber-600">ベースライン: {TS[h.new_status||""]?.label||h.new_status}</span>}{h.change_type==="status_change"&&<span className="ml-1">{TS[h.previous_status||""]?.label||h.previous_status} → <span className="font-bold text-sky-700">{TS[h.new_status||""]?.label||h.new_status}</span>{h.treatment_detail&&` (${h.treatment_detail})`}</span>}{h.change_type==="perio_update"&&<span className="ml-1 text-teal-600">P検{h.bop?" BOP(+)":""}</span>}</div>))}</div>}</div>
             </div>
-
-            {/* 現在のステータス */}
-            {toothChart[selectedTooth] && (
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs text-gray-400">現在:</span>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded ${(TOOTH_STATUS[toothChart[selectedTooth]?.status || "normal"] || TOOTH_STATUS.normal).bg} ${(TOOTH_STATUS[toothChart[selectedTooth]?.status || "normal"] || TOOTH_STATUS.normal).color}`}>
-                  {(TOOTH_STATUS[toothChart[selectedTooth]?.status || "normal"] || TOOTH_STATUS.normal).label}
-                </span>
-                {toothChart[selectedTooth]?.note && (
-                  <span className="text-xs text-gray-500">{toothChart[selectedTooth].note}</span>
-                )}
-              </div>
-            )}
-
-            {/* 履歴タイムライン */}
-            {selectedToothHistory.length === 0 ? (
-              <p className="text-xs text-gray-400 py-4 text-center">この歯の履歴はまだありません</p>
-            ) : (
-              <div className="border-l-2 border-gray-200 ml-2 pl-4 space-y-3">
-                {selectedToothHistory.map(h => (
-                  <div key={h.id} className="relative">
-                    <div className="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-sky-400 border-2 border-white"></div>
-                    <div className="text-xs">
-                      <span className="font-bold text-sky-600">{formatDate(h.created_at)}</span>
-                      {h.change_type === "baseline" && (
-                        <span className="ml-2 text-amber-600 font-bold">ベースライン: {(TOOTH_STATUS[h.new_status || "normal"] || { label: h.new_status }).label}</span>
-                      )}
-                      {h.change_type === "status_change" && (
-                        <span className="ml-2">
-                          {(TOOTH_STATUS[h.previous_status || ""] || { label: h.previous_status }).label} → <span className="font-bold text-sky-700">{(TOOTH_STATUS[h.new_status || ""] || { label: h.new_status }).label}</span>
-                          {h.treatment_detail && <span className="text-gray-500">（{h.treatment_detail}）</span>}
-                        </span>
-                      )}
-                      {h.change_type === "perio_update" && (
-                        <span className="ml-2 text-teal-600">
-                          P検: 頬側 [{h.pocket_buccal?.join(",") || "-"}] 舌側 [{h.pocket_lingual?.join(",") || "-"}]
-                          {h.bop && " BOP(+)"}
-                        </span>
-                      )}
-                      {h.note && <div className="text-gray-400 mt-0.5">{h.note}</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
-        {/* ===== タブ切り替え ===== */}
+        {/* タブ */}
         <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
-          {([
-            { key: "records", label: "📋 カルテ履歴", count: records.length },
-            { key: "tooth_changes", label: "🔄 歯式の変遷", count: toothHistory.length },
-            { key: "perio", label: "📊 P検推移" },
-            { key: "info", label: "ℹ️ 基本情報" },
-          ] as { key: TabType; label: string; count?: number }[]).map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${
-                activeTab === tab.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {tab.label}
-              {tab.count !== undefined && <span className="ml-1 text-gray-400">({tab.count})</span>}
-            </button>
+          {([{k:"records" as Tab,l:"📋 カルテ履歴",n:records.length},{k:"timeline" as Tab,l:"🔄 歯式の変遷",n:th.length},{k:"perio" as Tab,l:"📊 P検推移",n:ps.length},{k:"info" as Tab,l:"ℹ️ 基本情報"}] as {k:Tab;l:string;n?:number}[]).map(t=>(
+            <button key={t.k} onClick={()=>setTab(t.k)} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${tab===t.k?"bg-white text-gray-900 shadow-sm":"text-gray-500 hover:text-gray-700"}`}>{t.l}{t.n!==undefined?` (${t.n})`:""}</button>
           ))}
         </div>
 
-        {/* ===== カルテ履歴タブ ===== */}
-        {activeTab === "records" && (
-          <div className="space-y-3">
-            {records.length === 0 ? (
-              <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-                <p className="text-sm text-gray-400">カルテ履歴はまだありません</p>
-              </div>
-            ) : records.map(r => (
-              <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-bold text-gray-900">{formatDate(r.appointments?.scheduled_at || r.created_at)}</span>
-                    <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold">
-                      {r.appointments?.patient_type === "new" ? "初診" : "再診"}
-                    </span>
-                    {r.doctor_confirmed && <span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded font-bold">✓ 確定</span>}
-                    {!r.doctor_confirmed && <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-bold">未確定</span>}
-                  </div>
-                  {/* 歯式変更バッジ */}
-                  {r.tooth_changes && Array.isArray(r.tooth_changes) && r.tooth_changes.length > 0 && (
-                    <div className="flex items-center gap-1">
-                      {r.tooth_changes.map((tc: ToothChange, i: number) => (
-                        <span key={i} className="text-[9px] bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold">
-                          #{tc.tooth} {tc.from}→{tc.to}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                  {r.soap_s && (
-                    <div><span className="font-bold text-pink-600">S:</span> <span className="text-gray-600">{r.soap_s}</span></div>
-                  )}
-                  {r.soap_o && (
-                    <div><span className="font-bold text-green-600">O:</span> <span className="text-gray-600">{r.soap_o}</span></div>
-                  )}
-                  {r.soap_a && (
-                    <div><span className="font-bold text-blue-600">A:</span> <span className="text-gray-600">{r.soap_a}</span></div>
-                  )}
-                  {r.soap_p && (
-                    <div><span className="font-bold text-purple-600">P:</span> <span className="text-gray-600">{r.soap_p}</span></div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ===== 歯式の変遷タブ ===== */}
-        {activeTab === "tooth_changes" && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            {toothHistory.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">歯式の変遷データはまだありません</p>
-            ) : (
-              <div className="border-l-2 border-sky-200 ml-4 pl-6 space-y-4">
-                {toothHistory.map(h => (
-                  <div key={h.id} className="relative">
-                    <div className="absolute -left-[29px] top-1 w-3 h-3 rounded-full bg-sky-500 border-2 border-white"></div>
-                    <div>
-                      <div className="text-xs font-bold text-sky-600 mb-1">{formatDate(h.created_at)}</div>
-                      <div className="text-sm">
-                        <span className="font-bold text-gray-700">#{h.tooth_number}（{toothLabel(h.tooth_number)}）</span>
-                        {h.change_type === "baseline" && (
-                          <span className="ml-2 text-amber-600">ベースライン記録 → {(TOOTH_STATUS[h.new_status || ""] || { label: h.new_status }).label}</span>
-                        )}
-                        {h.change_type === "status_change" && (
-                          <span className="ml-2 text-gray-600">
-                            {(TOOTH_STATUS[h.previous_status || ""] || { label: h.previous_status }).label}
-                            {" → "}
-                            <span className="font-bold text-sky-700">{(TOOTH_STATUS[h.new_status || ""] || { label: h.new_status }).label}</span>
-                            {h.treatment_detail && ` （${h.treatment_detail}）`}
-                          </span>
-                        )}
-                        {h.change_type === "perio_update" && (
-                          <span className="ml-2 text-teal-600">
-                            P検 — 頬側[{h.pocket_buccal?.join(",") || ""}] 舌側[{h.pocket_lingual?.join(",") || ""}]
-                            {h.bop && " BOP(+)"} {h.mobility ? `動揺度${h.mobility}` : ""}
-                          </span>
-                        )}
-                      </div>
-                      {h.note && <div className="text-xs text-gray-400 mt-1">{h.note}</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ===== P検推移タブ ===== */}
-        {activeTab === "perio" && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <p className="text-sm text-gray-400 text-center py-8">
-              P検推移グラフは Phase 2 で実装されます。<br />
-              P検データが蓄積されると、BOP率やポケット4mm+の推移がここにグラフ表示されます。
-            </p>
-          </div>
-        )}
-
-        {/* ===== 基本情報タブ ===== */}
-        {activeTab === "info" && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* 左カラム */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2">基本情報</h3>
-                <InfoRow label="氏名（漢字）" value={patient.name_kanji} />
-                <InfoRow label="氏名（カナ）" value={patient.name_kana} />
-                <InfoRow label="患者番号" value={patient.patient_number} />
-                <InfoRow label="生年月日" value={patient.date_of_birth ? `${formatDate(patient.date_of_birth)}（${calcAge(patient.date_of_birth)}）` : null} />
-                <InfoRow label="性別" value={patient.sex} />
-                <InfoRow label="電話番号" value={patient.phone} />
-                <InfoRow label="メール" value={patient.email} />
-                <InfoRow label="郵便番号" value={patient.postal_code} />
-                <InfoRow label="住所" value={patient.address} />
-                <InfoRow label="職業" value={patient.occupation} />
-              </div>
-
-              {/* 右カラム */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2">保険・医療情報</h3>
-                <InfoRow label="保険種別" value={patient.insurance_type} />
-                <InfoRow label="負担割合" value={patient.burden_ratio ? `${Math.round(patient.burden_ratio * 100)}%` : null} />
-                <InfoRow label="保険者番号" value={patient.insurer_number} />
-                <InfoRow label="記号" value={patient.insured_symbol} />
-                <InfoRow label="番号" value={patient.insured_number} />
-                <InfoRow label="アレルギー" value={hasData(patient.allergies) ? JSON.stringify(patient.allergies) : "なし"} highlight={hasData(patient.allergies)} />
-                <InfoRow label="服薬" value={hasData(patient.medications) ? JSON.stringify(patient.medications) : "なし"} />
-                <InfoRow label="備考" value={patient.notes} />
-                <InfoRow label="登録日" value={formatDate(patient.created_at)} />
-              </div>
+        {tab==="records"&&<div className="space-y-3">{records.length===0?<E t="カルテ履歴はまだありません"/>:records.map(r=>(
+          <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2"><span className="text-sm font-bold text-gray-900">{fd(r.appointments?.scheduled_at||r.created_at)}</span><span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold">{r.appointments?.patient_type==="new"?"初診":"再診"}</span>{r.doctor_confirmed?<span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded font-bold">✓ 確定</span>:<span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-bold">未確定</span>}</div>
+              {r.tooth_changes&&Array.isArray(r.tooth_changes)&&r.tooth_changes.length>0&&<div className="flex gap-1 flex-wrap">{r.tooth_changes.map((c,i)=><span key={i} className="text-[9px] bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold">#{c.tooth} {c.from}→{c.to}</span>)}</div>}
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">{r.soap_s&&<div><span className="font-bold text-pink-600">S:</span> <span className="text-gray-600">{r.soap_s}</span></div>}{r.soap_o&&<div><span className="font-bold text-green-600">O:</span> <span className="text-gray-600">{r.soap_o}</span></div>}{r.soap_a&&<div><span className="font-bold text-blue-600">A:</span> <span className="text-gray-600">{r.soap_a}</span></div>}{r.soap_p&&<div><span className="font-bold text-purple-600">P:</span> <span className="text-gray-600">{r.soap_p}</span></div>}</div>
           </div>
-        )}
+        ))}</div>}
+
+        {tab==="timeline"&&<div className="bg-white rounded-xl border border-gray-200 p-5">{th.length===0?<E t="歯式の変遷データはまだありません"/>:<div className="border-l-2 border-sky-200 ml-3 pl-5 space-y-4">{th.map(h=>(<div key={h.id} className="relative"><div className="absolute -left-[27px] top-1 w-3 h-3 rounded-full bg-sky-500 border-2 border-white"></div><div className="text-xs font-bold text-sky-600 mb-0.5">{fd(h.created_at)}</div><div className="text-sm"><span className="font-bold text-gray-700">#{h.tooth_number}（{tl(h.tooth_number)}）</span>{h.change_type==="baseline"&&<span className="ml-2 text-amber-600">ベースライン → {TS[h.new_status||""]?.label||h.new_status}</span>}{h.change_type==="status_change"&&<span className="ml-2">{TS[h.previous_status||""]?.label||h.previous_status} → <span className="font-bold text-sky-700">{TS[h.new_status||""]?.label||h.new_status}</span>{h.treatment_detail&&` （${h.treatment_detail}）`}</span>}{h.change_type==="perio_update"&&<span className="ml-2 text-teal-600">P検 — 頬[{h.pocket_buccal?.join(",")||""}] 舌[{h.pocket_lingual?.join(",")||""}]{h.bop&&" BOP(+)"}</span>}</div>{h.note&&<div className="text-xs text-gray-400 mt-0.5">{h.note}</div>}</div>))}</div>}</div>}
+
+        {tab==="perio"&&<div className="bg-white rounded-xl border border-gray-200 p-5">{ps.length===0?<E t="P検データはまだありません。診察でP検を実施するとBOP率やポケット推移が表示されます。"/>:<table className="text-xs w-full"><thead><tr className="border-b border-gray-200 text-gray-400"><th className="text-left py-2">日付</th><th>BOP率</th><th>PPD≧4mm</th><th>PPD≧6mm</th><th>ステージ</th></tr></thead><tbody>{ps.map(p=>(<tr key={p.id} className="border-b border-gray-100"><td className="py-2 font-bold">{fd(p.created_at)}</td><td className={`text-center font-bold ${(p.bop_rate||0)>30?"text-red-600":"text-green-600"}`}>{p.bop_rate??"-"}%</td><td className="text-center font-bold">{p.deep_4mm_plus??"-"}</td><td className="text-center font-bold text-red-600">{p.deep_6mm_plus??"-"}</td><td className="text-center font-bold">{p.stage||"-"}</td></tr>))}</tbody></table>}</div>}
+
+        {tab==="info"&&<div className="bg-white rounded-xl border border-gray-200 p-5"><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="space-y-3"><h3 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2">基本情報</h3><IR l="氏名（漢字）" v={patient.name_kanji}/><IR l="氏名（カナ）" v={patient.name_kana}/><IR l="患者番号" v={patient.patient_number}/><IR l="生年月日" v={patient.date_of_birth?`${fd(patient.date_of_birth)}（${age(patient.date_of_birth)}）`:null}/><IR l="性別" v={patient.sex}/><IR l="電話番号" v={patient.phone}/><IR l="メール" v={patient.email}/><IR l="郵便番号" v={patient.postal_code}/><IR l="住所" v={patient.address}/><IR l="職業" v={patient.occupation}/></div><div className="space-y-3"><h3 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2">保険・医療情報</h3><IR l="保険種別" v={patient.insurance_type}/><IR l="負担割合" v={patient.burden_ratio?`${Math.round(patient.burden_ratio*100)}%`:null}/><IR l="保険者番号" v={patient.insurer_number}/><IR l="記号" v={patient.insured_symbol}/><IR l="番号" v={patient.insured_number}/><IR l="アレルギー" v={hd(patient.allergies)?JSON.stringify(patient.allergies):"なし"} h={hd(patient.allergies)}/><IR l="服薬" v={hd(patient.medications)?JSON.stringify(patient.medications):"なし"}/><IR l="備考" v={patient.notes}/><IR l="登録日" v={fd(patient.created_at)}/></div></div></div>}
       </main>
     </div>
   );
 }
 
-// 情報表示行
-function InfoRow({ label, value, highlight }: { label: string; value: string | null | undefined; highlight?: boolean }) {
-  return (
-    <div className="flex items-start gap-4">
-      <span className="text-xs font-bold text-gray-400 w-24 flex-shrink-0">{label}</span>
-      <span className={`text-sm ${highlight ? "text-red-600 font-bold" : "text-gray-700"}`}>{value || "-"}</span>
-    </div>
-  );
+function TR({teeth,tc,cm,sel,setSel,jaw}:{teeth:string[];tc:Record<string,ToothData>;cm:CM;sel:string|null;setSel:(t:string)=>void;jaw:"upper"|"lower"}){
+  return<div className="flex gap-[2px]">{teeth.map(t=>{const d=tc[t];const s=d?.status||"normal";const c=TS[s]||TS.normal;const isSel=sel===t;const isM=s==="missing"||s==="root_remain";
+    if(cm==="perio"){const bu=d?.pocket?.buccal||[];const li=d?.pocket?.lingual||[];const hp=bu.length>0||li.length>0;const mx=Math.max(...bu,...li,0);
+      return<div key={t} className="flex flex-col items-center">{jaw==="upper"&&hp&&<div className="flex gap-[1px] mb-0.5">{(bu.length>0?bu:[0,0,0]).map((v,i)=><span key={i} className={`text-[8px] font-bold w-3 text-center rounded-sm ${pc(v)}`}>{v}</span>)}</div>}
+        <button onClick={()=>setSel(t)} className={`w-10 h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":mx>=6?"bg-red-100 border-red-400 text-red-700":mx>=4?"bg-red-50 border-red-300 text-red-600":d?.bop?"bg-red-50 border-red-200 text-gray-700":"bg-white border-gray-200 text-gray-600"} ${isSel?"ring-2 ring-sky-400 scale-110":""}`}>
+          {jaw==="upper"?<><span className="text-[7px] text-gray-400 leading-none">{t}</span><span className="leading-none">{isM?c.sl:d?.bop?"●":""}</span></>:<><span className="leading-none">{isM?c.sl:d?.bop?"●":""}</span><span className="text-[7px] text-gray-400 leading-none">{t}</span></>}
+        </button>{jaw==="lower"&&hp&&<div className="flex gap-[1px] mt-0.5">{(li.length>0?li:[0,0,0]).map((v,i)=><span key={i} className={`text-[8px] font-bold w-3 text-center rounded-sm ${pc(v)}`}>{v}</span>)}</div>}</div>}
+    return<button key={t} onClick={()=>setSel(t)} className={`w-10 h-12 rounded-lg border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${c.cbg} ${c.border} ${c.color} ${isSel?"ring-2 ring-sky-400 scale-110":""}`}>
+      {jaw==="upper"?<><span className="text-[7px] text-gray-400 leading-none">{t}</span><span className="leading-tight">{s!=="normal"?c.sl||c.label:""}</span><span className="text-[7px] leading-none">{s!=="normal"?c.label:""}</span></>:<><span className="text-[7px] leading-none">{s!=="normal"?c.label:""}</span><span className="leading-tight">{s!=="normal"?c.sl||c.label:""}</span><span className="text-[7px] text-gray-400 leading-none">{t}</span></>}
+    </button>})}</div>
 }
+
+function L({c,t}:{c:string;t:string}){return<span className="flex items-center gap-1"><span className={`w-2.5 h-2.5 rounded border ${c}`}></span>{t}</span>}
+function SB({l,v,c,b}:{l:string;v:string;c:string;b:string}){return<span className={`${b} ${c} px-2 py-1 rounded-lg font-bold`}>■ {l} <span className="text-sm">{v}</span></span>}
+function E({t}:{t:string}){return<div className="py-10 text-center"><p className="text-sm text-gray-400">{t}</p></div>}
+function IR({l,v,h}:{l:string;v:string|null|undefined;h?:boolean}){return<div className="flex items-start gap-3"><span className="text-xs font-bold text-gray-400 w-24 flex-shrink-0">{l}</span><span className={`text-sm ${h?"text-red-600 font-bold":"text-gray-700"}`}>{v||"-"}</span></div>}
