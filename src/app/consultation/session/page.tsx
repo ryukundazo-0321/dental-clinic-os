@@ -344,7 +344,11 @@ function SessionContent() {
 
   // ★ P検データ更新
   function updatePerio(tooth: string, field: keyof PerioData, value: unknown) {
-    setPerioData(prev => ({ ...prev, [tooth]: { buccal: [2,2,2], lingual: [2,2,2], bop: false, mobility: 0, ...prev[tooth], [field]: value } }));
+    setPerioData(prev => {
+      const defaults: PerioData = { buccal: [2,2,2], lingual: [2,2,2], bop: false, mobility: 0 };
+      const existing = prev[tooth] || defaults;
+      return { ...prev, [tooth]: { ...existing, [field]: value } };
+    });
   }
   function updatePerioPocket(tooth: string, side: "buccal" | "lingual", index: number, value: number) {
     setPerioData(prev => {
@@ -378,7 +382,19 @@ function SessionContent() {
       allTeethSet.forEach(tooth => { const prev = prevChart[tooth] || "normal"; const next = newChart[tooth] || "normal"; if (prev !== next) toothChanges.push({ tooth, from: prev, to: next }); });
     } catch (e) { console.error("歯式変更検出エラー:", e); }
 
-    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, tooth_changes: toothChanges, status: "confirmed", doctor_confirmed: true }).eq("id", record.id);
+    // ★ P検実施時: O欄にP検サマリを自動追記（保険算定に必要）
+    let finalSoapO = record.soap_o || "";
+    if (Object.keys(perioData).length > 0) {
+      let bopP = 0, bopT = 0, d4 = 0, d6 = 0;
+      Object.values(perioData).forEach(pd => { if (pd.bop) bopP++; bopT++;
+        [...pd.buccal, ...pd.lingual].forEach(v => { if (v >= 4) d4++; if (v >= 6) d6++; });
+      });
+      const bopRate = bopT > 0 ? Math.round(bopP / bopT * 1000) / 10 : 0;
+      const perioNote = `\n【P検実施】${Object.keys(perioData).length}歯測定 / BOP率${bopRate}% / PPD≧4mm: ${d4}部位 / PPD≧6mm: ${d6}部位`;
+      finalSoapO = finalSoapO + perioNote;
+    }
+
+    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: finalSoapO, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, tooth_changes: toothChanges, status: "confirmed", doctor_confirmed: true }).eq("id", record.id);
     await supabase.from("appointments").update({ status: "completed" }).eq("id", appointmentId);
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
 
