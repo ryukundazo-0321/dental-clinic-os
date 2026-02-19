@@ -724,9 +724,69 @@ function SessionContent() {
     if (!record || !appointmentId) return;
     if (!confirm("診察を完了してカルテを確定しますか？\n確定後、自動的に点数算定が行われます。")) return;
     setSaving(true);
-    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, status: "confirmed", doctor_confirmed: true }).eq("id", record.id);
+
+    // ===== CRM連携: 歯式変更を検出 =====
+    let toothChanges: { tooth: string; from: string; to: string; treatment?: string }[] = [];
+    try {
+      // 現在のpatients.current_tooth_chartを取得
+      const { data: ptData } = await supabase.from("patients").select("current_tooth_chart").eq("id", record.patient_id).single();
+      const prevChart: Record<string, string> = {};
+      if (ptData?.current_tooth_chart && typeof ptData.current_tooth_chart === "object") {
+        Object.entries(ptData.current_tooth_chart as Record<string, unknown>).forEach(([k, v]) => {
+          if (typeof v === "string") prevChart[k] = v;
+          else if (typeof v === "object" && v && "status" in (v as Record<string, unknown>)) prevChart[k] = (v as Record<string, string>).status;
+        });
+      }
+      const newChart = record.tooth_chart || {};
+
+      // 変更を検出
+      const allTeethSet = new Set([...Object.keys(prevChart), ...Object.keys(newChart)]);
+      allTeethSet.forEach(tooth => {
+        const prev = prevChart[tooth] || "normal";
+        const next = newChart[tooth] || "normal";
+        if (prev !== next) {
+          toothChanges.push({ tooth, from: prev, to: next });
+        }
+      });
+    } catch (e) { console.error("歯式変更検出エラー:", e); }
+
+    // ===== 1. medical_records保存（tooth_changes付き） =====
+    await supabase.from("medical_records").update({
+      soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p,
+      tooth_chart: record.tooth_chart, tooth_changes: toothChanges,
+      status: "confirmed", doctor_confirmed: true,
+    }).eq("id", record.id);
+
+    // ===== 2. appointments + queue更新 =====
     await supabase.from("appointments").update({ status: "completed" }).eq("id", appointmentId);
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
+
+    // ===== 3. CRM: patients.current_tooth_chart更新 =====
+    try {
+      const newToothChart: Record<string, { status: string }> = {};
+      Object.entries(record.tooth_chart || {}).forEach(([k, v]) => {
+        newToothChart[k] = { status: v };
+      });
+      await supabase.from("patients").update({ current_tooth_chart: newToothChart }).eq("id", record.patient_id);
+    } catch (e) { console.error("CRM歯式更新エラー:", e); }
+
+    // ===== 4. CRM: tooth_historyに変更ログ追記 =====
+    try {
+      if (toothChanges.length > 0) {
+        const historyRows = toothChanges.map(tc => ({
+          patient_id: record.patient_id,
+          record_id: record.id,
+          tooth_number: tc.tooth,
+          change_type: "status_change",
+          previous_status: tc.from,
+          new_status: tc.to,
+          treatment_detail: tc.treatment || null,
+        }));
+        await supabase.from("tooth_history").insert(historyRows);
+      }
+    } catch (e) { console.error("CRM歯式履歴エラー:", e); }
+
+    // ===== 5. 自動算定 =====
     let billingResult = "";
     try {
       const res = await fetch("/api/auto-billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: record.id }) });
@@ -736,7 +796,8 @@ function SessionContent() {
     } catch (e) { billingResult = `⚠️ 算定API呼び出し失敗: ${e instanceof Error ? e.message : "不明"}`; }
     if (timerRef.current) clearInterval(timerRef.current);
     setSaving(false);
-    alert(`カルテ確定しました。\n\n${billingResult}\n\n会計画面（/billing）で確認してください。`);
+    const changeMsg = toothChanges.length > 0 ? `\n\n🦷 歯式変更: ${toothChanges.map(c => `#${c.tooth} ${c.from}→${c.to}`).join(", ")}` : "";
+    alert(`カルテ確定しました。\n\n${billingResult}${changeMsg}\n\n会計画面（/billing）で確認してください。`);
     router.push("/consultation");
   }
 
