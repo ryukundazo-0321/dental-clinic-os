@@ -206,8 +206,50 @@ function filterHallucinations(text: string): string {
 
 // =====================================================
 // 軽量補正（whisper_onlyモード用 — gpt-4o-mini）
+// ★ 長いテキストは2000文字ごとに分割して補正
+// ★ 補正結果が壊れたら（長さが半分以下になった等）生テキストにフォールバック
 // =====================================================
 async function quickCorrect(apiKey: string, raw: string): Promise<string> {
+  // 短いテキストはそのまま補正
+  if (raw.length <= 2500) {
+    return quickCorrectSingle(apiKey, raw);
+  }
+
+  // 長いテキストは分割して補正
+  console.log(`[quickCorrect] 長いテキスト(${raw.length}文字)を分割補正`);
+  const chunkSize = 2000;
+  const chunks: string[] = [];
+  
+  // 句点・改行で区切りの良い位置で分割
+  let remaining = raw;
+  while (remaining.length > 0) {
+    if (remaining.length <= chunkSize) {
+      chunks.push(remaining);
+      break;
+    }
+    // chunkSize付近で区切りの良い位置を探す
+    let splitAt = chunkSize;
+    const searchRange = remaining.substring(chunkSize - 200, chunkSize + 200);
+    const lastPeriod = searchRange.lastIndexOf("。");
+    const lastNewline = searchRange.lastIndexOf("\n");
+    const bestSplit = Math.max(lastPeriod, lastNewline);
+    if (bestSplit >= 0) {
+      splitAt = (chunkSize - 200) + bestSplit + 1;
+    }
+    chunks.push(remaining.substring(0, splitAt));
+    remaining = remaining.substring(splitAt);
+  }
+
+  console.log(`[quickCorrect] ${chunks.length}チャンクに分割`);
+  const correctedChunks: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const corrected = await quickCorrectSingle(apiKey, chunks[i]);
+    correctedChunks.push(corrected);
+  }
+  return correctedChunks.join("\n");
+}
+
+async function quickCorrectSingle(apiKey: string, raw: string): Promise<string> {
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -219,6 +261,7 @@ async function quickCorrect(apiKey: string, raw: string): Promise<string> {
             role: "system",
             content: `歯科診療の音声書き起こしを補正してください。
 誤認識された歯科用語のみ修正し、原文の意味は変えないでください。
+原文のテキストをほぼそのまま返してください。大幅な要約や省略はしないでください。
 ハルシネーション（「チャンネル登録」「購読ボタン」等のYouTube系フレーズ）は削除してください。
 
 主な補正例:
@@ -235,11 +278,26 @@ async function quickCorrect(apiKey: string, raw: string): Promise<string> {
         max_tokens: 16384,
       }),
     });
-    if (!res.ok) return raw;
+    if (!res.ok) {
+      console.log(`[quickCorrectSingle] API error: ${res.status}`);
+      return raw;
+    }
     const result = await res.json();
     const corrected = result.choices?.[0]?.message?.content?.trim();
-    return (corrected && corrected.length > 3) ? corrected : raw;
-  } catch {
+    
+    // ★ サニティチェック: 補正結果が壊れていたら生テキストにフォールバック
+    if (!corrected || corrected.length < 3) {
+      console.log("[quickCorrectSingle] 補正結果が空 → 生テキスト使用");
+      return raw;
+    }
+    // 補正結果が元の40%未満なら壊れている可能性が高い
+    if (corrected.length < raw.length * 0.4) {
+      console.log(`[quickCorrectSingle] 補正結果が短すぎる(${corrected.length}/${raw.length}) → 生テキスト使用`);
+      return raw;
+    }
+    return corrected;
+  } catch (e) {
+    console.log("[quickCorrectSingle] Error:", e);
     return raw;
   }
 }
@@ -318,7 +376,7 @@ JSON形式のみ。余計な説明は不要。`;
 誤認識が含まれている可能性があります。文脈から正しく読み取ってSOAPに変換してください。
 
 ${existingSoapS ? `【問診票の情報】\n${existingSoapS}\n\n` : ""}【音声書き起こし】
-${transcript}
+${safeTranscript}
 
 以下のJSON形式で出力:
 {
@@ -337,6 +395,14 @@ ${transcript}
   try {
     // gpt-4oを最優先、失敗時gpt-4o-miniにフォールバック
     const models = ["gpt-4o", "gpt-4o-mini"];
+    console.log(`[generateSOAP] Input transcript: ${transcript.length} chars, existingSoapS: ${existingSoapS.length} chars`);
+    
+    // ★ 入力が非常に長い場合は末尾を切り詰め（gpt-4oの入力上限対策）
+    let safeTranscript = transcript;
+    if (transcript.length > 15000) {
+      console.log(`[generateSOAP] Transcript too long (${transcript.length}), truncating to 15000 chars`);
+      safeTranscript = transcript.substring(0, 15000) + "\n\n（以降省略）";
+    }
 
     for (const model of models) {
       try {
