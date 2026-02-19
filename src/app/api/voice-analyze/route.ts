@@ -372,6 +372,13 @@ async function generateSOAP(
 ## 出力形式
 JSON形式のみ。余計な説明は不要。`;
 
+  // ★ 入力が非常に長い場合は末尾を切り詰め（gpt-4oの入力上限対策）
+  let safeTranscript = transcript;
+  if (transcript.length > 15000) {
+    console.log(`[generateSOAP] Transcript too long (${transcript.length}), truncating to 15000 chars`);
+    safeTranscript = transcript.substring(0, 15000) + "\n\n（以降省略）";
+  }
+
   const userPrompt = `以下は歯科診察中の会話を音声認識で書き起こしたテキストです。
 誤認識が含まれている可能性があります。文脈から正しく読み取ってSOAPに変換してください。
 
@@ -395,14 +402,7 @@ ${safeTranscript}
   try {
     // gpt-4oを最優先、失敗時gpt-4o-miniにフォールバック
     const models = ["gpt-4o", "gpt-4o-mini"];
-    console.log(`[generateSOAP] Input transcript: ${transcript.length} chars, existingSoapS: ${existingSoapS.length} chars`);
-    
-    // ★ 入力が非常に長い場合は末尾を切り詰め（gpt-4oの入力上限対策）
-    let safeTranscript = transcript;
-    if (transcript.length > 15000) {
-      console.log(`[generateSOAP] Transcript too long (${transcript.length}), truncating to 15000 chars`);
-      safeTranscript = transcript.substring(0, 15000) + "\n\n（以降省略）";
-    }
+    console.log(`[generateSOAP] Input transcript: ${transcript.length} chars, safeTranscript: ${safeTranscript.length} chars`);
 
     for (const model of models) {
       try {
