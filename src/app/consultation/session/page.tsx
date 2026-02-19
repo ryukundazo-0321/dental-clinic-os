@@ -602,59 +602,99 @@ function SessionContent() {
               <div className="bg-white rounded-xl border border-gray-200 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-bold text-gray-700">📊 歯周検査（6点法）</h3>
-                  {perioSummary.count > 0 && <div className="flex gap-2 text-[10px]">
-                    <span className={`font-bold px-2 py-0.5 rounded ${perioSummary.bopRate > 30 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"}`}>BOP {perioSummary.bopRate}%</span>
-                    <span className="font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">PPD≧4mm {perioSummary.d4pct}%</span>
-                    <span className="font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">{perioSummary.count}歯記録</span>
-                  </div>}
+                  <div className="flex items-center gap-2">
+                    {perioSummary.count > 0 && <div className="flex gap-2 text-[10px]">
+                      <span className={`font-bold px-2 py-0.5 rounded ${perioSummary.bopRate > 30 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"}`}>BOP {perioSummary.bopRate}%</span>
+                      <span className="font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">PPD≧4mm {perioSummary.d4pct}%</span>
+                      <span className="font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">{perioSummary.count}歯</span>
+                    </div>}
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-500"></span>BOP(+)</span>
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-200 border border-red-300"></span>PPD≧4</span>
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-500"></span>PPD≧6</span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* P検 歯一覧 */}
+                {/* 上顎 P検チャート */}
+                <div className="text-[9px] text-gray-400 mb-0.5 ml-10">上顎</div>
                 <div className="overflow-x-auto">
-                  <table className="text-[10px] w-full border-collapse">
-                    <thead>
-                      <tr className="text-gray-400 border-b border-gray-200">
-                        <th className="text-left py-1 w-14">歯番号</th>
-                        <th colSpan={3} className="text-center">頬側 (MB/B/DB)</th>
-                        <th colSpan={3} className="text-center">舌側 (ML/L/DL)</th>
-                        <th className="text-center w-12">BOP</th>
-                        <th className="text-center w-12">動揺</th>
-                        <th className="w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ALL_TEETH.filter(t => {
-                        const st = record?.tooth_chart?.[t]; return st !== "missing";
-                      }).map(tooth => {
-                        const pd = perioData[tooth];
-                        const isEditing = perioEditTooth === tooth;
-                        return (
-                          <tr key={tooth} className={`border-b border-gray-50 ${isEditing ? "bg-sky-50" : "hover:bg-gray-50"}`}>
-                            <td className="py-1 font-bold text-gray-700">{tooth}</td>
-                            {[0,1,2].map(i => <td key={`b${i}`} className="text-center">
-                              {isEditing ? <input type="number" min={0} max={15} value={pd?.buccal[i] ?? 2} onChange={e => updatePerioPocket(tooth, "buccal", i, parseInt(e.target.value) || 0)} className={`w-7 text-center border rounded py-0.5 font-bold ${(pd?.buccal[i] ?? 2) >= 6 ? "bg-red-500 text-white border-red-500" : (pd?.buccal[i] ?? 2) >= 4 ? "bg-red-100 text-red-700 border-red-300" : "border-gray-200"}`} />
-                                : <span className={`font-bold ${(pd?.buccal[i] ?? 0) >= 6 ? "text-red-600 bg-red-100 px-1 rounded" : (pd?.buccal[i] ?? 0) >= 4 ? "text-red-500" : "text-gray-500"}`}>{pd?.buccal[i] ?? "-"}</span>}
-                            </td>)}
-                            {[0,1,2].map(i => <td key={`l${i}`} className="text-center">
-                              {isEditing ? <input type="number" min={0} max={15} value={pd?.lingual[i] ?? 2} onChange={e => updatePerioPocket(tooth, "lingual", i, parseInt(e.target.value) || 0)} className={`w-7 text-center border rounded py-0.5 font-bold ${(pd?.lingual[i] ?? 2) >= 6 ? "bg-red-500 text-white border-red-500" : (pd?.lingual[i] ?? 2) >= 4 ? "bg-red-100 text-red-700 border-red-300" : "border-gray-200"}`} />
-                                : <span className={`font-bold ${(pd?.lingual[i] ?? 0) >= 6 ? "text-red-600 bg-red-100 px-1 rounded" : (pd?.lingual[i] ?? 0) >= 4 ? "text-red-500" : "text-gray-500"}`}>{pd?.lingual[i] ?? "-"}</span>}
-                            </td>)}
-                            <td className="text-center">
-                              {isEditing ? <button onClick={() => updatePerio(tooth, "bop", !(pd?.bop))} className={`w-6 h-6 rounded-full text-[9px] font-bold border-2 ${pd?.bop ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-300 text-gray-400"}`}>{pd?.bop ? "+" : "-"}</button>
-                                : pd?.bop ? <span className="text-red-600 font-bold">+</span> : pd ? <span className="text-gray-400">-</span> : <span className="text-gray-300">-</span>}
-                            </td>
-                            <td className="text-center">
-                              {isEditing ? <select value={pd?.mobility ?? 0} onChange={e => updatePerio(tooth, "mobility", parseInt(e.target.value))} className="w-8 text-center border border-gray-200 rounded text-[10px] py-0.5">
-                                <option value={0}>0</option><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
-                              </select> : <span className={`font-bold ${(pd?.mobility ?? 0) > 0 ? "text-amber-600" : "text-gray-400"}`}>{pd?.mobility ?? "-"}</span>}
-                            </td>
-                            <td><button onClick={() => setPerioEditTooth(isEditing ? null : tooth)} className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isEditing ? "bg-sky-500 text-white" : "text-sky-500 hover:bg-sky-50"}`}>{isEditing ? "✓" : "✏️"}</button></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <table className="w-full border-collapse min-w-[640px]"><tbody>
+                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-[9px]"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
+                    </tr>
+                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                    </tr>
+                    <tr><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">上顎</td>
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const st = record?.tooth_chart?.[t]||"normal"; const cfg = TOOTH_STATUS[st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = st==="missing"; const isE = perioEditTooth===t;
+                        return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-[8px] text-gray-400">{t}</span>{st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
+                    </tr>
+                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                    </tr>
+                  </tbody></table>
                 </div>
+
+                <div className="my-2 border-t border-gray-200" />
+
+                {/* 下顎 P検チャート */}
+                <div className="text-[9px] text-gray-400 mb-0.5 ml-10">下顎</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse min-w-[640px]"><tbody>
+                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                    </tr>
+                    <tr><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">下顎</td>
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const st = record?.tooth_chart?.[t]||"normal"; const cfg = TOOTH_STATUS[st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = st==="missing"; const isE = perioEditTooth===t;
+                        return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-[8px] text-gray-400">{t}</span>{st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
+                    </tr>
+                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                    </tr>
+                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-[9px]"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
+                    </tr>
+                  </tbody></table>
+                </div>
+
+                {/* 歯タップ時の個別編集パネル */}
+                {perioEditTooth && (() => {
+                  const t = perioEditTooth; const pd = perioData[t]; const st = record?.tooth_chart?.[t];
+                  if (st === "missing") { setPerioEditTooth(null); return null; }
+                  return (
+                    <div className="mt-3 p-3 bg-sky-50 rounded-xl border-2 border-sky-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-bold text-sky-700">#{t}（{toothLabel(t)}）</span>
+                        <button onClick={() => setPerioEditTooth(null)} className="text-xs text-gray-400 hover:text-gray-600">✕ 閉じる</button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-[10px] text-gray-500 font-bold mb-1">頬側 (MB / B / DB)</p>
+                          <div className="flex gap-1">{[0,1,2].map(i => <input key={i} type="number" min={0} max={15} value={pd?.buccal[i] ?? 2} onChange={e => updatePerioPocket(t, "buccal", i, parseInt(e.target.value)||0)} className={`w-10 text-center border-2 rounded-lg py-1 text-sm font-bold ${(pd?.buccal[i]??2)>=6?"bg-red-500 text-white border-red-500":(pd?.buccal[i]??2)>=4?"bg-red-100 text-red-700 border-red-300":"border-gray-200"}`} />)}</div>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-gray-500 font-bold mb-1">舌側 (ML / L / DL)</p>
+                          <div className="flex gap-1">{[0,1,2].map(i => <input key={i} type="number" min={0} max={15} value={pd?.lingual[i] ?? 2} onChange={e => updatePerioPocket(t, "lingual", i, parseInt(e.target.value)||0)} className={`w-10 text-center border-2 rounded-lg py-1 text-sm font-bold ${(pd?.lingual[i]??2)>=6?"bg-red-500 text-white border-red-500":(pd?.lingual[i]??2)>=4?"bg-red-100 text-red-700 border-red-300":"border-gray-200"}`} />)}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 mt-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-500 font-bold">BOP:</span>
+                          <button onClick={() => updatePerio(t, "bop", !(pd?.bop))} className={`px-3 py-1 rounded-lg text-xs font-bold border-2 ${pd?.bop ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-300 text-gray-400"}`}>{pd?.bop ? "(+) 出血あり" : "(-) 出血なし"}</button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-500 font-bold">動揺:</span>
+                          {[0,1,2,3].map(m => <button key={m} onClick={() => updatePerio(t, "mobility", m)} className={`w-7 h-7 rounded-lg text-xs font-bold border-2 ${(pd?.mobility??0)===m ? "bg-sky-500 text-white border-sky-500" : "bg-white border-gray-200 text-gray-500"}`}>{m}</button>)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
