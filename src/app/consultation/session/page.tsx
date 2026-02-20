@@ -5,6 +5,22 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
+// SpeechRecognition型宣言
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: { isFinal: boolean; [index: number]: { transcript: string } }[];
+}
+interface SpeechRecognition extends EventTarget {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 type Patient = {
   id: string; name_kanji: string; name_kana: string;
   date_of_birth: string; phone: string; insurance_type: string; burden_ratio: number;
@@ -115,6 +131,9 @@ function SessionContent() {
   // U=コの字, Z=Z型, S=S型, TB=頬→舌(1歯ずつ)
   const [perioCurrentIdx, setPerioCurrentIdx] = useState(0);
   const [perioSide, setPerioSide] = useState<"buccal" | "lingual">("buccal");
+  const [perioListening, setPerioListening] = useState(false);
+  const [perioRecogRef] = useState<{ current: unknown }>({ current: null });
+  const [perioInputBuffer, setPerioInputBuffer] = useState<number[]>([]);
 
   // Billing
   const [billingItems, setBillingItems] = useState<BillingItem[]>([]);
@@ -1081,7 +1100,164 @@ function SessionContent() {
                             </div>
                           </div>
                         </div>)}
-                        <p className="text-[10px] text-gray-400 text-center mb-2">タップで数値入力（音声の補助用）</p>
+                        {/* === リアルタイム音声入力 === */}
+                        <div className="mb-3 p-3 bg-green-50 rounded-xl border border-green-200">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-bold text-green-700">
+                              🎤 リアルタイム音声入力
+                            </span>
+                            <div className="flex gap-1">
+                              <button onClick={() => setPerioVoiceMode(false)}
+                                className={`text-[9px] px-2 py-1 rounded font-bold ${!perioVoiceMode ? "bg-green-500 text-white" : "bg-white text-gray-400 border"}`}>
+                                手動
+                              </button>
+                              <button onClick={() => setPerioVoiceMode(true)}
+                                className={`text-[9px] px-2 py-1 rounded font-bold ${perioVoiceMode ? "bg-green-500 text-white" : "bg-white text-gray-400 border"}`}>
+                                音声
+                              </button>
+                            </div>
+                          </div>
+                          {perioVoiceMode && (
+                            <div>
+                              <p className="text-[9px] text-green-600 mb-2">
+                                数字を読み上げると自動入力されます。
+                                {perioProbePoints === 1
+                                  ? "1つ言うと次の歯へ"
+                                  : perioProbePoints === 6
+                                    ? "6つ（頬側3+舌側3）言うと次の歯へ"
+                                    : "4つ言うと次の歯へ"}
+                              </p>
+                              {perioInputBuffer.length > 0 && (
+                                <div className="flex gap-1 mb-2 items-center">
+                                  <span className="text-[9px] text-gray-400">バッファ:</span>
+                                  {perioInputBuffer.map((v, i) => (
+                                    <span key={i} className="bg-green-200 text-green-800 text-xs font-bold px-1.5 py-0.5 rounded">{v}</span>
+                                  ))}
+                                </div>
+                              )}
+                              <button
+                                onClick={() => {
+                                  if (perioListening) {
+                                    // 停止
+                                    const r = perioRecogRef.current as { stop?: () => void } | null;
+                                    if (r?.stop) r.stop();
+                                    setPerioListening(false);
+                                    showMsg("⏹ 音声認識を停止");
+                                    return;
+                                  }
+                                  // 開始
+                                  const SR = (window as unknown as Record<string, unknown>).SpeechRecognition
+                                    || (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
+                                  if (!SR) {
+                                    showMsg("❌ このブラウザは音声認識非対応です");
+                                    return;
+                                  }
+                                  const recognition = new (SR as new () => SpeechRecognition)();
+                                  recognition.lang = "ja-JP";
+                                  recognition.continuous = true;
+                                  recognition.interimResults = true;
+                                  perioRecogRef.current = recognition;
+
+                                  const numMap: Record<string, number> = {
+                                    "いち": 1, "に": 2, "さん": 3, "し": 4, "よん": 4,
+                                    "ご": 5, "ろく": 6, "なな": 7, "しち": 7,
+                                    "はち": 8, "きゅう": 9, "く": 9, "じゅう": 10,
+                                    "1": 1, "2": 2, "3": 3, "4": 4, "5": 5,
+                                    "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
+                                    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+                                    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+                                  };
+
+                                  let buffer: number[] = [];
+
+                                  recognition.onresult = (event: SpeechRecognitionEvent) => {
+                                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                                      if (!event.results[i].isFinal) continue;
+                                      const text = event.results[i][0].transcript.trim();
+                                      // テキストから数字を抽出
+                                      const words = text.split(/[\s,、。．.]+/);
+                                      for (const w of words) {
+                                        const cleaned = w.trim();
+                                        if (!cleaned) continue;
+                                        const num = numMap[cleaned] || parseInt(cleaned);
+                                        if (num >= 1 && num <= 15) {
+                                          buffer.push(num);
+                                          setPerioInputBuffer([...buffer]);
+
+                                          const needed = perioProbePoints === 1 ? 1
+                                            : perioProbePoints === 4 ? 4 : 6;
+
+                                          if (buffer.length >= needed) {
+                                            // 必要数に達した → 現在の歯に入力
+                                            const vals = buffer.slice(0, needed);
+                                            buffer = buffer.slice(needed);
+                                            setPerioInputBuffer([...buffer]);
+
+                                            setPerioData(prev => {
+                                              const pd = prev[curT] || {
+                                                buccal: [2,2,2] as [number,number,number],
+                                                lingual: [2,2,2] as [number,number,number],
+                                                bop: false, mobility: 0,
+                                              };
+                                              if (needed === 1) {
+                                                const v = vals[0];
+                                                return { ...prev, [curT]: {
+                                                  ...pd,
+                                                  buccal: [v,v,v] as [number,number,number],
+                                                  lingual: [v,v,v] as [number,number,number],
+                                                }};
+                                              } else if (needed === 4) {
+                                                return { ...prev, [curT]: {
+                                                  ...pd,
+                                                  buccal: [vals[0],vals[1],vals[2]] as [number,number,number],
+                                                  lingual: [vals[3],vals[3],vals[3]] as [number,number,number],
+                                                }};
+                                              } else {
+                                                return { ...prev, [curT]: {
+                                                  ...pd,
+                                                  buccal: [vals[0],vals[1],vals[2]] as [number,number,number],
+                                                  lingual: [vals[3],vals[4],vals[5]] as [number,number,number],
+                                                }};
+                                              }
+                                            });
+                                            // 次の歯へ
+                                            setPerioCurrentIdx(prev => {
+                                              const next = prev + 1;
+                                              return next < order.length ? next : prev;
+                                            });
+                                            setPerioSide("buccal");
+                                          }
+                                        }
+                                      }
+                                    }
+                                  };
+                                  recognition.onerror = () => {
+                                    setPerioListening(false);
+                                  };
+                                  recognition.onend = () => {
+                                    // continuous modeで終了した場合再開
+                                    if (perioListening) {
+                                      try { recognition.start(); } catch {}
+                                    }
+                                  };
+                                  recognition.start();
+                                  setPerioListening(true);
+                                  setPerioInputBuffer([]);
+                                  showMsg("🎤 音声認識開始 — 数字を読み上げてください");
+                                }}
+                                className={`w-full py-3 rounded-xl text-sm font-bold transition-all ${
+                                  perioListening
+                                    ? "bg-red-500 text-white animate-pulse"
+                                    : "bg-green-500 text-white hover:bg-green-600"
+                                }`}
+                              >
+                                {perioListening ? "⏹ 音声認識を停止" : "🎤 音声認識を開始"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <p className="text-[10px] text-gray-400 text-center mb-2">タップで数値入力（手動 / 音声の補助用）</p>
                         <div className="flex justify-center gap-1 mb-3">
                           {[1,2,3,4,5,6,7,8,9,10].map(v => (
                             <button key={v} onClick={() => {
