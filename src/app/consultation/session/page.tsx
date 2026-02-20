@@ -28,8 +28,46 @@ type Patient = {
 type MedicalRecord = {
   id: string; appointment_id: string; patient_id: string; status: string;
   soap_s: string | null; soap_o: string | null; soap_a: string | null; soap_p: string | null;
-  tooth_chart: Record<string, string> | null;
+  tooth_chart: Record<string, string | string[]> | null;
 };
+
+// 歯式ヘルパー: string | string[] どちらでも配列で返す
+function getToothStatuses(chart: Record<string, string | string[]> | null, tooth: string): string[] {
+  if (!chart || !chart[tooth]) return ["normal"];
+  const v = chart[tooth];
+  if (Array.isArray(v)) return v.length > 0 ? v : ["normal"];
+  return [v];
+}
+// 歯に特定ステータスがあるか
+function hasStatus(chart: Record<string, string | string[]> | null, tooth: string, status: string): boolean {
+  return getToothStatuses(chart, tooth).includes(status);
+}
+// 歯のプライマリステータス（表示色に使う最も優先度の高いもの）
+function primaryStatus(chart: Record<string, string | string[]> | null, tooth: string): string {
+  const statuses = getToothStatuses(chart, tooth);
+  const priority = ["caries","in_treatment","missing","root_remain","br_pontic","br_abutment","implant","crown","inlay","cr","watch","normal"];
+  for (const p of priority) { if (statuses.includes(p)) return p; }
+  return statuses[0] || "normal";
+}
+// 歯にステータスをトグル
+function toggleToothStatus(chart: Record<string, string | string[]>, tooth: string, status: string): Record<string, string | string[]> {
+  const current = getToothStatuses(chart, tooth);
+  const newChart = { ...chart };
+  if (status === "normal") {
+    newChart[tooth] = ["normal"];
+    return newChart;
+  }
+  // normalを除外
+  let updated = current.filter(s => s !== "normal");
+  if (updated.includes(status)) {
+    updated = updated.filter(s => s !== status);
+  } else {
+    updated.push(status);
+  }
+  if (updated.length === 0) updated = ["normal"];
+  newChart[tooth] = updated;
+  return newChart;
+}
 type BillingItem = { code: string; name: string; points: number; count: number; tooth?: string };
 type TranscriptEntry = { id: string; recording_number: number; transcript_text: string; duration_seconds: number | null; is_edited: boolean; created_at: string };
 type PreviousVisit = { date: string; soap_a: string; soap_p: string; procedures: string[]; nextPlan: string; toothNumbers: string[] };
@@ -57,15 +95,17 @@ const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string; b
   normal:       { label: "健全",   color: "text-gray-500",   bg: "bg-white",      border: "border-gray-200",  shortLabel: "○" },
   caries:       { label: "C",      color: "text-red-700",    bg: "bg-red-50",     border: "border-red-300",   shortLabel: "C" },
   in_treatment: { label: "治療中", color: "text-orange-700", bg: "bg-orange-50",  border: "border-orange-300",shortLabel: "🔧" },
-  treated:      { label: "処置済", color: "text-blue-700",   bg: "bg-blue-50",    border: "border-blue-300",  shortLabel: "●" },
-  crown:        { label: "冠",     color: "text-yellow-700", bg: "bg-yellow-50",  border: "border-yellow-300",shortLabel: "冠" },
+  cr:           { label: "CR",     color: "text-blue-700",   bg: "bg-blue-50",    border: "border-blue-300",  shortLabel: "CR" },
+  inlay:        { label: "In",     color: "text-cyan-700",   bg: "bg-cyan-50",    border: "border-cyan-300",  shortLabel: "In" },
+  crown:        { label: "Cr",     color: "text-yellow-700", bg: "bg-yellow-50",  border: "border-yellow-300",shortLabel: "Cr" },
   missing:      { label: "欠損",   color: "text-gray-400",   bg: "bg-gray-100",   border: "border-gray-300",  shortLabel: "/" },
-  implant:      { label: "Imp",    color: "text-purple-700", bg: "bg-purple-50",  border: "border-purple-300",shortLabel: "I" },
-  bridge:       { label: "Br",     color: "text-orange-700", bg: "bg-orange-50",  border: "border-orange-300",shortLabel: "Br" },
+  implant:      { label: "IP",     color: "text-purple-700", bg: "bg-purple-50",  border: "border-purple-300",shortLabel: "IP" },
+  br_abutment:  { label: "Br支台", color: "text-orange-700", bg: "bg-orange-50",  border: "border-orange-300",shortLabel: "Br" },
+  br_pontic:    { label: "Brポン", color: "text-orange-500", bg: "bg-orange-100", border: "border-orange-400",shortLabel: "Br欠" },
   root_remain:  { label: "残根",   color: "text-pink-700",   bg: "bg-pink-50",    border: "border-pink-300",  shortLabel: "残" },
   watch:        { label: "要注意", color: "text-amber-700",  bg: "bg-amber-50",   border: "border-amber-300", shortLabel: "△" },
 };
-const CHECK_STATUSES = ["normal","caries","in_treatment","treated","crown","missing","root_remain","watch"] as const;
+const CHECK_STATUSES = ["normal","caries","in_treatment","cr","inlay","crown","missing","implant","br_abutment","br_pontic","root_remain","watch"] as const;
 
 type SessionTab = "chief" | "tooth" | "perio" | "dh_record" | "dr_exam" | "confirm";
 type DentitionMode = "permanent" | "mixed";
@@ -496,23 +536,51 @@ function SessionContent() {
   function getAge(dob: string) { const b = new Date(dob), t = new Date(); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; }
 
   function renderTooth(num: string, isDeciduous = false) {
-    const status = record?.tooth_chart?.[num] || "normal";
-    const cfg = TOOTH_STATUS[status] || TOOTH_STATUS.normal;
+    const statuses = getToothStatuses(record?.tooth_chart || null, num);
+    const primary = primaryStatus(record?.tooth_chart || null, num);
+    const cfg = TOOTH_STATUS[primary] || TOOTH_STATUS.normal;
     const editing = editingTooth === num && !checkMode && !baselineMode;
     const size = isDeciduous ? "w-8 h-8 text-[9px]" : "w-9 h-9 text-[10px]";
     const isBaselineCurrent = baselineMode && ALL_TEETH[baselineIndex] === num;
+    const hasMultiple = statuses.length > 1 || (statuses.length === 1 && statuses[0] !== "normal");
+    // ラベル表示: 複数の場合はショートラベルを連結
+    const displayLabel = statuses.includes("normal") && statuses.length === 1
+      ? num
+      : statuses.filter(s => s !== "normal").map(s => TOOTH_STATUS[s]?.shortLabel || TOOTH_STATUS[s]?.label || s).join("/");
     return (
       <div key={num} className="relative">
         <button onClick={() => { if (checkMode) onCheckTap(num); else if (!baselineMode) setEditingTooth(editing ? null : num); }}
           className={`${size} rounded-lg font-bold border-2 transition-all ${cfg.bg} ${cfg.border} ${cfg.color} ${isBaselineCurrent ? "ring-4 ring-sky-400 scale-125 shadow-lg" : checkMode ? "hover:ring-2 hover:ring-sky-300 active:scale-95" : editing ? "ring-2 ring-sky-400 scale-110" : "hover:scale-105"}`}>
-          {status === "normal" ? num : (isDeciduous ? (cfg.shortLabel || cfg.label) : cfg.label)}
+          <span className="text-[8px] leading-none">{displayLabel}</span>
         </button>
-        {editing && !checkMode && !baselineMode && (
-          <div className="absolute z-30 top-full mt-1 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-200 p-2 min-w-[110px]">
-            <p className="text-[10px] text-gray-400 text-center mb-1 font-bold">#{num}</p>
-            {Object.entries(TOOTH_STATUS).map(([k, v]) => (
-              <button key={k} onClick={() => { setToothState(num, k); setEditingTooth(null); }} className={`w-full text-left px-2 py-1 rounded-lg text-[11px] font-bold hover:bg-gray-50 ${status === k ? "bg-sky-50 text-sky-700" : "text-gray-700"}`}>{v.label}</button>
+        {/* 複数ステータスドット */}
+        {hasMultiple && statuses.length > 1 && (
+          <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 flex gap-[1px]">
+            {statuses.filter(s => s !== "normal").slice(0, 3).map((s, i) => (
+              <span key={i} className={`w-1.5 h-1.5 rounded-full ${TOOTH_STATUS[s]?.bg || "bg-gray-300"} border ${TOOTH_STATUS[s]?.border || "border-gray-300"}`} />
             ))}
+          </div>
+        )}
+        {/* 編集ポップアップ: 複数選択対応 */}
+        {editing && !checkMode && !baselineMode && (
+          <div className="absolute z-30 top-full mt-1 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-200 p-2 min-w-[140px]">
+            <p className="text-[10px] text-gray-400 text-center mb-1 font-bold">#{num}（複数選択可）</p>
+            {Object.entries(TOOTH_STATUS).map(([k, v]) => {
+              const isActive = statuses.includes(k);
+              return (
+                <button key={k} onClick={() => {
+                  const newChart = toggleToothStatus(record.tooth_chart || {}, num, k);
+                  setRecord({ ...record, tooth_chart: newChart });
+                }} className={`w-full text-left px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 ${isActive ? "bg-sky-50 text-sky-700" : "text-gray-600 hover:bg-gray-50"}`}>
+                  <span className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center text-[8px] ${isActive ? "bg-sky-500 border-sky-500 text-white" : "border-gray-300"}`}>
+                    {isActive ? "✓" : ""}
+                  </span>
+                  <span className={`${v.color}`}>{v.shortLabel}</span>
+                  <span>{v.label}</span>
+                </button>
+              );
+            })}
+            <button onClick={() => setEditingTooth(null)} className="w-full mt-1 text-center text-[10px] text-gray-400 hover:text-gray-600 py-1">閉じる</button>
           </div>
         )}
       </div>
@@ -531,7 +599,7 @@ function SessionContent() {
     { key: "soap_a" as const, label: "A", title: "評価", color: "bg-yellow-500", borderColor: "border-yellow-200", placeholder: "診断名・評価" },
     { key: "soap_p" as const, label: "P", title: "計画", color: "bg-green-500", borderColor: "border-green-200", placeholder: "治療計画・処置内容・次回予定" },
   ];
-  const chartStats = (() => { const c = record.tooth_chart || {}; const counts: Record<string, number> = {}; Object.values(c).forEach(s => { counts[s] = (counts[s] || 0) + 1; }); return counts; })();
+  const chartStats = (() => { const c = record.tooth_chart || {}; const counts: Record<string, number> = {}; Object.keys(c).forEach(t => { const sts = getToothStatuses(c, t); sts.forEach(s => { if (s !== "normal") counts[s] = (counts[s] || 0) + 1; }); }); return counts; })();
 
   // P検サマリ
   const perioSummary = (() => {
@@ -1050,7 +1118,10 @@ function SessionContent() {
                   {(() => {
                     const chart = record.tooth_chart || {};
                     const excluded = Object.entries(chart)
-                      .filter(([, s]) => s === "missing" || s === "root_remain")
+                      .filter(([, s]) => {
+                        const arr = Array.isArray(s) ? s : [s];
+                        return arr.includes("missing") || arr.includes("root_remain");
+                      })
                       .map(([t]) => t);
                     const ur = UPPER_RIGHT.filter(t => !excluded.includes(t));
                     const ul = UPPER_LEFT.filter(t => !excluded.includes(t));
@@ -1361,15 +1432,15 @@ function SessionContent() {
                       {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-[9px]"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                     <tr><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">上顎</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const st = record?.tooth_chart?.[t]||"normal"; const cfg = TOOTH_STATUS[st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = st==="missing"; const isE = perioEditTooth===t;
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing"); const isE = perioEditTooth===t;
                         return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-[8px] text-gray-400">{t}</span>{st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                   </tbody></table>
@@ -1382,15 +1453,15 @@ function SessionContent() {
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[640px]"><tbody>
                     <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                     <tr><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">下顎</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const st = record?.tooth_chart?.[t]||"normal"; const cfg = TOOTH_STATUS[st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = st==="missing"; const isE = perioEditTooth===t;
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing"); const isE = perioEditTooth===t;
                         return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-[8px] text-gray-400">{t}</span>{st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const st = record?.tooth_chart?.[t]; const isM = st==="missing";
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
