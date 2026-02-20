@@ -619,14 +619,70 @@ function SessionContent() {
                   />
                 </div>
 
-                {/* 録音ボタン */}
-                <div className="bg-gray-50 rounded-xl p-3">
-                  <p className="text-[10px] text-gray-400 font-bold mb-2">
-                    🎙 音声で主訴を記録（録音→文字起こし→S欄に反映）
+                {/* 専用録音 → AI分析 → S欄比較 */}
+                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
+                  <p className="text-xs font-bold text-sky-700 mb-3">
+                    🎙 音声で主訴を記録
                   </p>
-                  <p className="text-[10px] text-gray-300">
-                    ヘッダーの録音ボタンから録音できます。文字起こし後、SOAP生成でS欄に反映されます。
+                  <p className="text-[10px] text-sky-500 mb-3">
+                    ヘッダーの録音ボタンで録音 → 文字起こし完了後、下のボタンでS分析
                   </p>
+                  {transcripts.length > 0 && (
+                    <div className="mb-3 bg-white rounded-lg p-3 border border-sky-100">
+                      <p className="text-[10px] text-gray-400 font-bold mb-1">
+                        文字起こし（{transcripts.length}件）
+                      </p>
+                      <p className="text-xs text-gray-600 line-clamp-3">
+                        {transcripts.map(t => t.transcript_text).join(" ")}
+                      </p>
+                    </div>
+                  )}
+                  <button
+                    onClick={async () => {
+                      if (transcripts.length === 0) {
+                        showMsg("⚠️ 先に録音してください");
+                        return;
+                      }
+                      showMsg("🤖 S欄を分析中...");
+                      try {
+                        const full = transcripts.map(
+                          t => t.transcript_text
+                        ).join("\n");
+                        const res = await fetch("/api/step-analyze", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            step: "chief",
+                            transcript: full,
+                            existing_soap: { s: record.soap_s || "" },
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.success && data.result) {
+                          const r = data.result;
+                          const merged = r.merged_s || r.analyzed_s || "";
+                          if (record.soap_s && record.soap_s.trim()) {
+                            const ok = confirm(
+                              `問診票のS:\n${record.soap_s}\n\nAI分析のS:\n${merged}\n\nAI分析の内容でS欄を更新しますか？`
+                            );
+                            if (ok) updateSOAP("soap_s", merged);
+                          } else {
+                            updateSOAP("soap_s", merged);
+                          }
+                          showMsg("✅ S欄を更新しました");
+                        } else {
+                          showMsg("❌ 分析失敗: " + (data.error || ""));
+                        }
+                      } catch (e) {
+                        showMsg("❌ 分析エラー");
+                        console.error(e);
+                      }
+                    }}
+                    disabled={transcripts.length === 0}
+                    className="w-full bg-sky-500 text-white py-2.5 rounded-lg text-xs font-bold hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    🤖 音声からS欄を分析・更新
+                  </button>
                 </div>
 
                 {/* 次のステップへ */}
@@ -655,6 +711,98 @@ function SessionContent() {
                     {!isReturning && !baselineMode && <button onClick={() => { setBaselineMode(true); setBaselineIndex(0); setCheckMode(false); }} className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-sky-50 text-sky-600 border border-sky-200 hover:bg-sky-100">📋 ベースライン記録</button>}
                     {!baselineMode && <button onClick={() => { setCheckMode(!checkMode); setEditingTooth(null); }} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold ${checkMode ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-600 border border-orange-200"}`}>{checkMode ? "✓ チェック中" : "🖊 一括チェック"}</button>}
                   </div>
+                </div>
+
+                {/* レントゲン画像アップロード & AI分析 */}
+                <div className="mb-3 p-3 bg-purple-50 rounded-xl border border-purple-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-purple-700">
+                      📷 レントゲン画像 → AI歯式分析
+                    </span>
+                    <label className="cursor-pointer">
+                      <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-200">
+                        📤 画像アップロード
+                      </span>
+                      <input type="file" accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file || !patient || !record) return;
+                          showMsg("📤 アップロード中...");
+                          try {
+                            const fd = new FormData();
+                            fd.append("file", file);
+                            fd.append("patient_id", patient.id);
+                            fd.append("record_id", record.id);
+                            fd.append("image_type", "panorama");
+                            const upRes = await fetch(
+                              "/api/image-upload",
+                              { method: "POST", body: fd }
+                            );
+                            const upData = await upRes.json();
+                            if (!upData.success) {
+                              showMsg("❌ アップロード失敗");
+                              return;
+                            }
+                            showMsg("🤖 AI分析中...");
+                            const aiRes = await fetch(
+                              "/api/xray-analyze",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  image_base64: upData.image.base64,
+                                  patient_id: patient.id,
+                                }),
+                              }
+                            );
+                            const aiData = await aiRes.json();
+                            if (aiData.success && aiData.tooth_chart) {
+                              const chart = {
+                                ...(record.tooth_chart || {}),
+                              };
+                              Object.entries(
+                                aiData.tooth_chart
+                              ).forEach(([t, s]) => {
+                                if (TOOTH_STATUS[s as string]) {
+                                  chart[t] = s as string;
+                                }
+                              });
+                              setRecord({
+                                ...record, tooth_chart: chart,
+                              });
+                              const cnt = Object.keys(
+                                aiData.tooth_chart
+                              ).length;
+                              showMsg(
+                                `✅ AI分析完了！${cnt}歯を更新`
+                              );
+                              // DB更新
+                              if (upData.image?.id) {
+                                await supabase
+                                  .from("patient_images")
+                                  .update({
+                                    ai_analysis: aiData.analysis,
+                                  })
+                                  .eq("id", upData.image.id);
+                              }
+                            } else {
+                              showMsg("❌ 分析失敗");
+                            }
+                          } catch (err) {
+                            showMsg("❌ エラーが発生");
+                            console.error(err);
+                          }
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-purple-500">
+                    パノラマ写真をアップすると、AIが欠損・残根・C・Imp等を自動判定し歯式に反映します
+                  </p>
                 </div>
 
                 {/* ベースラインモード */}
@@ -822,6 +970,17 @@ function SessionContent() {
                     患者さんにフィードバックする内容を音声で記録 → O欄に反映
                   </p>
                 </div>
+
+                {/* Step1で確定したS表示 */}
+                {record.soap_s && (
+                  <div className="bg-red-50 rounded-xl border border-red-200 p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="bg-red-500 text-white text-[10px] font-bold w-5 h-5 rounded flex items-center justify-center">S</span>
+                      <span className="text-xs font-bold text-red-600">確定済みの主訴</span>
+                    </div>
+                    <p className="text-sm text-gray-700">{record.soap_s}</p>
+                  </div>
+                )}
 
                 {/* 予定処置パネル（再診時） */}
                 {isReturning && hasPreviousPlan && !quickSoapApplied && visitCondition === "" && (
