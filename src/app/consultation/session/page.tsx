@@ -569,6 +569,7 @@ function SessionContent() {
               const isActive = statuses.includes(k);
               return (
                 <button key={k} onClick={() => {
+                  if (!record) return;
                   const newChart = toggleToothStatus(record.tooth_chart || {}, num, k);
                   setRecord({ ...record, tooth_chart: newChart });
                 }} className={`w-full text-left px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 ${isActive ? "bg-sky-50 text-sky-700" : "text-gray-600 hover:bg-gray-50"}`}>
