@@ -416,7 +416,7 @@ function SessionContent() {
   async function applyAiResult() {
     if (!record || !aiResult) return;
     const chart = { ...(record.tooth_chart || {}) };
-    if (aiResult.tooth_updates) Object.entries(aiResult.tooth_updates).forEach(([t, s]) => { const num = t.replace("#", ""); if (TOOTH_STATUS[s]) chart[num] = s; });
+    if (aiResult.tooth_updates) Object.entries(aiResult.tooth_updates).forEach(([t, s]) => { const num = t.replace("#", ""); if (TOOTH_STATUS[s]) chart[num] = [s]; });
     setRecord({ ...record, soap_s: aiResult.soap.s || record.soap_s, soap_o: aiResult.soap.o || record.soap_o, soap_a: aiResult.soap.a || record.soap_a, soap_p: aiResult.soap.p || record.soap_p, tooth_chart: chart });
     if (aiResult.diagnoses && aiResult.diagnoses.length > 0 && record.patient_id) {
       try { for (const d of aiResult.diagnoses) { const { data: dup } = await supabase.from("patient_diagnoses").select("id").eq("patient_id", record.patient_id).eq("diagnosis_code", d.code || "").eq("tooth_number", d.tooth || "").eq("outcome", "continuing").limit(1); if (dup && dup.length > 0) continue; await supabase.from("patient_diagnoses").insert({ patient_id: record.patient_id, diagnosis_code: d.code || "", diagnosis_name: d.name || "", tooth_number: d.tooth || "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing" }); } } catch (e) { console.error("傷病名エラー:", e); }
@@ -426,7 +426,7 @@ function SessionContent() {
 
   function showMsg(msg: string) { setSaveMsg(msg); setTimeout(() => setSaveMsg(""), 5000); }
   function updateSOAP(field: "soap_s" | "soap_o" | "soap_a" | "soap_p", value: string) { if (record) setRecord({ ...record, [field]: value }); }
-  function setToothState(num: string, status: string) { if (!record) return; const chart = { ...(record.tooth_chart || {}) }; if (status === "normal") delete chart[num]; else chart[num] = status; setRecord({ ...record, tooth_chart: chart }); }
+  function setToothState(num: string, status: string) { if (!record) return; const chart = { ...(record.tooth_chart || {}) }; if (status === "normal") delete chart[num]; else chart[num] = [status]; setRecord({ ...record, tooth_chart: chart }); }
   function onCheckTap(num: string) { if (!checkMode) return; setToothState(num, checkBrush); }
 
   // ★ ベースラインチェック: 次の歯に進む
@@ -475,7 +475,7 @@ function SessionContent() {
       }
       const newChart = record.tooth_chart || {};
       const allTeethSet = new Set([...Object.keys(prevChart), ...Object.keys(newChart)]);
-      allTeethSet.forEach(tooth => { const prev = prevChart[tooth] || "normal"; const next = newChart[tooth] || "normal"; if (prev !== next) toothChanges.push({ tooth, from: prev, to: next }); });
+      allTeethSet.forEach(tooth => { const prevVal = prevChart[tooth] || "normal"; const prev = typeof prevVal === "string" ? prevVal : String(prevVal); const nextVal = newChart[tooth] || "normal"; const next = Array.isArray(nextVal) ? nextVal.join(",") : String(nextVal); if (prev !== next) toothChanges.push({ tooth, from: prev, to: next }); });
     } catch (e) { console.error("歯式変更検出エラー:", e); }
 
     // ★ P検実施時: O欄にP検サマリを自動追記（保険算定に必要）
@@ -885,7 +885,7 @@ function SessionContent() {
                                   aiData.tooth_chart
                                 ).forEach(([t, s]) => {
                                   if (TOOTH_STATUS[s as string]) {
-                                    chart[t] = s as string;
+                                    chart[t] = [s as string];
                                   }
                                 });
                                 setRecord({
@@ -964,7 +964,7 @@ function SessionContent() {
                                   aiData.tooth_chart
                                 ).forEach(([t, s]) => {
                                   if (TOOTH_STATUS[s as string]) {
-                                    chart[t] = s as string;
+                                    chart[t] = [s as string];
                                   }
                                 });
                                 setRecord({
@@ -1472,8 +1472,8 @@ function SessionContent() {
 
                 {/* 歯タップ時の個別編集パネル */}
                 {perioEditTooth && (() => {
-                  const t = perioEditTooth; const pd = perioData[t]; const st = record?.tooth_chart?.[t];
-                  if (st === "missing") { setPerioEditTooth(null); return null; }
+                  const t = perioEditTooth; const pd = perioData[t];
+                  if (hasStatus(record?.tooth_chart || null, t, "missing")) { setPerioEditTooth(null); return null; }
                   return (
                     <div className="mt-3 p-3 bg-sky-50 rounded-xl border-2 border-sky-200">
                       <div className="flex items-center justify-between mb-2">
