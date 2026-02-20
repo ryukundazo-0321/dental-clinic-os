@@ -15,12 +15,19 @@ type MatchedAppointment = {
   patient_name: string;
 };
 
+function getJSTDateStr() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + (9 * 60 + now.getTimezoneOffset()) * 60000);
+  return jst.toISOString().split("T")[0];
+}
+
 export default function SelfCheckinPage() {
   const [step, setStep] = useState<Step>("input");
   const [config, setConfig] = useState<ClinicConfig | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [form, setForm] = useState({ name_kanji: "", date_of_birth: "", phone: "" });
+  const [patientId, setPatientId] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [matched, setMatched] = useState<MatchedAppointment | null>(null);
   const [queueNumber, setQueueNumber] = useState(0);
 
@@ -32,20 +39,38 @@ export default function SelfCheckinPage() {
     init();
   }, []);
 
+  // 生年月日8桁 → YYYY-MM-DD変換
+  function parseBirthDate(input: string): string | null {
+    const digits = input.replace(/[^0-9]/g, "");
+    if (digits.length !== 8) return null;
+    const y = digits.slice(0, 4);
+    const m = digits.slice(4, 6);
+    const d = digits.slice(6, 8);
+    const mi = parseInt(m), di = parseInt(d);
+    if (mi < 1 || mi > 12 || di < 1 || di > 31) return null;
+    return `${y}-${m}-${d}`;
+  }
+
   async function handleLookup() {
-    if (!form.name_kanji || !form.date_of_birth || !form.phone) return;
+    if (!patientId.trim() || !birthDate.trim()) return;
     setStep("checking");
     setLoading(true);
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const dob = parseBirthDate(birthDate);
+    if (!dob) {
+      setStep("not_found");
+      setLoading(false);
+      return;
+    }
 
-    // 患者照合
+    const todayStr = getJSTDateStr();
+
+    // 患者照合: patient_number + date_of_birth
     const { data: patient } = await supabase
       .from("patients")
       .select("id, name_kanji")
-      .eq("name_kanji", form.name_kanji)
-      .eq("date_of_birth", form.date_of_birth)
-      .eq("phone", form.phone)
+      .eq("patient_number", patientId.trim())
+      .eq("date_of_birth", dob)
       .single();
 
     if (!patient) {
@@ -54,7 +79,7 @@ export default function SelfCheckinPage() {
       return;
     }
 
-    // 今日の予約を検索（最新の予約を優先）
+    // 今日の予約を検索
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
@@ -66,7 +91,6 @@ export default function SelfCheckinPage() {
       .limit(1);
 
     if (!appointments || appointments.length === 0) {
-      // 既にチェックイン済みかチェック
       const { data: checkedIn } = await supabase
         .from("appointments")
         .select("id")
@@ -102,9 +126,8 @@ export default function SelfCheckinPage() {
     if (!matched) return;
     setLoading(true);
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = getJSTDateStr();
 
-    // 次の受付番号を取得
     const { data: maxQueue } = await supabase
       .from("queue")
       .select("queue_number")
@@ -114,13 +137,11 @@ export default function SelfCheckinPage() {
 
     const nextNumber = (maxQueue && maxQueue.length > 0) ? maxQueue[0].queue_number + 1 : 1;
 
-    // 予約ステータスを来院済に
     await supabase
       .from("appointments")
       .update({ status: "checked_in" })
       .eq("id", matched.id);
 
-    // キューに追加
     await supabase.from("queue").insert({
       appointment_id: matched.id,
       queue_number: nextNumber,
@@ -132,67 +153,100 @@ export default function SelfCheckinPage() {
     setStep("complete");
     setLoading(false);
 
-    // 30秒後にリセット（次の患者用）
-    setTimeout(() => {
-      setStep("input");
-      setForm({ name_kanji: "", date_of_birth: "", phone: "" });
-      setMatched(null);
-      setQueueNumber(0);
-    }, 30000);
+    setTimeout(() => { reset(); }, 30000);
   }
 
   function formatTime(dateStr: string) {
-    const d = new Date(dateStr); return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
+    const d = new Date(dateStr);
+    return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
   }
 
   function reset() {
     setStep("input");
-    setForm({ name_kanji: "", date_of_birth: "", phone: "" });
+    setPatientId("");
+    setBirthDate("");
     setMatched(null);
     setQueueNumber(0);
   }
 
+  // 8桁入力のフォーマット表示
+  function formatBirthDisplay(input: string): string {
+    const digits = input.replace(/[^0-9]/g, "");
+    if (digits.length <= 4) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 4)}/${digits.slice(4)}`;
+    return `${digits.slice(0, 4)}/${digits.slice(4, 6)}/${digits.slice(6, 8)}`;
+  }
+
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white flex flex-col">
       <header className="bg-sky-600 text-white">
         <div className="max-w-lg mx-auto px-4 py-5 text-center">
           <h1 className="text-xl font-bold">🦷 {config?.clinicName || "受付"}</h1>
-          <p className="text-sky-200 text-sm mt-1">チェックインはこちらから</p>
+          <p className="text-sky-200 text-sm mt-1">セルフチェックイン</p>
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 py-8">
-        {/* ===== 情報入力 ===== */}
+      <main className="max-w-lg mx-auto px-4 py-8 flex-1 w-full">
+        {/* ===== 入力画面 ===== */}
         {step === "input" && (
           <div>
             <h2 className="text-xl font-bold text-gray-900 text-center mb-2">受付</h2>
-            <p className="text-sm text-gray-500 text-center mb-8">ご予約の方は以下をご入力ください</p>
+            <p className="text-sm text-gray-500 text-center mb-8">
+              診察券番号と生年月日を入力してください
+            </p>
 
-            <div className="space-y-5">
+            <div className="space-y-6">
+              {/* 診察券番号 */}
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1.5">お名前（漢字）<span className="text-red-500">*</span></label>
-                <input type="text" value={form.name_kanji}
-                  onChange={(e) => setForm({ ...form, name_kanji: e.target.value })}
-                  placeholder="山田 太郎"
-                  className="w-full border border-gray-300 rounded-xl px-4 py-4 text-lg focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1.5">生年月日 <span className="text-red-500">*</span></label>
-                <input type="date" value={form.date_of_birth}
-                  onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })}
-                  className="w-full border border-gray-300 rounded-xl px-4 py-4 text-lg focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1.5">電話番号 <span className="text-red-500">*</span></label>
-                <input type="tel" value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  placeholder="09012345678"
-                  className="w-full border border-gray-300 rounded-xl px-4 py-4 text-lg focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100" />
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  診察券番号 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={patientId}
+                  onChange={(e) => setPatientId(e.target.value)}
+                  placeholder="例: 00001"
+                  className="w-full border-2 border-gray-200 rounded-2xl px-5 py-5 text-2xl text-center font-mono font-bold tracking-widest focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                />
+                <p className="text-xs text-gray-400 mt-1.5 text-center">
+                  診察券に記載されている番号をご入力ください
+                </p>
               </div>
 
-              <button onClick={handleLookup}
-                disabled={!form.name_kanji || !form.date_of_birth || !form.phone}
-                className="w-full bg-sky-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-sky-700 disabled:opacity-50 active:scale-[0.98] mt-4">
+              {/* 生年月日 8桁 */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  生年月日（8桁） <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={birthDate}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 8);
+                    setBirthDate(v);
+                  }}
+                  placeholder="例: 19900101"
+                  maxLength={8}
+                  className="w-full border-2 border-gray-200 rounded-2xl px-5 py-5 text-2xl text-center font-mono font-bold tracking-widest focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                />
+                {birthDate.length > 0 && (
+                  <p className="text-sm text-sky-600 mt-2 text-center font-bold">
+                    {formatBirthDisplay(birthDate)}
+                    {birthDate.length === 8 && " ✓"}
+                  </p>
+                )}
+                <p className="text-xs text-gray-400 mt-1 text-center">
+                  西暦で8桁入力（例: 1990年1月1日 → 19900101）
+                </p>
+              </div>
+
+              <button
+                onClick={handleLookup}
+                disabled={!patientId.trim() || birthDate.length !== 8}
+                className="w-full bg-sky-600 text-white py-5 rounded-2xl font-bold text-xl hover:bg-sky-700 disabled:opacity-40 active:scale-[0.98] mt-4 shadow-lg shadow-sky-200"
+              >
                 受付する
               </button>
             </div>
@@ -242,17 +296,13 @@ export default function SelfCheckinPage() {
           <div className="text-center py-4">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">チェックインが完了しました</h2>
-
             <div className="bg-sky-50 border-2 border-sky-300 rounded-3xl p-8 my-8">
               <p className="text-sm text-sky-600 mb-1">あなたの受付番号</p>
               <p className="text-8xl font-bold text-sky-600">{queueNumber}</p>
             </div>
-
             <p className="text-gray-500 mb-2">待合室でお待ちください。</p>
             <p className="text-gray-400 text-sm mb-8">モニターに番号が表示されたら診察室へお入りください。</p>
-
-            <button onClick={reset}
-              className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-bold">
+            <button onClick={reset} className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-bold">
               次の方の受付へ
             </button>
           </div>
@@ -263,8 +313,12 @@ export default function SelfCheckinPage() {
           <div className="text-center py-8">
             <div className="bg-yellow-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">⚠️</div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">本日のご予約が見つかりません</h2>
-            <p className="text-gray-500 text-sm mb-2">入力内容をご確認いただくか、受付スタッフにお声がけください。</p>
-            <p className="text-gray-400 text-xs mb-8">※ 予約時と同じ氏名・生年月日・電話番号をご入力ください</p>
+            <p className="text-gray-500 text-sm mb-2">
+              入力内容をご確認いただくか、受付スタッフにお声がけください。
+            </p>
+            <p className="text-gray-400 text-xs mb-8">
+              ※ 診察券番号と生年月日をご確認ください
+            </p>
             <button onClick={reset}
               className="w-full bg-sky-600 text-white py-4 rounded-xl font-bold text-lg">
               もう一度入力する
@@ -277,7 +331,9 @@ export default function SelfCheckinPage() {
           <div className="text-center py-8">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">既に受付済みです</h2>
-            <p className="text-gray-500 text-sm mb-8">待合室でお待ちください。モニターに番号が表示されたら診察室へお入りください。</p>
+            <p className="text-gray-500 text-sm mb-8">
+              待合室でお待ちください。モニターに番号が表示されたら診察室へお入りください。
+            </p>
             <button onClick={reset}
               className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-bold">
               次の方の受付へ
@@ -287,7 +343,9 @@ export default function SelfCheckinPage() {
       </main>
 
       <footer className="border-t border-gray-100 mt-auto">
-        <div className="max-w-lg mx-auto px-4 py-4 text-center text-xs text-gray-300">Powered by DENTAL CLINIC OS</div>
+        <div className="max-w-lg mx-auto px-4 py-4 text-center text-xs text-gray-300">
+          Powered by DENTAL CLINIC OS
+        </div>
       </footer>
     </div>
   );
