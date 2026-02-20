@@ -142,6 +142,19 @@ function SessionContent() {
   const [stepTranscript, setStepTranscript] = useState("");
   const [stepAnalyzing, setStepAnalyzing] = useState(false);
 
+  // 治療計画書
+  const [treatmentPlan, setTreatmentPlan] = useState<{
+    summary?: string;
+    diagnosis_summary?: string;
+    procedures?: { name: string; tooth?: string; priority?: number; estimated_visits?: number; description?: string }[];
+    estimated_total_visits?: number;
+    estimated_duration_months?: number;
+    goals?: string;
+    patient_instructions?: string;
+    notes?: string;
+  } | null>(null);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+
   // Billing
   const [billingItems, setBillingItems] = useState<BillingItem[]>([]);
   const [billingTotal, setBillingTotal] = useState(0);
@@ -1844,6 +1857,189 @@ function SessionContent() {
                     ))}
                     <div className="flex items-center px-2 py-2 border-t-2 border-gray-300 mt-1"><span className="flex-1 text-sm font-bold text-gray-800">合計</span><span className="text-sm font-bold text-sky-600">{billingTotal.toLocaleString()}点</span><span className="text-xs text-gray-400 ml-2">(¥{Math.round(billingTotal * 10 * patient.burden_ratio).toLocaleString()})</span></div>
                   </div>}
+                </div>
+
+                {/* ===== 🤖 治療計画書の自動生成 ===== */}
+                <div className="bg-purple-50 rounded-xl border-2 border-purple-200 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-bold text-purple-700">📋 治療計画書の自動生成</h4>
+                    <button
+                      onClick={async () => {
+                        setGeneratingPlan(true);
+                        showMsg("🤖 治療計画書を生成中...");
+                        try {
+                          const res = await fetch("/api/step-analyze", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              step: "treatment_plan",
+                              transcript: "",
+                              context: {
+                                soap: {
+                                  s: record.soap_s || "",
+                                  o: record.soap_o || "",
+                                  a: record.soap_a || "",
+                                  p: record.soap_p || "",
+                                },
+                                tooth_chart: record.tooth_chart || {},
+                                perio_summary: perioSummary,
+                                perio_data: perioData,
+                                patient: {
+                                  name: patient.name_kanji,
+                                  age: patient.date_of_birth,
+                                  insurance: patient.insurance_type,
+                                },
+                              },
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.success && data.result) {
+                            setTreatmentPlan(data.result);
+                            showMsg("✅ 治療計画書を生成しました");
+                          } else {
+                            showMsg("❌ 生成失敗: " + (data.error || ""));
+                          }
+                        } catch (e) {
+                          showMsg("❌ 生成エラー");
+                          console.error(e);
+                        }
+                        setGeneratingPlan(false);
+                      }}
+                      disabled={generatingPlan || (!record.soap_s && !record.soap_o && !record.soap_a)}
+                      className="bg-purple-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-purple-700 disabled:opacity-40"
+                    >
+                      {generatingPlan ? "⚙️ 生成中..." : "🤖 AI生成"}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-purple-500 mb-3">
+                    SOAP・歯式・P検の全データからAIが治療計画書を自動生成します
+                  </p>
+
+                  {!treatmentPlan && !generatingPlan && (
+                    <div className="text-center py-4">
+                      <p className="text-gray-400 text-xs">
+                        SOAPを入力後「AI生成」ボタンで治療計画書を作成できます
+                      </p>
+                    </div>
+                  )}
+
+                  {treatmentPlan && (
+                    <div className="space-y-3">
+                      {/* サマリ */}
+                      <div className="bg-white rounded-lg p-3 border border-purple-100">
+                        <p className="text-[9px] text-purple-400 font-bold mb-1">概要</p>
+                        <p className="text-sm text-gray-800">{treatmentPlan.summary}</p>
+                      </div>
+
+                      {/* 診断まとめ */}
+                      {treatmentPlan.diagnosis_summary && (
+                        <div className="bg-white rounded-lg p-3 border border-purple-100">
+                          <p className="text-[9px] text-purple-400 font-bold mb-1">診断まとめ</p>
+                          <p className="text-sm text-gray-800">{treatmentPlan.diagnosis_summary}</p>
+                        </div>
+                      )}
+
+                      {/* 処置一覧 */}
+                      {treatmentPlan.procedures && treatmentPlan.procedures.length > 0 && (
+                        <div className="bg-white rounded-lg p-3 border border-purple-100">
+                          <p className="text-[9px] text-purple-400 font-bold mb-2">治療項目</p>
+                          <div className="space-y-2">
+                            {treatmentPlan.procedures.map((p, i) => (
+                              <div key={i} className="flex items-start gap-2">
+                                <span className={`flex-shrink-0 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white ${
+                                  p.priority === 1 ? "bg-red-500"
+                                  : p.priority === 2 ? "bg-orange-500"
+                                  : "bg-gray-400"
+                                }`}>{p.priority || i + 1}</span>
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-gray-800">{p.name}</span>
+                                    {p.tooth && (
+                                      <span className="text-[9px] bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold">{p.tooth}</span>
+                                    )}
+                                    {p.estimated_visits && (
+                                      <span className="text-[9px] text-gray-400">約{p.estimated_visits}回</span>
+                                    )}
+                                  </div>
+                                  {p.description && (
+                                    <p className="text-[10px] text-gray-500 mt-0.5">{p.description}</p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 予想来院回数・期間 */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {treatmentPlan.estimated_total_visits && (
+                          <div className="bg-white rounded-lg p-3 border border-purple-100 text-center">
+                            <p className="text-[9px] text-purple-400 font-bold">予想来院回数</p>
+                            <p className="text-xl font-bold text-purple-700">{treatmentPlan.estimated_total_visits}回</p>
+                          </div>
+                        )}
+                        {treatmentPlan.estimated_duration_months && (
+                          <div className="bg-white rounded-lg p-3 border border-purple-100 text-center">
+                            <p className="text-[9px] text-purple-400 font-bold">予想期間</p>
+                            <p className="text-xl font-bold text-purple-700">{treatmentPlan.estimated_duration_months}ヶ月</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 治療目標 */}
+                      {treatmentPlan.goals && (
+                        <div className="bg-white rounded-lg p-3 border border-purple-100">
+                          <p className="text-[9px] text-purple-400 font-bold mb-1">治療目標</p>
+                          <p className="text-sm text-gray-800">{treatmentPlan.goals}</p>
+                        </div>
+                      )}
+
+                      {/* 患者さんへの説明 */}
+                      {treatmentPlan.patient_instructions && (
+                        <div className="bg-green-50 rounded-lg p-3 border border-green-200">
+                          <p className="text-[9px] text-green-600 font-bold mb-1">患者さんへの説明</p>
+                          <p className="text-sm text-gray-800">{treatmentPlan.patient_instructions}</p>
+                        </div>
+                      )}
+
+                      {/* 保存ボタン */}
+                      <button
+                        onClick={async () => {
+                          if (!treatmentPlan || !patient) return;
+                          showMsg("💾 治療計画書を保存中...");
+                          try {
+                            const { error } = await supabase
+                              .from("treatment_plans")
+                              .insert({
+                                patient_id: patient.id,
+                                record_id: record.id,
+                                plan_type: "initial",
+                                summary: treatmentPlan.summary || "",
+                                diagnosis_summary: treatmentPlan.diagnosis_summary || "",
+                                procedures: treatmentPlan.procedures || [],
+                                estimated_total_visits: treatmentPlan.estimated_total_visits,
+                                estimated_duration_months: treatmentPlan.estimated_duration_months,
+                                goals: treatmentPlan.goals || "",
+                                notes: treatmentPlan.patient_instructions || "",
+                                status: "draft",
+                              });
+                            if (error) {
+                              showMsg("❌ 保存失敗: " + error.message);
+                            } else {
+                              showMsg("✅ 治療計画書を保存しました");
+                            }
+                          } catch (e) {
+                            showMsg("❌ 保存エラー");
+                            console.error(e);
+                          }
+                        }}
+                        className="w-full bg-purple-500 text-white py-2.5 rounded-lg text-xs font-bold hover:bg-purple-600"
+                      >
+                        💾 治療計画書を保存
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* ナビ + 確定ボタン */}
