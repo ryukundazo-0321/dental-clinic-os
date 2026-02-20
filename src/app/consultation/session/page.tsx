@@ -135,6 +135,13 @@ function SessionContent() {
   const [perioRecogRef] = useState<{ current: unknown }>({ current: null });
   const [perioInputBuffer, setPerioInputBuffer] = useState<number[]>([]);
 
+  // Step4/5専用録音
+  const [stepRecording, setStepRecording] = useState(false);
+  const [stepRecorder, setStepRecorder] = useState<MediaRecorder | null>(null);
+  const [stepChunks, setStepChunks] = useState<Blob[]>([]);
+  const [stepTranscript, setStepTranscript] = useState("");
+  const [stepAnalyzing, setStepAnalyzing] = useState(false);
+
   // Billing
   const [billingItems, setBillingItems] = useState<BillingItem[]>([]);
   const [billingTotal, setBillingTotal] = useState(0);
@@ -1460,6 +1467,113 @@ function SessionContent() {
                 )}
                 {quickSoapApplied && <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between"><div className="flex items-center gap-2"><span className="text-lg">✅</span><p className="text-sm font-bold text-green-800">予定処置のSOAP自動入力済み</p></div><button onClick={() => { setQuickSoapApplied(false); setVisitCondition(""); }} className="text-xs text-green-600 hover:text-green-800 font-bold px-2 py-1 rounded hover:bg-green-100">やり直す</button></div>}
 
+                {/* ===== Step4専用録音 → O自動入力 ===== */}
+                <div className="bg-blue-50 rounded-xl border-2 border-blue-200 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-blue-700">🎤 DH専用録音 → O欄自動入力</span>
+                    {stepTranscript && <span className="text-[9px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">文字起こし済</span>}
+                  </div>
+                  <p className="text-[10px] text-blue-500 mb-3">患者さんへのフィードバックを話すだけでO欄に自動入力されます</p>
+
+                  {stepTranscript && (
+                    <div className="bg-white rounded-lg p-3 mb-3 border border-blue-100">
+                      <p className="text-[9px] text-gray-400 font-bold mb-1">文字起こし結果</p>
+                      <p className="text-xs text-gray-700 whitespace-pre-wrap">{stepTranscript}</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button onClick={async () => {
+                      if (stepRecording) {
+                        // 停止
+                        if (stepRecorder) stepRecorder.stop();
+                        setStepRecording(false);
+                        return;
+                      }
+                      // 録音開始
+                      try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+                        const chunks: Blob[] = [];
+                        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+                        recorder.onstop = async () => {
+                          stream.getTracks().forEach(t => t.stop());
+                          const blob = new Blob(chunks, { type: "audio/webm" });
+                          showMsg("🤖 文字起こし中...");
+                          try {
+                            const tokenRes = await fetch("/api/whisper-token");
+                            const { token } = await tokenRes.json();
+                            const fd = new FormData();
+                            fd.append("file", blob, "dh_record.webm");
+                            fd.append("model", "whisper-1");
+                            fd.append("language", "ja");
+                            const wRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+                              method: "POST",
+                              headers: { Authorization: `Bearer ${token}` },
+                              body: fd,
+                            });
+                            const wData = await wRes.json();
+                            const text = wData.text || "";
+                            setStepTranscript(text);
+                            showMsg("✅ 文字起こし完了");
+                          } catch (err) {
+                            showMsg("❌ 文字起こしエラー");
+                            console.error(err);
+                          }
+                        };
+                        recorder.start();
+                        setStepRecorder(recorder);
+                        setStepRecording(true);
+                        setStepTranscript("");
+                        showMsg("🎤 DH録音開始...");
+                      } catch (err) {
+                        showMsg("❌ マイクアクセスエラー");
+                        console.error(err);
+                      }
+                    }} className={`flex-1 py-3 rounded-xl text-sm font-bold ${
+                      stepRecording ? "bg-red-500 text-white animate-pulse" : "bg-blue-500 text-white hover:bg-blue-600"
+                    }`}>
+                      {stepRecording ? "⏹ 録音停止" : "🎤 DH録音開始"}
+                    </button>
+
+                    <button onClick={async () => {
+                      if (!stepTranscript) { showMsg("⚠️ 先に録音してください"); return; }
+                      setStepAnalyzing(true);
+                      showMsg("🤖 O欄を分析中...");
+                      try {
+                        const res = await fetch("/api/step-analyze", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            step: "dh_record",
+                            transcript: stepTranscript,
+                            existing_soap: { s: record.soap_s || "" },
+                            tooth_chart: record.tooth_chart,
+                            perio_summary: perioSummary,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.success && data.result) {
+                          const o = data.result.soap_o || "";
+                          if (o) {
+                            updateSOAP("soap_o", o);
+                            showMsg("✅ O欄を自動入力しました");
+                          }
+                        } else {
+                          showMsg("❌ 分析失敗: " + (data.error || ""));
+                        }
+                      } catch (e) {
+                        showMsg("❌ 分析エラー");
+                        console.error(e);
+                      }
+                      setStepAnalyzing(false);
+                    }} disabled={!stepTranscript || stepAnalyzing}
+                      className="flex-1 bg-purple-500 text-white py-3 rounded-xl text-sm font-bold hover:bg-purple-600 disabled:opacity-40">
+                      {stepAnalyzing ? "⚙️ 分析中..." : "🤖 O欄を自動生成"}
+                    </button>
+                  </div>
+                </div>
+
                 {/* 文字起こしパネル */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -1537,6 +1651,112 @@ function SessionContent() {
                       ))}
                     </div>
                   )}
+                </div>
+
+                {/* ===== Step5専用録音 → A,P自動入力 ===== */}
+                <div className="bg-orange-50 rounded-xl border-2 border-orange-200 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-orange-700">🎤 Dr専用録音 → A,P欄自動入力</span>
+                    {stepTranscript && activeTab === "dr_exam" && <span className="text-[9px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">文字起こし済</span>}
+                  </div>
+                  <p className="text-[10px] text-orange-500 mb-3">患者さんへのフィードバックを話すだけでA(評価)・P(計画)に自動入力されます</p>
+
+                  {stepTranscript && activeTab === "dr_exam" && (
+                    <div className="bg-white rounded-lg p-3 mb-3 border border-orange-100">
+                      <p className="text-[9px] text-gray-400 font-bold mb-1">文字起こし結果</p>
+                      <p className="text-xs text-gray-700 whitespace-pre-wrap">{stepTranscript}</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button onClick={async () => {
+                      if (stepRecording) {
+                        if (stepRecorder) stepRecorder.stop();
+                        setStepRecording(false);
+                        return;
+                      }
+                      try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+                        const chunks: Blob[] = [];
+                        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+                        recorder.onstop = async () => {
+                          stream.getTracks().forEach(t => t.stop());
+                          const blob = new Blob(chunks, { type: "audio/webm" });
+                          showMsg("🤖 文字起こし中...");
+                          try {
+                            const tokenRes = await fetch("/api/whisper-token");
+                            const { token } = await tokenRes.json();
+                            const fd = new FormData();
+                            fd.append("file", blob, "dr_exam.webm");
+                            fd.append("model", "whisper-1");
+                            fd.append("language", "ja");
+                            const wRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+                              method: "POST",
+                              headers: { Authorization: `Bearer ${token}` },
+                              body: fd,
+                            });
+                            const wData = await wRes.json();
+                            setStepTranscript(wData.text || "");
+                            showMsg("✅ 文字起こし完了");
+                          } catch (err) {
+                            showMsg("❌ 文字起こしエラー");
+                            console.error(err);
+                          }
+                        };
+                        recorder.start();
+                        setStepRecorder(recorder);
+                        setStepRecording(true);
+                        setStepTranscript("");
+                        showMsg("🎤 Dr録音開始...");
+                      } catch (err) {
+                        showMsg("❌ マイクアクセスエラー");
+                        console.error(err);
+                      }
+                    }} className={`flex-1 py-3 rounded-xl text-sm font-bold ${
+                      stepRecording ? "bg-red-500 text-white animate-pulse" : "bg-orange-500 text-white hover:bg-orange-600"
+                    }`}>
+                      {stepRecording ? "⏹ 録音停止" : "🎤 Dr録音開始"}
+                    </button>
+
+                    <button onClick={async () => {
+                      if (!stepTranscript) { showMsg("⚠️ 先に録音してください"); return; }
+                      setStepAnalyzing(true);
+                      showMsg("🤖 A,P欄を分析中...");
+                      try {
+                        const res = await fetch("/api/step-analyze", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            step: "dr_exam",
+                            transcript: stepTranscript,
+                            existing_soap: {
+                              s: record.soap_s || "",
+                              o: record.soap_o || "",
+                            },
+                            tooth_chart: record.tooth_chart,
+                            perio_summary: perioSummary,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.success && data.result) {
+                          const r = data.result;
+                          if (r.soap_a) updateSOAP("soap_a", r.soap_a);
+                          if (r.soap_p) updateSOAP("soap_p", r.soap_p);
+                          showMsg("✅ A,P欄を自動入力しました");
+                        } else {
+                          showMsg("❌ 分析失敗: " + (data.error || ""));
+                        }
+                      } catch (e) {
+                        showMsg("❌ 分析エラー");
+                        console.error(e);
+                      }
+                      setStepAnalyzing(false);
+                    }} disabled={!stepTranscript || stepAnalyzing}
+                      className="flex-1 bg-purple-500 text-white py-3 rounded-xl text-sm font-bold hover:bg-purple-600 disabled:opacity-40">
+                      {stepAnalyzing ? "⚙️ 分析中..." : "🤖 A,P欄を自動生成"}
+                    </button>
+                  </div>
                 </div>
 
                 {/* 文字起こし（再利用） */}
