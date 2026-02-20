@@ -1,166 +1,158 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const {
-      step,
-      transcript,
-      existing_soap,
-      tooth_chart,
-      perio_summary,
-      context,
-    } = body;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "APIキー未設定" },
-        { status: 500 }
-      );
+export async function POST(request: NextRequest) {
+  try {
+    if (!OPENAI_API_KEY) {
+      return NextResponse.json({ success: false, error: "OPENAI_API_KEY not set" }, { status: 500 });
+    }
+
+    const body = await request.json();
+    const { step, transcript, existing_soap, tooth_chart, perio_summary, context } = body;
+
+    if (!step) {
+      return NextResponse.json({ success: false, error: "step is required" }, { status: 400 });
     }
 
     let systemPrompt = "";
     let userPrompt = "";
 
     switch (step) {
-      case "chief":
-        systemPrompt = `あなたは歯科クリニックの音声分析AIです。
-患者の主訴に関する会話の文字起こしから、SOAPのS（主観）を抽出してください。
-既存の問診票の内容がある場合、それと比較して差分を明確にしてください。
+      case "dh_record": {
+        systemPrompt = `あなたは歯科衛生士（DH）のカルテ記録を支援するAIです。
+DHが患者にフィードバックした音声の文字起こしから、SOAP形式のO欄（客観的所見）を生成してください。
 
 出力はJSON形式で:
 {
-  "analyzed_s": "分析から抽出した主訴",
-  "original_s": "問診票の内容（あれば）",
-  "differences": ["差分1", "差分2"],
-  "merged_s": "統合した最終的なS欄テキスト",
-  "confidence": 0.95
-}`;
-        userPrompt = `文字起こし:\n${transcript}\n\n問診票のS:\n${existing_soap?.s || "なし"}`;
+  "soap_o": "O欄の内容"
+}
+
+O欄に含めるべき内容:
+- 実施した処置（スケーリング、SRP、PMTC等）
+- 口腔内の状態（プラーク付着状況、歯肉の状態等）
+- ブラッシング指導の内容
+- 所見（歯石、着色、歯肉出血等）
+
+簡潔かつ専門的に記述してください。`;
+
+        userPrompt = `DHの音声記録: ${transcript || "(なし)"}
+S欄（主訴）: ${existing_soap?.s || "(なし)"}
+歯式: ${tooth_chart ? JSON.stringify(tooth_chart) : "(なし)"}
+P検サマリ: ${perio_summary ? JSON.stringify(perio_summary) : "(なし)"}`;
         break;
+      }
 
-      case "dh_record":
-        systemPrompt = `あなたは歯科衛生士の記録分析AIです。
-DHが患者にフィードバックしている内容の文字起こしから、SOAPのO（客観的所見）を生成してください。
-歯式やP検の情報がある場合はそれも参考にしてください。
+      case "dr_exam": {
+        systemPrompt = `あなたは歯科医師（Dr）のカルテ記録を支援するAIです。
+Drが患者に説明した音声の文字起こしから、SOAP形式のA欄（評価）とP欄（計画）を生成してください。
 
 出力はJSON形式で:
 {
-  "soap_o": "客観的所見テキスト",
-  "procedures_done": ["実施した処置1", "処置2"],
-  "findings": ["所見1", "所見2"],
-  "recommendations": ["推奨事項1"]
-}`;
-        userPrompt = `文字起こし:\n${transcript}`;
-        if (tooth_chart) {
-          userPrompt += `\n\n歯式状態:\n${JSON.stringify(tooth_chart)}`;
-        }
-        if (perio_summary) {
-          userPrompt += `\n\nP検サマリ:\n${JSON.stringify(perio_summary)}`;
-        }
+  "soap_a": "A欄（評価・診断名）",
+  "soap_p": "P欄（治療計画・次回予定）"
+}
+
+A欄に含めるべき内容:
+- 診断名（う蝕症、歯周炎、根尖性歯周炎等）
+- 病態の評価
+
+P欄に含めるべき内容:
+- 本日実施した処置
+- 次回の治療予定
+- 患者への指示事項
+- メンテナンス計画
+
+簡潔かつ専門的に記述してください。`;
+
+        userPrompt = `Drの音声記録: ${transcript || "(なし)"}
+S欄: ${existing_soap?.s || "(なし)"}
+O欄: ${existing_soap?.o || "(なし)"}
+歯式: ${tooth_chart ? JSON.stringify(tooth_chart) : "(なし)"}
+P検サマリ: ${perio_summary ? JSON.stringify(perio_summary) : "(なし)"}`;
         break;
+      }
 
-      case "dr_exam":
-        systemPrompt = `あなたは歯科医師の診察記録分析AIです。
-医師が患者に説明している内容の文字起こしから、SOAPのA（評価）とP（計画）を生成してください。
-既存のS（主訴）とO（所見）がある場合はそれも参考にしてください。
-
-出力はJSON形式で:
-{
-  "soap_a": "評価・診断テキスト",
-  "soap_p": "計画・次回予定テキスト",
-  "diagnoses": [{"name": "診断名", "tooth": "#16", "code": "K02"}],
-  "next_visit_plan": "次回の予定内容",
-  "tooth_updates": {"16": "treated", "17": "in_treatment"}
-}`;
-        userPrompt = `文字起こし:\n${transcript}`;
-        if (existing_soap) {
-          userPrompt += `\n\n既存SOAP:\nS: ${existing_soap.s || ""}\nO: ${existing_soap.o || ""}`;
-        }
-        if (tooth_chart) {
-          userPrompt += `\n\n歯式:\n${JSON.stringify(tooth_chart)}`;
-        }
-        break;
-
-      case "treatment_plan":
-        systemPrompt = `あなたは歯科治療計画作成AIです。
-本日の診察結果（SOAP全体、歯式、P検）から治療計画書を生成してください。
+      case "treatment_plan": {
+        const ctx = context || {};
+        systemPrompt = `あなたは歯科の治療計画を立案するAIです。
+SOAP記録、歯式、P検データから包括的な治療計画書を作成してください。
 
 出力はJSON形式で:
 {
-  "summary": "治療計画の概要",
-  "diagnosis_summary": "診断のまとめ",
+  "summary": "治療計画の概要（1-2文）",
+  "diagnosis_summary": "診断まとめ",
   "procedures": [
     {
       "name": "処置名",
-      "tooth": "#16",
+      "tooth": "対象歯（例: #16）",
       "priority": 1,
-      "estimated_visits": 2,
-      "description": "説明"
+      "estimated_visits": 1,
+      "description": "処置の説明"
     }
   ],
   "estimated_total_visits": 5,
   "estimated_duration_months": 3,
   "goals": "治療目標",
-  "patient_instructions": "患者さんへの説明",
-  "notes": "備考"
-}`;
-        userPrompt = `本日の診察結果:\n${JSON.stringify(context)}`;
+  "patient_instructions": "患者さんへの説明（平易な日本語）"
+}
+
+priorityは1=高（緊急）、2=中、3=低。
+処置は優先度順に並べてください。`;
+
+        userPrompt = `SOAP:
+S: ${ctx.soap?.s || "(なし)"}
+O: ${ctx.soap?.o || "(なし)"}
+A: ${ctx.soap?.a || "(なし)"}
+P: ${ctx.soap?.p || "(なし)"}
+
+歯式: ${ctx.tooth_chart ? JSON.stringify(ctx.tooth_chart) : "(なし)"}
+P検: ${ctx.perio_summary ? JSON.stringify(ctx.perio_summary) : "(なし)"}
+患者: ${ctx.patient ? JSON.stringify(ctx.patient) : "(なし)"}`;
         break;
+      }
 
       default:
-        return NextResponse.json(
-          { success: false, error: "不正なstep" },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, error: `Unknown step: ${step}` }, { status: 400 });
     }
 
-    const res = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.3,
-          response_format: { type: "json_object" },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const errText = await res.text();
-      return NextResponse.json(
-        { success: false, error: `OpenAI Error: ${res.status} ${errText}` },
-        { status: 500 }
-      );
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content || "{}";
-    const result = JSON.parse(content);
-
-    return NextResponse.json({
-      success: true,
-      step,
-      result,
-    });
-  } catch (e) {
-    console.error("step-analyze error:", e);
-    return NextResponse.json(
-      {
-        success: false,
-        error: e instanceof Error ? e.message : "Unknown error",
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
-      { status: 500 }
-    );
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 2000,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("OpenAI error:", errText);
+      return NextResponse.json({ success: false, error: "OpenAI API error" }, { status: 500 });
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "{}";
+
+    let result;
+    try {
+      result = JSON.parse(content);
+    } catch {
+      result = { soap_o: content };
+    }
+
+    return NextResponse.json({ success: true, result });
+  } catch (error) {
+    console.error("step-analyze error:", error);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
