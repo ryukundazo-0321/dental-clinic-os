@@ -99,8 +99,8 @@ const TS: Record<
     cbg: "bg-white",
   },
   caries: {
-    label: "要治療",
-    sl: "⚠",
+    label: "C",
+    sl: "C",
     color: "text-red-700",
     bg: "bg-red-50",
     border: "border-red-400",
@@ -108,23 +108,31 @@ const TS: Record<
   },
   in_treatment: {
     label: "治療中",
-    sl: "⚡",
+    sl: "🔧",
     color: "text-orange-700",
     bg: "bg-orange-50",
     border: "border-orange-400",
     cbg: "bg-orange-100",
   },
-  treated: {
-    label: "完了",
-    sl: "✓",
-    color: "text-green-700",
-    bg: "bg-green-50",
-    border: "border-green-400",
-    cbg: "bg-green-100",
+  cr: {
+    label: "CR",
+    sl: "CR",
+    color: "text-blue-700",
+    bg: "bg-blue-50",
+    border: "border-blue-400",
+    cbg: "bg-blue-100",
+  },
+  inlay: {
+    label: "In",
+    sl: "In",
+    color: "text-cyan-700",
+    bg: "bg-cyan-50",
+    border: "border-cyan-400",
+    cbg: "bg-cyan-100",
   },
   crown: {
-    label: "冠",
-    sl: "冠",
+    label: "Cr",
+    sl: "Cr",
     color: "text-yellow-700",
     bg: "bg-yellow-50",
     border: "border-yellow-400",
@@ -139,20 +147,28 @@ const TS: Record<
     cbg: "bg-gray-200",
   },
   implant: {
-    label: "Imp",
-    sl: "I",
+    label: "IP",
+    sl: "IP",
     color: "text-purple-700",
     bg: "bg-purple-50",
     border: "border-purple-400",
     cbg: "bg-purple-100",
   },
-  bridge: {
-    label: "Br",
+  br_abutment: {
+    label: "Br支台",
     sl: "Br",
-    color: "text-teal-700",
-    bg: "bg-teal-50",
-    border: "border-teal-400",
-    cbg: "bg-teal-100",
+    color: "text-orange-700",
+    bg: "bg-orange-50",
+    border: "border-orange-400",
+    cbg: "bg-orange-100",
+  },
+  br_pontic: {
+    label: "Brポン",
+    sl: "Br欠",
+    color: "text-orange-500",
+    bg: "bg-orange-100",
+    border: "border-orange-400",
+    cbg: "bg-orange-200",
   },
   root_remain: {
     label: "残根",
@@ -163,20 +179,12 @@ const TS: Record<
     cbg: "bg-pink-100",
   },
   watch: {
-    label: "観察",
+    label: "要注意",
     sl: "△",
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-400",
     cbg: "bg-amber-100",
-  },
-  inlay: {
-    label: "In",
-    sl: "In",
-    color: "text-cyan-700",
-    bg: "bg-cyan-50",
-    border: "border-cyan-400",
-    cbg: "bg-cyan-100",
   },
 };
 
@@ -444,15 +452,15 @@ export default function PatientDetailPage() {
               <div className="flex bg-gray-100 rounded-lg p-0.5">
                 <button
                   onClick={() => setCM("status")}
-                  className={`px-3 py-1.5 rounded-md text-[11px]
-                    font-bold transition-all ${cm === "status" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold
+                    transition-all ${cm === "status" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
                 >
                   🦷 ステータス
                 </button>
                 <button
                   onClick={() => setCM("perio")}
-                  className={`px-3 py-1.5 rounded-md text-[11px]
-                    font-bold transition-all ${cm === "perio" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold
+                    transition-all ${cm === "perio" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
                 >
                   📊 P検
                 </button>
@@ -732,8 +740,8 @@ export default function PatientDetailPage() {
             <button
               key={t.k}
               onClick={() => setTab(t.k)}
-              className={`px-3 py-1.5 rounded-md text-xs
-            font-bold transition-all ${tab === t.k ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold
+                    transition-all ${tab === t.k ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
             >
               {t.l}
               {t.n !== undefined ? ` (${t.n})` : ""}
