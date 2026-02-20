@@ -114,10 +114,18 @@ export default function MyPage() {
   const [patientFull, setPatientFull] = useState<PatientFull | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "history" | "info">(
-    "home"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "home" | "history" | "info" | "book"
+  >("home");
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null);
+
+  // Booking state
+  const [bookStep, setBookStep] = useState<
+    "select_date" | "select_time" | "confirm" | "complete"
+  >("select_date");
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [selectedTime, setSelectedTime] = useState<string>("");
+  const [bookingLoading, setBookingLoading] = useState(false);
 
   // ===== Login =====
   async function handleLogin() {
@@ -229,6 +237,93 @@ export default function MyPage() {
       prev.map((a) => (a.id === aptId ? { ...a, status: "cancelled" } : a))
     );
     setCancelConfirm(null);
+  }
+
+  // ===== Booking =====
+  function getAvailableDates() {
+    const dates: string[] = [];
+    const now = new Date();
+    for (let i = 1; i <= 30; i++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + i);
+      // Skip Sundays (0)
+      if (d.getDay() === 0) continue;
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      dates.push(`${y}-${m}-${day}`);
+    }
+    return dates;
+  }
+
+  function getAvailableTimes() {
+    const times: string[] = [];
+    // 9:00 - 12:30, 14:00 - 17:30 (30min slots)
+    for (let h = 9; h <= 12; h++) {
+      times.push(`${String(h).padStart(2, "0")}:00`);
+      if (h < 12 || (h === 12 && true)) {
+        times.push(`${String(h).padStart(2, "0")}:30`);
+      }
+    }
+    for (let h = 14; h <= 17; h++) {
+      times.push(`${String(h).padStart(2, "0")}:00`);
+      times.push(`${String(h).padStart(2, "0")}:30`);
+    }
+    return times;
+  }
+
+  function formatDateFull(d: string) {
+    const dt = new Date(d + "T00:00:00");
+    const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+    const w = weekdays[dt.getDay()];
+    return `${dt.getMonth() + 1}/${dt.getDate()}（${w}）`;
+  }
+
+  async function confirmBooking() {
+    if (!patientFull || !selectedDate || !selectedTime) return;
+    setBookingLoading(true);
+
+    try {
+      const scheduledAt = `${selectedDate}T${selectedTime}:00`;
+
+      const { error } = await supabase.from("appointments").insert({
+        patient_id: patientFull.id,
+        scheduled_at: scheduledAt,
+        patient_type: "returning",
+        status: "scheduled",
+        duration_min: 30,
+      });
+
+      if (error) {
+        console.error("Booking error:", error);
+        alert("予約の登録に失敗しました。お電話でお問い合わせください。");
+      } else {
+        // Create medical record
+        const { data: aptData } = await supabase
+          .from("appointments")
+          .select("id")
+          .eq("patient_id", patientFull.id)
+          .eq("scheduled_at", scheduledAt)
+          .single();
+
+        if (aptData) {
+          await supabase.from("medical_records").insert({
+            appointment_id: aptData.id,
+            patient_id: patientFull.id,
+            status: "pending",
+          });
+        }
+
+        setBookStep("complete");
+        // Reload appointments
+        await loadPatientData(patientFull.id);
+      }
+    } catch (e) {
+      console.error("Booking error:", e);
+      alert("予約の登録に失敗しました");
+    }
+
+    setBookingLoading(false);
   }
 
   // ===== Login Screen =====
@@ -377,6 +472,7 @@ export default function MyPage() {
           {(
             [
               { k: "home" as const, l: "🏠 ホーム" },
+              { k: "book" as const, l: "📅 予約" },
               { k: "history" as const, l: "📋 治療経過" },
               { k: "info" as const, l: "👤 基本情報" },
             ]
@@ -410,9 +506,12 @@ export default function MyPage() {
                   <p className="text-gray-400 text-sm">
                     現在予約はありません
                   </p>
-                  <p className="text-xs text-gray-300 mt-1">
-                    お電話またはWEB予約からご予約ください
-                  </p>
+                  <button
+                    onClick={() => setActiveTab("book")}
+                    className="mt-3 bg-sky-500 hover:bg-sky-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-sky-200 transition-colors"
+                  >
+                    📅 新しい予約を取る
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -623,6 +722,176 @@ export default function MyPage() {
                   </>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* ===== Book Tab ===== */}
+        {activeTab === "book" && (
+          <div className="space-y-4">
+            {bookStep === "complete" ? (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm text-center">
+                <span className="text-5xl">✅</span>
+                <h2 className="text-lg font-bold text-gray-900 mt-3">
+                  予約が完了しました
+                </h2>
+                <p className="text-sm text-gray-500 mt-2">
+                  {formatDateFull(selectedDate)} {selectedTime}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  キャンセル・変更はホーム画面から行えます
+                </p>
+                <button
+                  onClick={() => {
+                    setActiveTab("home");
+                    setBookStep("select_date");
+                    setSelectedDate("");
+                    setSelectedTime("");
+                  }}
+                  className="mt-4 bg-sky-500 text-white px-6 py-3 rounded-xl text-sm font-bold"
+                >
+                  ホームに戻る
+                </button>
+              </div>
+            ) : bookStep === "confirm" ? (
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-gray-900 mb-4">
+                  📅 予約内容の確認
+                </h2>
+                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200 mb-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-xs text-gray-500">お名前</span>
+                      <span className="text-sm font-bold text-gray-900">
+                        {patientFull?.name_kanji}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-xs text-gray-500">日付</span>
+                      <span className="text-sm font-bold text-sky-700">
+                        {formatDateFull(selectedDate)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-xs text-gray-500">時間</span>
+                      <span className="text-sm font-bold text-sky-700">
+                        {selectedTime}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-xs text-gray-500">種別</span>
+                      <span className="text-sm font-bold text-gray-700">
+                        再診
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={confirmBooking}
+                    disabled={bookingLoading}
+                    className="flex-1 bg-sky-500 hover:bg-sky-600 text-white py-3 rounded-xl text-sm font-bold disabled:opacity-50 shadow-lg shadow-sky-200"
+                  >
+                    {bookingLoading ? "予約中..." : "✅ この内容で予約する"}
+                  </button>
+                  <button
+                    onClick={() => setBookStep("select_time")}
+                    className="px-4 bg-gray-100 text-gray-500 py-3 rounded-xl text-sm font-bold"
+                  >
+                    戻る
+                  </button>
+                </div>
+              </div>
+            ) : bookStep === "select_time" ? (
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-gray-900 mb-1">
+                  🕐 時間を選択
+                </h2>
+                <p className="text-xs text-gray-400 mb-4">
+                  {formatDateFull(selectedDate)}
+                </p>
+                <div className="mb-3">
+                  <p className="text-[10px] text-gray-400 font-bold mb-2">
+                    午前
+                  </p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {getAvailableTimes()
+                      .filter((t) => parseInt(t) < 13)
+                      .map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            setSelectedTime(t);
+                            setBookStep("confirm");
+                          }}
+                          className="py-2.5 rounded-lg border-2 border-gray-200 text-sm font-bold text-gray-700 hover:border-sky-400 hover:bg-sky-50 transition-all"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400 font-bold mb-2">
+                    午後
+                  </p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {getAvailableTimes()
+                      .filter((t) => parseInt(t) >= 13)
+                      .map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            setSelectedTime(t);
+                            setBookStep("confirm");
+                          }}
+                          className="py-2.5 rounded-lg border-2 border-gray-200 text-sm font-bold text-gray-700 hover:border-sky-400 hover:bg-sky-50 transition-all"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setBookStep("select_date")}
+                  className="mt-4 w-full bg-gray-100 text-gray-500 py-2.5 rounded-xl text-xs font-bold"
+                >
+                  ← 日付選択に戻る
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-gray-900 mb-4">
+                  📅 予約日を選択
+                </h2>
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {getAvailableDates().map((d) => {
+                    const dt = new Date(d + "T00:00:00");
+                    const isSat = dt.getDay() === 6;
+                    return (
+                      <button
+                        key={d}
+                        onClick={() => {
+                          setSelectedDate(d);
+                          setBookStep("select_time");
+                        }}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 text-left transition-all hover:border-sky-400 hover:bg-sky-50 ${
+                          isSat
+                            ? "border-blue-200 bg-blue-50"
+                            : "border-gray-200"
+                        }`}
+                      >
+                        <span className="text-sm font-bold text-gray-800">
+                          {formatDateFull(d)}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {isSat ? "午前のみ" : "9:00〜18:00"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
         )}
