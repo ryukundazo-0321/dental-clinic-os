@@ -45,7 +45,7 @@ function hasStatus(chart: Record<string, string | string[]> | null, tooth: strin
 // 歯のプライマリステータス（表示色に使う最も優先度の高いもの）
 function primaryStatus(chart: Record<string, string | string[]> | null, tooth: string): string {
   const statuses = getToothStatuses(chart, tooth);
-  const priority = ["caries","in_treatment","missing","root_remain","br_pontic","br_abutment","implant","crown","inlay","cr","watch","normal"];
+  const priority = ["c4","c3","c2","c1","c0","in_treatment","missing","root_remain","br_pontic","br_abutment","implant","crown","inlay","cr","watch","normal"];
   for (const p of priority) { if (statuses.includes(p)) return p; }
   return statuses[0] || "normal";
 }
@@ -93,7 +93,11 @@ const ALL_TEETH = [...UPPER_RIGHT,...UPPER_LEFT,...LOWER_RIGHT,...LOWER_LEFT];
 
 const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string; border: string; shortLabel?: string }> = {
   normal:       { label: "健全",   color: "text-gray-500",   bg: "bg-white",      border: "border-gray-200",  shortLabel: "○" },
-  caries:       { label: "C",      color: "text-red-700",    bg: "bg-red-50",     border: "border-red-300",   shortLabel: "C" },
+  c0:           { label: "C0",     color: "text-red-400",    bg: "bg-red-50",     border: "border-red-200",   shortLabel: "C0" },
+  c1:           { label: "C1",     color: "text-red-500",    bg: "bg-red-50",     border: "border-red-300",   shortLabel: "C1" },
+  c2:           { label: "C2",     color: "text-red-600",    bg: "bg-red-100",    border: "border-red-400",   shortLabel: "C2" },
+  c3:           { label: "C3",     color: "text-red-700",    bg: "bg-red-200",    border: "border-red-500",   shortLabel: "C3" },
+  c4:           { label: "C4",     color: "text-red-800",    bg: "bg-red-300",    border: "border-red-600",   shortLabel: "C4" },
   in_treatment: { label: "治療中", color: "text-orange-700", bg: "bg-orange-50",  border: "border-orange-300",shortLabel: "🔧" },
   cr:           { label: "CR",     color: "text-blue-700",   bg: "bg-blue-50",    border: "border-blue-300",  shortLabel: "CR" },
   inlay:        { label: "In",     color: "text-cyan-700",   bg: "bg-cyan-50",    border: "border-cyan-300",  shortLabel: "In" },
@@ -105,7 +109,7 @@ const TOOTH_STATUS: Record<string, { label: string; color: string; bg: string; b
   root_remain:  { label: "残根",   color: "text-pink-700",   bg: "bg-pink-50",    border: "border-pink-300",  shortLabel: "残" },
   watch:        { label: "要注意", color: "text-amber-700",  bg: "bg-amber-50",   border: "border-amber-300", shortLabel: "△" },
 };
-const CHECK_STATUSES = ["normal","caries","in_treatment","cr","inlay","crown","missing","implant","br_abutment","br_pontic","root_remain","watch"] as const;
+const CHECK_STATUSES = ["normal","c0","c1","c2","c3","c4","in_treatment","cr","inlay","crown","missing","implant","br_abutment","br_pontic","root_remain","watch"] as const;
 
 type SessionTab = "chief" | "tooth" | "perio" | "dh_record" | "dr_exam" | "confirm";
 type DentitionMode = "permanent" | "mixed";
