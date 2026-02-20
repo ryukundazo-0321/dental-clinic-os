@@ -1591,7 +1591,7 @@ function SessionContent() {
                           showMsg("🤖 文字起こし中...");
                           try {
                             const tokenRes = await fetch("/api/whisper-token");
-                            const { token } = await tokenRes.json();
+                            const { key: token } = await tokenRes.json();
                             const fd = new FormData();
                             fd.append("file", blob, "dh_record.webm");
                             fd.append("model", "whisper-1");
@@ -1775,7 +1775,7 @@ function SessionContent() {
                           showMsg("🤖 文字起こし中...");
                           try {
                             const tokenRes = await fetch("/api/whisper-token");
-                            const { token } = await tokenRes.json();
+                            const { key: token } = await tokenRes.json();
                             const fd = new FormData();
                             fd.append("file", blob, "dr_exam.webm");
                             fd.append("model", "whisper-1");
