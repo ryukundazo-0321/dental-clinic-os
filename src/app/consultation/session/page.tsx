@@ -495,7 +495,7 @@ function SessionContent() {
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
 
     // CRM: current_tooth_chart更新
-    try { const ntc: Record<string, { status: string }> = {}; Object.entries(record.tooth_chart || {}).forEach(([k, v]) => { ntc[k] = { status: v }; }); await supabase.from("patients").update({ current_tooth_chart: ntc }).eq("id", record.patient_id); } catch (e) { console.error("CRM歯式エラー:", e); }
+    try { const ntc: Record<string, { status: string }> = {}; Object.entries(record.tooth_chart || {}).forEach(([k, v]) => { ntc[k] = { status: Array.isArray(v) ? v.join(",") : v }; }); await supabase.from("patients").update({ current_tooth_chart: ntc }).eq("id", record.patient_id); } catch (e) { console.error("CRM歯式エラー:", e); }
 
     // CRM: tooth_history
     try { if (toothChanges.length > 0) await supabase.from("tooth_history").insert(toothChanges.map(tc => ({ patient_id: record.patient_id, record_id: record.id, tooth_number: tc.tooth, change_type: "status_change", previous_status: tc.from, new_status: tc.to }))); } catch (e) { console.error("CRM履歴エラー:", e); }
