@@ -116,6 +116,7 @@ export default function Home() {
     { href: "/checkin", icon: "📱", iconBg: "bg-green-50 text-green-600 group-hover:bg-green-100", title: "受付", desc: "チェックイン・受付番号発行", ready: true },
     { href: "/billing", icon: "💰", iconBg: "bg-purple-50 text-purple-600 group-hover:bg-purple-100", title: "会計", desc: "精算・レセプト管理", ready: true },
     { href: "/monitor", icon: "🖥️", iconBg: "bg-teal-50 text-teal-600 group-hover:bg-teal-100", title: "待合モニター", desc: "待合室表示用画面", ready: true },
+    { href: "/recall", icon: "🔔", iconBg: "bg-amber-50 text-amber-600 group-hover:bg-amber-100", title: "リコール管理", desc: "定期検診リコール対象者一覧", ready: true },
   ];
 
   const settingsItems = [
