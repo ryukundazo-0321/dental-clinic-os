@@ -16,6 +16,7 @@ type Appointment = {
   duration_min: number;
   doctor_id: string | null;
   notes: string | null;
+  cancel_type?: string | null;
   patients: {
     id: string; name_kanji: string; name_kana: string; phone: string;
     date_of_birth: string; insurance_type: string; burden_ratio: number; is_new: boolean;
@@ -73,6 +74,8 @@ export default function ReservationManagePage() {
   const [loading, setLoading] = useState(true);
   const [selectedApt, setSelectedApt] = useState<Appointment | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState<Appointment | null>(null);
+  const [showDailySummary, setShowDailySummary] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
   const [config, setConfig] = useState<ClinicConfig | null>(null);
@@ -128,7 +131,7 @@ export default function ReservationManagePage() {
     setLoading(true);
     const { data } = await supabase
       .from("appointments")
-      .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, notes,
+      .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, notes, cancel_type,
         patients ( id, name_kanji, name_kana, phone, date_of_birth, insurance_type, burden_ratio, is_new ),
         medical_records ( id, status, soap_s )`)
       .gte("scheduled_at", `${selectedDate}T00:00:00`)
@@ -139,8 +142,10 @@ export default function ReservationManagePage() {
   }
 
   // ===== ステータス変更 =====
-  async function updateStatus(appointment: Appointment, newStatus: string) {
-    await supabase.from("appointments").update({ status: newStatus }).eq("id", appointment.id);
+  async function updateStatus(appointment: Appointment, newStatus: string, cancelType?: string) {
+    const updateData: Record<string, unknown> = { status: newStatus };
+    if (cancelType) updateData.cancel_type = cancelType;
+    await supabase.from("appointments").update(updateData).eq("id", appointment.id);
 
     switch (newStatus) {
       case "checked_in":
@@ -336,7 +341,10 @@ export default function ReservationManagePage() {
             <h1 className="text-lg font-bold text-gray-900">📅 予約管理</h1>
             {config && <span className="text-xs text-gray-400">（{config.slotDurationMin}分枠 / 上限{config.maxPatientsPerSlot}人）</span>}
           </div>
-          <button onClick={() => setShowAddModal(true)} className="bg-sky-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-sky-700">＋ 予約追加</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowDailySummary(true)} className="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-200">📊 日計表</button>
+            <button onClick={() => setShowAddModal(true)} className="bg-sky-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-sky-700">＋ 予約追加</button>
+          </div>
         </div>
       </header>
 
@@ -509,7 +517,10 @@ export default function ReservationManagePage() {
                       <p className="text-xs text-gray-400 mb-2">次のアクション</p>
                       <div className="space-y-2">
                         {STATUS_TRANSITIONS[selectedApt.status].map(({ next, label }) => (
-                          <button key={next} onClick={() => updateStatus(selectedApt, next)}
+                          <button key={next} onClick={() => {
+                            if (next === "cancelled") { setShowCancelModal(selectedApt); }
+                            else { updateStatus(selectedApt, next); }
+                          }}
                             className={`w-full py-2.5 rounded-lg text-sm font-bold transition-colors ${next !== "cancelled" ? "bg-sky-600 text-white hover:bg-sky-700" : "bg-red-50 text-red-600 hover:bg-red-100"}`}>
                             {STATUS_CONFIG[next].icon} {label}
                           </button>
@@ -729,6 +740,118 @@ export default function ReservationManagePage() {
           </div>
         </div>
       )}
+
+      {/* ===== キャンセル分類モーダル ===== */}
+      {showCancelModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="bg-red-500 text-white p-4">
+              <h3 className="text-lg font-bold">❌ キャンセル確認</h3>
+              <p className="text-red-100 text-xs mt-1">{showCancelModal.patients?.name_kanji} 様 — {new Date(showCancelModal.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+            </div>
+            <div className="p-5">
+              <p className="text-sm font-bold text-gray-700 mb-3">キャンセル種別を選択してください</p>
+              <div className="space-y-2">
+                {[
+                  { type: "advance", label: "事前キャンセル", desc: "前日以前に連絡あり", icon: "📞", color: "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100" },
+                  { type: "sameday", label: "当日キャンセル", desc: "当日に連絡あり", icon: "⚡", color: "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100" },
+                  { type: "noshow", label: "無断キャンセル", desc: "連絡なし・来院なし", icon: "🚫", color: "bg-red-50 border-red-200 text-red-700 hover:bg-red-100" },
+                ].map(c => (
+                  <button key={c.type} onClick={async () => {
+                    await updateStatus(showCancelModal, "cancelled", c.type);
+                    setShowCancelModal(null);
+                  }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left font-bold text-sm transition-all ${c.color}`}>
+                    <span className="text-xl">{c.icon}</span>
+                    <div><p>{c.label}</p><p className="text-[10px] font-normal opacity-70">{c.desc}</p></div>
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setShowCancelModal(null)} className="w-full mt-3 py-2.5 text-sm text-gray-400 font-bold hover:text-gray-600">やめる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 日計表モーダル ===== */}
+      {showDailySummary && (() => {
+        const dayApts = appointments;
+        const total = dayApts.length;
+        const completed = dayApts.filter(a => ["completed", "billing_done"].includes(a.status)).length;
+        const cancelled = dayApts.filter(a => a.status === "cancelled").length;
+        const cancelAdvance = dayApts.filter(a => a.status === "cancelled" && a.cancel_type === "advance").length;
+        const cancelSameday = dayApts.filter(a => a.status === "cancelled" && a.cancel_type === "sameday").length;
+        const cancelNoshow = dayApts.filter(a => a.status === "cancelled" && a.cancel_type === "noshow").length;
+        const cancelUnknown = cancelled - cancelAdvance - cancelSameday - cancelNoshow;
+        const newPatients = dayApts.filter(a => a.patient_type === "new" && a.status !== "cancelled").length;
+        const returning = dayApts.filter(a => a.patient_type === "returning" && a.status !== "cancelled").length;
+        const inProgress = dayApts.filter(a => ["reserved", "checked_in", "in_consultation"].includes(a.status)).length;
+        const cancelRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
+        const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+              <div className="bg-gray-900 text-white p-4 flex items-center justify-between">
+                <div><h3 className="text-lg font-bold">📊 日計表</h3><p className="text-gray-400 text-xs mt-0.5">{dateLabel}</p></div>
+                <button onClick={() => setShowDailySummary(false)} className="text-gray-400 hover:text-white text-lg">✕</button>
+              </div>
+              <div className="p-5 space-y-4">
+                {/* 集計カード */}
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-sky-50 rounded-xl p-3 text-center border border-sky-200"><p className="text-2xl font-bold text-sky-700">{total}</p><p className="text-[10px] text-sky-500 font-bold">総予約</p></div>
+                  <div className="bg-green-50 rounded-xl p-3 text-center border border-green-200"><p className="text-2xl font-bold text-green-700">{completed}</p><p className="text-[10px] text-green-500 font-bold">診療完了</p></div>
+                  <div className="bg-orange-50 rounded-xl p-3 text-center border border-orange-200"><p className="text-2xl font-bold text-orange-700">{inProgress}</p><p className="text-[10px] text-orange-500 font-bold">進行中</p></div>
+                  <div className="bg-red-50 rounded-xl p-3 text-center border border-red-200"><p className="text-2xl font-bold text-red-700">{cancelled}</p><p className="text-[10px] text-red-500 font-bold">キャンセル</p></div>
+                </div>
+
+                {/* 内訳 */}
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                  <h4 className="text-xs font-bold text-gray-700 mb-2">📋 内訳</h4>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">新患</span><span className="font-bold text-gray-800">{newPatients}人</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">再診</span><span className="font-bold text-gray-800">{returning}人</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">稼働率</span><span className="font-bold text-gray-800">{total > 0 ? 100 - cancelRate : 0}%</span></div>
+                </div>
+
+                {/* キャンセル内訳 */}
+                {cancelled > 0 && (
+                  <div className="bg-red-50 rounded-xl p-4 space-y-2 border border-red-200">
+                    <h4 className="text-xs font-bold text-red-700 mb-2">❌ キャンセル内訳（{cancelRate}%）</h4>
+                    {cancelAdvance > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">📞 事前キャンセル</span><span className="font-bold text-blue-700">{cancelAdvance}件</span></div>}
+                    {cancelSameday > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">⚡ 当日キャンセル</span><span className="font-bold text-amber-700">{cancelSameday}件</span></div>}
+                    {cancelNoshow > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">🚫 無断キャンセル</span><span className="font-bold text-red-700">{cancelNoshow}件</span></div>}
+                    {cancelUnknown > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">❓ 未分類</span><span className="font-bold text-gray-500">{cancelUnknown}件</span></div>}
+                  </div>
+                )}
+
+                {/* キャンセル患者リスト */}
+                {cancelled > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 mb-2">キャンセル者一覧</h4>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {dayApts.filter(a => a.status === "cancelled").map(a => (
+                        <div key={a.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-200 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-700">{a.patients?.name_kanji || "不明"}</span>
+                            <span className="text-gray-400">{new Date(a.scheduled_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            a.cancel_type === "noshow" ? "bg-red-100 text-red-700" :
+                            a.cancel_type === "sameday" ? "bg-amber-100 text-amber-700" :
+                            a.cancel_type === "advance" ? "bg-blue-100 text-blue-700" :
+                            "bg-gray-100 text-gray-500"
+                          }`}>{a.cancel_type === "noshow" ? "無断" : a.cancel_type === "sameday" ? "当日" : a.cancel_type === "advance" ? "事前" : "未分類"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={() => setShowDailySummary(false)} className="w-full bg-gray-800 text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-700">閉じる</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
