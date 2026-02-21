@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "APIキー未設定" },
+        { success: false, error: "OPENAI_API_KEY が Vercel の環境変数に設定されていません。Settings → Environment Variables で追加してください。" },
         { status: 500 }
       );
     }
