@@ -978,7 +978,7 @@ function SessionContent() {
                                     .eq("id", upData.image.id);
                                 }
                               } else {
-                                showMsg("❌ 分析失敗");
+                                showMsg(`❌ 分析失敗: ${aiData.error || "不明なエラー"}`);
                               }
                             } catch (err) {
                               showMsg("❌ エラーが発生");
@@ -1057,7 +1057,7 @@ function SessionContent() {
                                     .eq("id", upData.image.id);
                                 }
                               } else {
-                                showMsg("❌ 分析失敗");
+                                showMsg(`❌ 分析失敗: ${aiData.error || "不明なエラー"}`);
                               }
                             } catch (err) {
                               showMsg("❌ エラーが発生");
@@ -1805,9 +1805,9 @@ function SessionContent() {
                                 const res = await fetch("/api/image-upload", { method: "POST", body: fd });
                                 const data = await res.json();
                                 if (data.success && data.image) {
-                                  setIntraoralPhotos(prev => ({ ...prev, [photo.key]: { url: data.image.url || data.image.image_url, id: data.image.id } }));
+                                  setIntraoralPhotos(prev => ({ ...prev, [photo.key]: { url: data.image.url || data.image.image_url || data.image.public_url, id: data.image.id } }));
                                   showMsg(`✅ ${photo.label}を保存しました`);
-                                } else { showMsg("❌ アップロード失敗"); }
+                                } else { showMsg(`❌ ${data.error || "アップロード失敗"}`); }
                               } catch { showMsg("❌ エラーが発生"); }
                               e.target.value = "";
                             }} />
