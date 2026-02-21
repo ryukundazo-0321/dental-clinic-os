@@ -24,6 +24,7 @@ interface SpeechRecognition extends EventTarget {
 type Patient = {
   id: string; name_kanji: string; name_kana: string;
   date_of_birth: string; phone: string; insurance_type: string; burden_ratio: number;
+  allergies?: string[] | null;
 };
 type MedicalRecord = {
   id: string; appointment_id: string; patient_id: string; status: string;
@@ -164,6 +165,9 @@ function SessionContent() {
   const [baselineMode, setBaselineMode] = useState(false);
   const [baselineIndex, setBaselineIndex] = useState(0);
 
+  // 歯面管理（5面: M=近心, D=遠心, B=頬側, L=舌側, O=咬合面）
+  const [toothSurfaces, setToothSurfaces] = useState<Record<string, string[]>>({});
+
   // P検データ
   const [perioData, setPerioData] = useState<Record<string, PerioData>>({});
   const [perioEditTooth, setPerioEditTooth] = useState<string | null>(null);
@@ -225,14 +229,19 @@ function SessionContent() {
   async function loadSession() {
     setLoading(true);
     let aptData: Record<string, unknown> | null = null;
-    const { data: apt1, error: err1 } = await supabase.from("appointments").select(`id, patient_id, patient_type, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio )`).eq("id", appointmentId).single();
+    const { data: apt1, error: err1 } = await supabase.from("appointments").select(`id, patient_id, patient_type, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio, allergies )`).eq("id", appointmentId).single();
     if (apt1 && !err1) aptData = apt1 as Record<string, unknown>;
-    else { const { data: apt2 } = await supabase.from("appointments").select(`id, patient_id, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio )`).eq("id", appointmentId).single(); if (apt2) aptData = apt2 as Record<string, unknown>; }
+    else { const { data: apt2 } = await supabase.from("appointments").select(`id, patient_id, patients ( id, name_kanji, name_kana, date_of_birth, phone, insurance_type, burden_ratio, allergies )`).eq("id", appointmentId).single(); if (apt2) aptData = apt2 as Record<string, unknown>; }
     if (aptData) {
       const p = aptData.patients as unknown as Patient; setPatient(p);
       setPatientType(String(aptData.patient_type || "new"));
       const { data: rec } = await supabase.from("medical_records").select("*").eq("appointment_id", appointmentId).limit(1).single();
       if (rec) { setRecord(rec as unknown as MedicalRecord);
+        // 歯面データの読み込み
+        const recAny = rec as Record<string, unknown>;
+        if (recAny.tooth_surfaces && typeof recAny.tooth_surfaces === "object") {
+          setToothSurfaces(recAny.tooth_surfaces as Record<string, string[]>);
+        }
         const { data: billing } = await supabase.from("billing").select("procedures_detail, total_points").eq("record_id", (rec as Record<string, unknown>).id).limit(1).single();
         if (billing) { setBillingItems((billing.procedures_detail || []) as BillingItem[]); setBillingTotal(billing.total_points || 0); }
       }
@@ -461,7 +470,7 @@ function SessionContent() {
 
   async function saveRecord() {
     if (!record) return; setSaving(true);
-    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, status: "soap_complete" }).eq("id", record.id);
+    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, tooth_surfaces: toothSurfaces, status: "soap_complete" }).eq("id", record.id);
     showMsg("保存しました ✅"); setSaving(false);
   }
 
@@ -494,7 +503,7 @@ function SessionContent() {
       finalSoapO = finalSoapO + perioNote;
     }
 
-    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: finalSoapO, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, tooth_changes: toothChanges, status: "confirmed", doctor_confirmed: true }).eq("id", record.id);
+    await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: finalSoapO, soap_a: record.soap_a, soap_p: record.soap_p, tooth_chart: record.tooth_chart, tooth_surfaces: toothSurfaces, tooth_changes: toothChanges, status: "confirmed", doctor_confirmed: true }).eq("id", record.id);
     await supabase.from("appointments").update({ status: "completed" }).eq("id", appointmentId);
     await supabase.from("queue").update({ status: "done" }).eq("appointment_id", appointmentId);
 
@@ -533,8 +542,8 @@ function SessionContent() {
     setSaving(false);
     const changeMsg = toothChanges.length > 0 ? `\n\n🦷 歯式変更: ${toothChanges.map(c => `#${c.tooth} ${c.from}→${c.to}`).join(", ")}` : "";
     const perioMsg = Object.keys(perioData).length > 0 ? `\n📊 P検: ${Object.keys(perioData).length}歯記録` : "";
-    alert(`カルテ確定しました。\n\n${billingResult}${changeMsg}${perioMsg}\n\n会計画面で確認してください。`);
-    router.push("/consultation");
+    alert(`カルテ確定しました。\n\n${billingResult}${changeMsg}${perioMsg}\n\n会計画面に移動します。`);
+    router.push("/billing");
   }
 
   function getAge(dob: string) { const b = new Date(dob), t = new Date(); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; }
@@ -565,9 +574,15 @@ function SessionContent() {
             ))}
           </div>
         )}
-        {/* 編集ポップアップ: 複数選択対応 */}
+        {/* 歯面情報インジケーター */}
+        {(toothSurfaces[num] || []).length > 0 && (
+          <div className="absolute -top-1 -right-1 bg-sky-500 text-white text-[7px] w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold shadow-sm">
+            {(toothSurfaces[num] || []).length}
+          </div>
+        )}
+        {/* 編集ポップアップ: 複数選択対応 + 歯面管理（5面） */}
         {editing && !checkMode && !baselineMode && (
-          <div className="absolute z-30 top-full mt-1 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-200 p-2 min-w-[140px]">
+          <div className="absolute z-30 top-full mt-1 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-200 p-2 min-w-[180px]">
             <p className="text-[10px] text-gray-400 text-center mb-1 font-bold">#{num}（複数選択可）</p>
             {Object.entries(TOOTH_STATUS).map(([k, v]) => {
               const isActive = statuses.includes(k);
@@ -585,6 +600,34 @@ function SessionContent() {
                 </button>
               );
             })}
+            {/* 歯面管理（5面）— う蝕・充填・インレー関連ステータスがある場合のみ表示 */}
+            {statuses.some(s => ["c1","c2","c3","c4","cr","inlay","in_treatment"].includes(s)) && (
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <p className="text-[10px] text-gray-400 font-bold mb-1.5">🦷 罹患面（5面）</p>
+                <div className="flex justify-center gap-1 mb-1">
+                  {(["M","D","B","L","O"] as const).map(surface => {
+                    const surfaceLabels: Record<string, string> = { M: "近心", D: "遠心", B: "頬側", L: "舌側", O: "咬合" };
+                    const currentSurfaces = toothSurfaces[num] || [];
+                    const isOn = currentSurfaces.includes(surface);
+                    return (
+                      <button key={surface} onClick={() => {
+                        const cur = toothSurfaces[num] || [];
+                        const updated = isOn ? cur.filter(s => s !== surface) : [...cur, surface];
+                        setToothSurfaces({ ...toothSurfaces, [num]: updated });
+                      }} className={`w-9 h-9 rounded-lg text-[10px] font-bold border-2 transition-all flex flex-col items-center justify-center leading-tight ${isOn ? "bg-sky-500 text-white border-sky-500 shadow-sm" : "bg-gray-50 text-gray-400 border-gray-200 hover:border-sky-300"}`}>
+                        <span className="text-[11px]">{surface}</span>
+                        <span className="text-[7px]">{surfaceLabels[surface]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[8px] text-center text-gray-400">
+                  {(toothSurfaces[num] || []).length === 0 ? "未選択" :
+                   (toothSurfaces[num] || []).length === 1 ? "単純（1面）" :
+                   `複雑（${(toothSurfaces[num] || []).length}面）`}
+                </p>
+              </div>
+            )}
             <button onClick={() => setEditingTooth(null)} className="w-full mt-1 text-center text-[10px] text-gray-400 hover:text-gray-600 py-1">閉じる</button>
           </div>
         )}
@@ -645,6 +688,18 @@ function SessionContent() {
           </div>
         </div>
       </header>
+
+      {/* アレルギー警告バナー */}
+      {patient.allergies && Array.isArray(patient.allergies) && patient.allergies.length > 0 && !patient.allergies.includes("なし") && (
+        <div className="bg-red-50 border-b-2 border-red-300 px-4 py-2 flex items-center gap-3 sticky top-[52px] z-10">
+          <span className="text-lg">⚠️</span>
+          <div>
+            <span className="text-xs font-bold text-red-700">アレルギー: </span>
+            <span className="text-xs font-bold text-red-600">{patient.allergies.join("、")}</span>
+          </div>
+          <span className="text-[10px] text-red-400 ml-auto">処方・麻酔時に注意</span>
+        </div>
+      )}
 
       <main className="max-w-full mx-auto px-4 py-3">
         <div className="flex gap-3">
@@ -1049,6 +1104,19 @@ function SessionContent() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 mt-4 justify-center">{Object.entries(TOOTH_STATUS).map(([k, v]) => (<span key={k} className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${v.border} ${v.bg} ${v.color}`}>{v.label}</span>))}</div>
+                {/* 歯面記録サマリ */}
+                {Object.keys(toothSurfaces).filter(t => (toothSurfaces[t] || []).length > 0).length > 0 && (
+                  <div className="mt-3 p-3 bg-sky-50 rounded-xl border border-sky-200">
+                    <p className="text-[10px] text-sky-600 font-bold mb-2">🦷 歯面記録（罹患面）</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(toothSurfaces).filter(([, surfaces]) => surfaces.length > 0).map(([tooth, surfaces]) => (
+                        <span key={tooth} className="bg-white border border-sky-200 px-2 py-1 rounded-lg text-[10px] font-bold text-sky-700">
+                          #{tooth}: {surfaces.join("")} <span className="text-sky-400">({surfaces.length}面{surfaces.length >= 2 ? "・複雑" : "・単純"})</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="mt-4 flex justify-between">
                   <button onClick={() => setActiveTab("chief")} className="text-sm text-gray-400 hover:text-gray-600 font-bold">← 主訴確認</button>
                   <button onClick={() => setActiveTab("perio")} className="bg-sky-500 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-600 shadow-md shadow-sky-200">次へ: P検・BOP →</button>
@@ -2136,6 +2204,17 @@ function SessionContent() {
               <h3 className="text-xs font-bold text-gray-400 mb-2">患者情報</h3>
               <div className="space-y-1.5 text-xs"><div className="flex justify-between"><span className="text-gray-400">生年月日</span><span className="text-gray-700 font-bold">{patient.date_of_birth}</span></div><div className="flex justify-between"><span className="text-gray-400">電話</span><span className="text-gray-700 font-bold">{patient.phone}</span></div><div className="flex justify-between"><span className="text-gray-400">保険</span><span className="text-gray-700 font-bold">{patient.insurance_type} {patient.burden_ratio * 10}割</span></div></div>
             </div>
+            {/* アレルギー情報 */}
+            {patient.allergies && Array.isArray(patient.allergies) && patient.allergies.length > 0 && !patient.allergies.includes("なし") && (
+              <div className="bg-red-50 rounded-xl border-2 border-red-300 p-3">
+                <h3 className="text-xs font-bold text-red-600 mb-1">⚠️ アレルギー</h3>
+                <div className="flex flex-wrap gap-1">
+                  {patient.allergies.map((a, i) => (
+                    <span key={i} className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-200">{a}</span>
+                  ))}
+                </div>
+              </div>
+            )}
             {isReturning && previousVisit && (
               <div className="bg-purple-50 rounded-xl border border-purple-200 p-3">
                 <h3 className="text-xs font-bold text-purple-700 mb-2">📋 前回の情報</h3>
