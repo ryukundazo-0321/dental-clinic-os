@@ -29,6 +29,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<BillingRow | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [paidPatientInfo, setPaidPatientInfo] = useState<{ patientId: string; name: string } | null>(null);
   const [selectedDate, setSelectedDate] = useState(getTodayJST);
   const [receiptMonth, setReceiptMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
   const [receiptStatus, setReceiptStatus] = useState<string>("");
@@ -67,6 +68,7 @@ export default function BillingPage() {
     await supabase.from("billing").update({ payment_status: "paid" }).eq("id", billing.id);
     const { data: rec } = await supabase.from("medical_records").select("appointment_id").eq("id", billing.record_id).single();
     if (rec?.appointment_id) await supabase.from("appointments").update({ status: "billing_done" }).eq("id", rec.appointment_id);
+    setPaidPatientInfo({ patientId: billing.patient_id, name });
     await loadBillings(); await loadAllUnpaid(); setSelected(null); setProcessing(false);
   }
 
@@ -237,7 +239,10 @@ export default function BillingPage() {
             ) : (
               <>
                 <div className="text-center py-3 bg-green-100 rounded-xl"><p className="text-green-700 font-bold">✅ 精算済み</p></div>
-                <button onClick={() => printReceipt(bill)} className="w-full mt-2 bg-gray-800 text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-700">🖨️ 領収書・明細書を印刷</button>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => printReceipt(bill)} className="flex-1 bg-gray-800 text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-700">🖨️ 領収書・明細書</button>
+                  <Link href={`/reservation?action=new&patient_id=${bill.patient_id}&patient_name=${encodeURIComponent(getName(bill))}`} className="flex-1 bg-sky-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-sky-700 text-center shadow-md shadow-sky-200">📅 次回予約</Link>
+                </div>
               </>
             )}
           </div>
@@ -415,6 +420,28 @@ export default function BillingPage() {
           </div>
         )}
       </main>
+
+      {/* 精算完了後の次回予約導線モーダル */}
+      {paidPatientInfo && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl text-center">
+            <p className="text-5xl mb-3">✅</p>
+            <h3 className="text-xl font-bold text-gray-900 mb-1">{paidPatientInfo.name} 様</h3>
+            <p className="text-lg font-bold text-green-600 mb-4">精算が完了しました</p>
+            <div className="space-y-3">
+              <Link href={`/reservation?action=new&patient_id=${paidPatientInfo.patientId}&patient_name=${encodeURIComponent(paidPatientInfo.name)}`}
+                className="block w-full bg-sky-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-sky-700 shadow-lg shadow-sky-200">
+                📅 次回予約を取る
+              </Link>
+              <button onClick={() => setPaidPatientInfo(null)}
+                className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-bold text-sm hover:bg-gray-200">
+                次回予約なし（閉じる）
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-3">次回予約は患者マイページからも可能です</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
