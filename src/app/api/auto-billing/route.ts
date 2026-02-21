@@ -182,7 +182,7 @@ export async function POST(request: NextRequest) {
     // 1. カルテ取得
     const { data: record, error: recErr } = await supabase
       .from("medical_records")
-      .select("id, patient_id, appointment_id, soap_s, soap_o, soap_a, soap_p")
+      .select("id, patient_id, appointment_id, soap_s, soap_o, soap_a, soap_p, tooth_surfaces")
       .eq("id", recordId)
       .single();
 
@@ -392,10 +392,18 @@ export async function POST(request: NextRequest) {
           if (pattern.pattern_name.includes("浸潤") && soapAll.includes("伝達")) continue;
         }
 
-        // CR充填: 単純/複雑
+        // CR充填: 単純/複雑 — 歯面データがあれば歯面数で判定、なければSOAPキーワード
         if (pattern.category === "restoration") {
-          if (pattern.pattern_name.includes("複雑") && !soapAll.includes("複雑")) continue;
-          if (pattern.pattern_name.includes("単純") && soapAll.includes("複雑")) continue;
+          const toothSurfacesData = (record as Record<string, unknown>).tooth_surfaces as Record<string, string[]> | null;
+          let isComplex = soapAll.includes("複雑");
+          // 歯面データがある場合: 2面以上=複雑、1面=単純
+          if (toothSurfacesData && extractedTeeth.length > 0) {
+            const maxSurfaces = Math.max(...extractedTeeth.map(t => (toothSurfacesData[t] || []).length), 0);
+            if (maxSurfaces >= 2) isComplex = true;
+            else if (maxSurfaces === 1) isComplex = false;
+          }
+          if (pattern.pattern_name.includes("複雑") && !isComplex) continue;
+          if (pattern.pattern_name.includes("単純") && isComplex) continue;
         }
 
         // 抜歯: 難易度
@@ -413,10 +421,17 @@ export async function POST(request: NextRequest) {
           if (pattern.pattern_name === "FMC" && (soapAll.includes("cad") || soapAll.includes("前装") || soapAll.includes("前歯") || soapAll.includes("大臼歯"))) continue;
         }
 
-        // インレー: 単純/複雑
+        // インレー: 単純/複雑 — 歯面データがあれば歯面数で判定
         if (pattern.pattern_name.includes("インレー")) {
-          if (pattern.pattern_name.includes("複雑") && !(soapAll.includes("複雑") || soapAll.includes("2面"))) continue;
-          if (pattern.pattern_name.includes("単純") && (soapAll.includes("複雑") || soapAll.includes("2面"))) continue;
+          const toothSurfacesData = (record as Record<string, unknown>).tooth_surfaces as Record<string, string[]> | null;
+          let isComplex = soapAll.includes("複雑") || soapAll.includes("2面");
+          if (toothSurfacesData && extractedTeeth.length > 0) {
+            const maxSurfaces = Math.max(...extractedTeeth.map(t => (toothSurfacesData[t] || []).length), 0);
+            if (maxSurfaces >= 2) isComplex = true;
+            else if (maxSurfaces === 1) isComplex = false;
+          }
+          if (pattern.pattern_name.includes("複雑") && !isComplex) continue;
+          if (pattern.pattern_name.includes("単純") && isComplex) continue;
         }
 
         // 支台築造: メタル/ファイバー
@@ -607,6 +622,103 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
+    // [B-26] 薬剤アレルギーチェック
+    // 処方薬と患者アレルギー情報を照合し、危険な組み合わせを警告
+    // ============================================================
+    const allergyWarnings: string[] = [];
+    if (prescribedDrugs.length > 0 && patientId) {
+      const { data: patientData } = await supabase
+        .from("patients")
+        .select("allergies")
+        .eq("id", patientId)
+        .single();
+
+      if (patientData?.allergies) {
+        const allergies: string[] = Array.isArray(patientData.allergies)
+          ? patientData.allergies.map((a: unknown) => String(a).toLowerCase())
+          : typeof patientData.allergies === "string"
+          ? [patientData.allergies.toLowerCase()]
+          : [];
+
+        // アレルギーカテゴリと薬剤カテゴリのマッピング
+        const ALLERGY_DRUG_MAP: { allergyKeywords: string[]; drugCategories: string[]; severity: "critical" | "warning"; message: string }[] = [
+          {
+            allergyKeywords: ["ペニシリン", "penicillin"],
+            drugCategories: ["ペニシリン系"],
+            severity: "critical",
+            message: "⚠️🚨 【禁忌】ペニシリン系アレルギーの患者にペニシリン系抗菌薬が処方されています！処方を中止してください。",
+          },
+          {
+            allergyKeywords: ["セフェム", "cephem"],
+            drugCategories: ["セフェム系"],
+            severity: "critical",
+            message: "⚠️🚨 【禁忌】セフェム系アレルギーの患者にセフェム系抗菌薬が処方されています！処方を中止してください。",
+          },
+          {
+            allergyKeywords: ["ペニシリン", "penicillin"],
+            drugCategories: ["セフェム系"],
+            severity: "warning",
+            message: "⚠️ 【注意】ペニシリン系アレルギーの患者です。セフェム系抗菌薬は交差アレルギーの可能性があります。",
+          },
+          {
+            allergyKeywords: ["鎮痛", "nsaid", "nsaids", "nsa", "アスピリン"],
+            drugCategories: ["消炎鎮痛薬"],
+            severity: "critical",
+            message: "⚠️🚨 【禁忌】NSAIDsアレルギーの患者にNSAIDs系鎮痛薬が処方されています！アセトアミノフェン等への変更を検討してください。",
+          },
+          {
+            allergyKeywords: ["局所麻酔", "リドカイン", "キシロカイン", "local_anesthetic"],
+            drugCategories: [],
+            severity: "critical",
+            message: "⚠️🚨 【注意】局所麻酔薬アレルギーの患者です。麻酔使用時は十分注意してください。",
+          },
+          {
+            allergyKeywords: ["ラテックス", "latex"],
+            drugCategories: [],
+            severity: "warning",
+            message: "⚠️ 【注意】ラテックスアレルギーの患者です。ラテックスフリーのグローブを使用してください。",
+          },
+          {
+            allergyKeywords: ["ヨード", "iodine"],
+            drugCategories: ["含嗽薬"],
+            severity: "warning",
+            message: "⚠️ 【注意】ヨードアレルギーの患者にヨード系含嗽薬が処方されています。アズノール等への変更を検討してください。",
+          },
+        ];
+
+        for (const mapping of ALLERGY_DRUG_MAP) {
+          const hasAllergy = allergies.some(a =>
+            mapping.allergyKeywords.some(kw => a.includes(kw.toLowerCase()))
+          );
+          if (!hasAllergy) continue;
+
+          if (mapping.drugCategories.length === 0) {
+            // 薬剤カテゴリに関係なく警告（局所麻酔、ラテックス等）
+            allergyWarnings.push(mapping.message);
+          } else {
+            // 処方薬のカテゴリと照合
+            const hasDangerousDrug = prescribedDrugs.some(pd => {
+              const preset = PRESCRIPTION_KEYWORDS.find(pk =>
+                pk.drugNames.includes(pd.drug.name)
+              );
+              return preset && mapping.drugCategories.some(dc =>
+                preset.category.includes(dc)
+              );
+            });
+            if (hasDangerousDrug) {
+              allergyWarnings.push(mapping.message);
+            }
+          }
+        }
+
+        // アレルギー情報がある場合は常に注意喚起
+        if (allergies.length > 0 && allergies[0] !== "なし" && !allergies.includes("none")) {
+          allergyWarnings.push(`ℹ️ 患者アレルギー情報: ${allergies.join("、")}`);
+        }
+      }
+    }
+
+    // ============================================================
     // [B-2] 特定器材（材料）の自動算定
     // 算定された処置コードに基づき、必要な材料を自動追加する
     // ============================================================
@@ -705,6 +817,10 @@ export async function POST(request: NextRequest) {
     const insuranceClaim = totalPoints * 10 - patientBurden;
 
     const warnings: string[] = [];
+    // アレルギー警告を最優先で表示
+    if (allergyWarnings.length > 0) {
+      warnings.push(...allergyWarnings);
+    }
     if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
     if (prescribedDrugs.length > 0) warnings.push(`💊 投薬 ${prescribedDrugs.length}品目を自動算定しました。処方内容をご確認ください。`);
