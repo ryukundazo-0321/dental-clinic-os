@@ -168,6 +168,9 @@ function SessionContent() {
   // 歯面管理（5面: M=近心, D=遠心, B=頬側, L=舌側, O=咬合面）
   const [toothSurfaces, setToothSurfaces] = useState<Record<string, string[]>>({});
 
+  // 口腔内写真5枚法
+  const [intraoralPhotos, setIntraoralPhotos] = useState<Record<string, { url: string; id: string }>>({});
+
   // P検データ
   const [perioData, setPerioData] = useState<Record<string, PerioData>>({});
   const [perioEditTooth, setPerioEditTooth] = useState<string | null>(null);
@@ -246,6 +249,15 @@ function SessionContent() {
         if (billing) { setBillingItems((billing.procedures_detail || []) as BillingItem[]); setBillingTotal(billing.total_points || 0); }
       }
       await loadTranscripts();
+      // 口腔内写真の読み込み
+      if (rec) {
+        const { data: photos } = await supabase.from("patient_images").select("id, image_type, image_url").eq("record_id", (rec as Record<string, unknown>).id).in("image_type", ["intraoral_front", "intraoral_upper", "intraoral_lower", "intraoral_left", "intraoral_right"]);
+        if (photos) {
+          const photoMap: Record<string, { url: string; id: string }> = {};
+          for (const p of photos) { photoMap[p.image_type] = { url: p.image_url, id: p.id }; }
+          setIntraoralPhotos(photoMap);
+        }
+      }
       if (String(aptData.patient_type || "") === "returning") {
         await loadPreviousVisit(p.id);
         // ★ 再診時: 前回の歯式を読み込む
@@ -1751,6 +1763,61 @@ function SessionContent() {
                   </div>}
                 </div>
 
+                {/* 口腔内写真5枚法 */}
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold text-gray-700">📷 口腔内写真（5枚法）</span>
+                    <span className="text-[10px] text-gray-400">{Object.keys(intraoralPhotos).length}/5 撮影済</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2">
+                    {([
+                      { key: "intraoral_front", label: "正面観", icon: "😁" },
+                      { key: "intraoral_upper", label: "上顎咬合面", icon: "⬆️" },
+                      { key: "intraoral_lower", label: "下顎咬合面", icon: "⬇️" },
+                      { key: "intraoral_right", label: "右側方", icon: "➡️" },
+                      { key: "intraoral_left", label: "左側方", icon: "⬅️" },
+                    ] as const).map(photo => {
+                      const existing = intraoralPhotos[photo.key];
+                      return (
+                        <div key={photo.key} className="flex flex-col items-center">
+                          <div className={`w-full aspect-square rounded-xl border-2 flex items-center justify-center overflow-hidden ${existing ? "border-green-300 bg-green-50" : "border-dashed border-gray-300 bg-gray-50"}`}>
+                            {existing ? (
+                              <img src={existing.url} alt={photo.label} className="w-full h-full object-cover rounded-lg" />
+                            ) : (
+                              <span className="text-2xl">{photo.icon}</span>
+                            )}
+                          </div>
+                          <p className="text-[9px] text-gray-500 font-bold mt-1 text-center">{photo.label}</p>
+                          <label className="cursor-pointer mt-1">
+                            <span className={`text-[9px] font-bold px-2 py-1 rounded-lg inline-block ${existing ? "bg-green-100 text-green-600 border border-green-200" : "bg-sky-500 text-white"}`}>
+                              {existing ? "✓ 撮り直し" : "📸 撮影"}
+                            </span>
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file || !patient || !record) return;
+                              showMsg(`📤 ${photo.label}アップロード中...`);
+                              try {
+                                const fd = new FormData();
+                                fd.append("file", file);
+                                fd.append("patient_id", patient.id);
+                                fd.append("record_id", record.id);
+                                fd.append("image_type", photo.key);
+                                const res = await fetch("/api/image-upload", { method: "POST", body: fd });
+                                const data = await res.json();
+                                if (data.success && data.image) {
+                                  setIntraoralPhotos(prev => ({ ...prev, [photo.key]: { url: data.image.url || data.image.image_url, id: data.image.id } }));
+                                  showMsg(`✅ ${photo.label}を保存しました`);
+                                } else { showMsg("❌ アップロード失敗"); }
+                              } catch { showMsg("❌ エラーが発生"); }
+                              e.target.value = "";
+                            }} />
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* S, O入力 */}
                 <div className="grid grid-cols-2 gap-3">
                   {[soapItems[0], soapItems[1]].map(item => (
@@ -2002,6 +2069,62 @@ function SessionContent() {
                     <div className="flex items-center px-2 py-2 border-t-2 border-gray-300 mt-1"><span className="flex-1 text-sm font-bold text-gray-800">合計</span><span className="text-sm font-bold text-sky-600">{billingTotal.toLocaleString()}点</span><span className="text-xs text-gray-400 ml-2">(¥{Math.round(billingTotal * 10 * patient.burden_ratio).toLocaleString()})</span></div>
                   </div>}
                 </div>
+
+                {/* 処方箋印刷 */}
+                {billingItems.some(i => i.code.startsWith("DRUG-") || i.code.startsWith("MED-") || i.name.includes("処方") || i.name.includes("薬") || i.name.includes("錠") || i.name.includes("カプセル") || i.name.includes("うがい") || i.name.includes("軟膏")) && (
+                  <div className="bg-green-50 rounded-xl border border-green-200 p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold text-green-700">💊 処方箋</h3>
+                        <p className="text-[10px] text-green-500 mt-0.5">
+                          {billingItems.filter(i => i.code.startsWith("DRUG-") || i.code.startsWith("MED-") || i.name.includes("錠") || i.name.includes("カプセル") || i.name.includes("うがい") || i.name.includes("軟膏")).length}品目の処方あり
+                        </p>
+                      </div>
+                      <button onClick={() => {
+                        const drugItems = billingItems.filter(i =>
+                          i.code.startsWith("DRUG-") || i.code.startsWith("MED-") ||
+                          i.name.includes("錠") || i.name.includes("カプセル") ||
+                          i.name.includes("うがい") || i.name.includes("軟膏") || i.name.includes("頓服")
+                        );
+                        const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+                        const dob = patient ? new Date(patient.date_of_birth).toLocaleDateString("ja-JP") : "";
+                        const age = patient ? Math.floor((Date.now() - new Date(patient.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 0;
+                        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>処方箋</title>
+<style>@media print{.no-print{display:none!important}@page{size:A5 landscape;margin:8mm}}body{font-family:"Yu Gothic","Hiragino Kaku Gothic ProN",sans-serif;max-width:600px;margin:0 auto;padding:15px;font-size:11px;color:#333}h1{text-align:center;font-size:16px;border:2px solid #333;padding:6px;margin-bottom:12px}table{width:100%;border-collapse:collapse;margin-bottom:10px}td,th{border:1px solid #999;padding:4px 8px;text-align:left;font-size:10px}th{background:#f5f5f5;width:90px;font-weight:bold}.drug-row{font-size:12px;font-weight:bold}.section{font-weight:bold;background:#e8f5e9;color:#2e7d32}.sig{margin-top:15px;text-align:right;font-size:10px}</style></head><body>
+<div class="no-print" style="text-align:center;margin-bottom:12px"><button onclick="window.print()" style="padding:8px 24px;font-size:13px;background:#2e7d32;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨️ 印刷する</button><button onclick="window.close()" style="padding:8px 16px;font-size:11px;background:#eee;border:none;border-radius:6px;cursor:pointer;margin-left:6px">閉じる</button></div>
+<h1>処 方 箋</h1>
+<table>
+<tr><th>交付年月日</th><td>${today}</td><th>処方箋の使用期間</th><td>交付日含め4日以内</td></tr>
+<tr><th>患者氏名</th><td>${patient?.name_kanji || ""} 様</td><th>生年月日・年齢</th><td>${dob}（${age}歳）</td></tr>
+<tr><th>保険種別</th><td>${patient?.insurance_type || ""}</td><th>負担割合</th><td>${Math.round((patient?.burden_ratio || 0.3) * 100)}%</td></tr>
+</table>
+<table>
+<tr class="section"><td colspan="5">■ 処方内容</td></tr>
+<tr><th>No.</th><th>薬剤名</th><th>用法</th><th>用量</th><th>日数</th></tr>
+${drugItems.map((d, i) => {
+  const isAntibiotic = d.name.includes("シリン") || d.name.includes("フロモックス") || d.name.includes("メイアクト") || d.name.includes("ジスロマック") || d.name.includes("クラリス");
+  const isPainkiller = d.name.includes("ロキソ") || d.name.includes("ボルタレン") || d.name.includes("カロナール") || d.name.includes("セレコックス");
+  const isGargle = d.name.includes("うがい") || d.name.includes("ガーグル") || d.name.includes("アズノール");
+  const isOintment = d.name.includes("軟膏") || d.name.includes("デキサ");
+  const usage = isAntibiotic ? "毎食後" : isPainkiller ? "疼痛時" : isGargle ? "1日3〜4回含嗽" : isOintment ? "1日2〜4回患部塗布" : "指示通り";
+  const dose = isAntibiotic ? "1回1錠" : isPainkiller ? "1回1錠" : isGargle ? "適量" : isOintment ? "適量" : "1回1錠";
+  const days = isAntibiotic ? "3日分" : isPainkiller ? "3日分（頓服）" : isGargle ? "1本" : isOintment ? "1本" : `${d.count}日分`;
+  return `<tr class="drug-row"><td style="text-align:center">${i + 1}</td><td>${d.name}</td><td>${usage}</td><td>${dose}</td><td>${days}</td></tr>`;
+}).join("")}
+</table>
+<table>
+<tr><th>備考</th><td>${(record?.soap_p || "").includes("抗菌薬") ? "抗菌薬は用法用量を守り、必ず飲みきってください。" : ""}</td></tr>
+</table>
+<div class="sig"><p>医療機関名: ______________________</p><p style="margin-top:6px">歯科医師: ______________________ 印</p></div>
+</body></html>`;
+                        const pw = window.open("", "_blank");
+                        if (pw) { pw.document.write(html); pw.document.close(); }
+                      }} className="bg-green-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-green-700 shadow-md shadow-green-200">
+                        🖨️ 処方箋を印刷
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* ===== 🤖 治療計画書の自動生成 ===== */}
                 <div className="bg-purple-50 rounded-xl border-2 border-purple-200 p-4">
