@@ -49,13 +49,27 @@ export async function POST(req: NextRequest) {
 
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
-      return NextResponse.json(
-        {
-          success: false,
-          error: `アップロード失敗: ${uploadError.message}`,
-        },
-        { status: 500 }
-      );
+      // バケットが存在しない場合、自動作成を試みる
+      if (uploadError.message?.includes("not found") || uploadError.message?.includes("Bucket")) {
+        try {
+          await supabase.storage.createBucket("patient-images", { public: true });
+          // リトライ
+          const { error: retryError } = await supabase.storage.from("patient-images").upload(storagePath, buffer, { contentType: file.type, upsert: false });
+          if (retryError) {
+            return NextResponse.json({ success: false, error: `リトライ失敗: ${retryError.message}` }, { status: 500 });
+          }
+        } catch (bucketErr) {
+          return NextResponse.json({ success: false, error: `バケット作成失敗: ${bucketErr instanceof Error ? bucketErr.message : "unknown"}` }, { status: 500 });
+        }
+      } else {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `アップロード失敗: ${uploadError.message}`,
+          },
+          { status: 500 }
+        );
+      }
     }
 
     // 公開URLを取得
@@ -71,6 +85,7 @@ export async function POST(req: NextRequest) {
         patient_id: patientId,
         record_id: recordId || null,
         image_type: imageType,
+        image_url: urlData?.publicUrl || "",
         storage_path: storagePath,
         file_name: file.name,
         file_size: file.size,
@@ -92,6 +107,8 @@ export async function POST(req: NextRequest) {
         id: imageRecord?.id,
         storage_path: storagePath,
         public_url: urlData?.publicUrl,
+        image_url: urlData?.publicUrl,
+        url: urlData?.publicUrl,
         base64: base64,
         file_name: file.name,
         file_size: file.size,
