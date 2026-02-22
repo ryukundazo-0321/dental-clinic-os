@@ -86,6 +86,7 @@ export default function ReservationManagePage() {
   // 手動追加フォーム
   const [addForm, setAddForm] = useState({
     name_kanji: "", name_kana: "", date_of_birth: "", phone: "",
+    patient_number: "", appointment_date: "",
     time: "", insurance_type: "社保", burden_ratio: "0.3",
     patient_type: "new" as "new" | "returning", doctor_id: "",
   });
@@ -183,13 +184,36 @@ export default function ReservationManagePage() {
     setLookupLoading(true);
     setAddError("");
     try {
-      const { data: patient } = await supabase.from("patients").select("id, name_kanji")
-        .eq("name_kanji", addForm.name_kanji).eq("date_of_birth", addForm.date_of_birth).eq("phone", addForm.phone).single();
+      let patient: { id: string; name_kanji: string } | null = null;
+
+      // 方法1: 患者ID（P-XXXXX）で検索
+      if (addForm.patient_number.trim()) {
+        let pNum = addForm.patient_number.trim().toUpperCase();
+        if (/^\d+$/.test(pNum)) pNum = `P-${pNum.padStart(5, "0")}`;
+        if (/^P\d+$/.test(pNum)) pNum = `P-${pNum.slice(1).padStart(5, "0")}`;
+        const { data } = await supabase.from("patients").select("id, name_kanji")
+          .eq("patient_number", pNum).single();
+        patient = data;
+      }
+      // 方法2: 氏名 + 生年月日 + 電話番号で検索
+      if (!patient && addForm.name_kanji && addForm.date_of_birth && addForm.phone) {
+        const { data } = await supabase.from("patients").select("id, name_kanji")
+          .eq("name_kanji", addForm.name_kanji).eq("date_of_birth", addForm.date_of_birth).eq("phone", addForm.phone).single();
+        patient = data;
+      }
 
       if (!patient) {
-        setAddError("患者情報が見つかりません。入力内容を確認するか、初診として登録してください。");
+        setAddError("患者情報が見つかりません。患者ID or 氏名+生年月日+電話番号で照合してください。");
         setLookupLoading(false);
         return;
+      }
+
+      // フォームに患者名を自動入力
+      if (addForm.patient_number.trim() && !addForm.name_kanji) {
+        const { data: pFull } = await supabase.from("patients").select("name_kanji, name_kana, date_of_birth, phone").eq("id", patient.id).single();
+        if (pFull) {
+          setAddForm(f => ({ ...f, name_kanji: pFull.name_kanji || "", name_kana: pFull.name_kana || "", date_of_birth: pFull.date_of_birth || "", phone: pFull.phone || "" }));
+        }
       }
 
       setMatchedPatient(patient);
@@ -274,7 +298,8 @@ export default function ReservationManagePage() {
   async function handleAddAppointment() {
     setAddLoading(true);
     setAddError("");
-    if (!addForm.name_kanji || !addForm.date_of_birth || !addForm.phone) { setAddError("必須項目を入力してください"); setAddLoading(false); return; }
+    if (addForm.patient_type === "new" && (!addForm.name_kanji || !addForm.date_of_birth || !addForm.phone)) { setAddError("必須項目を入力してください"); setAddLoading(false); return; }
+    if (addForm.patient_type === "returning" && !matchedPatient) { setAddError("患者照合を行ってください"); setAddLoading(false); return; }
 
     try {
       let patientId: string;
@@ -293,7 +318,8 @@ export default function ReservationManagePage() {
         patientId = newPatient.id;
       }
 
-      const scheduledAt = `${selectedDate}T${addForm.time}:00`;
+      const bookDate = addForm.appointment_date || selectedDate;
+      const scheduledAt = `${bookDate}T${addForm.time}:00`;
 
       // 来院目的をnotes に保存
       let notes = "";
@@ -326,7 +352,7 @@ export default function ReservationManagePage() {
 
   function resetAddModal() {
     setShowAddModal(false);
-    setAddForm({ name_kanji: "", name_kana: "", date_of_birth: "", phone: "", time: timeSlotOptions[0] || "09:00", insurance_type: "社保", burden_ratio: "0.3", patient_type: "new", doctor_id: "" });
+    setAddForm({ name_kanji: "", name_kana: "", date_of_birth: "", phone: "", patient_number: "", appointment_date: "", time: timeSlotOptions[0] || "09:00", insurance_type: "社保", burden_ratio: "0.3", patient_type: "new", doctor_id: "" });
     setAddError("");
     setMatchedPatient(null);
     setTreatmentSummary(null);
@@ -579,13 +605,22 @@ export default function ReservationManagePage() {
 
               {addForm.patient_type === "returning" && !lookupDone && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5">
-                  <p className="text-xs text-blue-700">💡 氏名・生年月日・電話番号で照合します。「照合」ボタンを押してください。</p>
+                  <p className="text-xs text-blue-700">💡 患者IDだけで照合できます。または氏名+生年月日+電話番号でも照合可能です。</p>
+                </div>
+              )}
+
+              {/* ★ 再診: 患者ID入力（最優先） */}
+              {addForm.patient_type === "returning" && !lookupDone && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">患者ID（診察券番号）</label>
+                  <input type="text" value={addForm.patient_number} onChange={(e) => { setAddForm({ ...addForm, patient_number: e.target.value }); setLookupDone(false); setMatchedPatient(null); setTreatmentSummary(null); }}
+                    placeholder="P-00001 or 00001" className="w-full border-2 border-sky-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-sky-500 bg-sky-50" />
                 </div>
               )}
 
               {/* 氏名 */}
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">氏名（漢字）<span className="text-red-500">*</span></label>
+                <label className="block text-sm font-bold text-gray-700 mb-1">氏名（漢字）{addForm.patient_type === "new" && <span className="text-red-500">*</span>}{addForm.patient_type === "returning" && <span className="text-xs text-gray-400 ml-1">（ID入力時は不要）</span>}</label>
                 <input type="text" value={addForm.name_kanji} onChange={(e) => { setAddForm({ ...addForm, name_kanji: e.target.value }); if (addForm.patient_type === "returning") { setLookupDone(false); setMatchedPatient(null); setTreatmentSummary(null); } }}
                   placeholder="山田 太郎" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
               </div>
@@ -610,7 +645,7 @@ export default function ReservationManagePage() {
               {/* ★ 再診: 照合ボタン */}
               {addForm.patient_type === "returning" && !lookupDone && (
                 <button onClick={lookupReturningPatient}
-                  disabled={lookupLoading || !addForm.name_kanji || !addForm.date_of_birth || !addForm.phone}
+                  disabled={lookupLoading || (!addForm.patient_number.trim() && (!addForm.name_kanji || !addForm.date_of_birth || !addForm.phone))}
                   className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-green-700 disabled:opacity-50">
                   {lookupLoading ? "照合中..." : "🔍 患者を照合"}
                 </button>
@@ -717,12 +752,33 @@ export default function ReservationManagePage() {
                 </div>
               )}
 
+              {/* 予約日 */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">予約日<span className="text-red-500">*</span></label>
+                <input type="date" value={addForm.appointment_date || selectedDate}
+                  onChange={(e) => setAddForm({ ...addForm, appointment_date: e.target.value })}
+                  min={new Date().toISOString().split("T")[0]}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+              </div>
+
               {/* 予約時間 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">予約時間<span className="text-red-500">*</span></label>
                 <select value={addForm.time} onChange={(e) => setAddForm({ ...addForm, time: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white">
-                  {timeSlotOptions.map((t) => (<option key={t} value={t}>{t}</option>))}
+                  {(() => {
+                    // config由来のスロット + 15分刻みの追加スロットを生成
+                    const allSlots = new Set<string>();
+                    timeSlotOptions.forEach(t => allSlots.add(t));
+                    // 15分刻みで 09:00〜20:00 をカバー
+                    for (let h = 9; h <= 20; h++) {
+                      for (const m of [0, 15, 30, 45]) {
+                        if (h === 20 && m > 0) break;
+                        allSlots.add(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+                      }
+                    }
+                    return Array.from(allSlots).sort().map(t => (<option key={t} value={t}>{t}</option>));
+                  })()}
                 </select>
               </div>
 
