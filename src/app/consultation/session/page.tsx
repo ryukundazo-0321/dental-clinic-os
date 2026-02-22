@@ -590,7 +590,7 @@ function SessionContent() {
     const primary = primaryStatus(record?.tooth_chart || null, num);
     const cfg = TOOTH_STATUS[primary] || TOOTH_STATUS.normal;
     const editing = editingTooth === num && !checkMode && !baselineMode;
-    const size = isDeciduous ? "w-8 h-8 text-[9px]" : "w-9 h-9 text-[10px]";
+    const size = isDeciduous ? "w-8 h-8 text-xs" : "w-9 h-9 text-xs";
     const isBaselineCurrent = baselineMode && ALL_TEETH[baselineIndex] === num;
     const hasMultiple = statuses.length > 1 || (statuses.length === 1 && statuses[0] !== "normal");
     // ラベル表示: 複数の場合はショートラベルを連結
@@ -601,7 +601,7 @@ function SessionContent() {
       <div key={num} className="relative">
         <button onClick={() => { if (checkMode) onCheckTap(num); else if (!baselineMode) setEditingTooth(editing ? null : num); }}
           className={`${size} rounded-lg font-bold border-2 transition-all ${cfg.bg} ${cfg.border} ${cfg.color} ${isBaselineCurrent ? "ring-4 ring-sky-400 scale-125 shadow-lg" : checkMode ? "hover:ring-2 hover:ring-sky-300 active:scale-95" : editing ? "ring-2 ring-sky-400 scale-110" : "hover:scale-105"}`}>
-          <span className="text-[8px] leading-none">{displayLabel}</span>
+          <span className="text-xs leading-none">{displayLabel}</span>
         </button>
         {/* 複数ステータスドット */}
         {hasMultiple && statuses.length > 1 && (
@@ -620,7 +620,7 @@ function SessionContent() {
         {/* 編集ポップアップ: 複数選択対応 + 歯面管理（5面） */}
         {editing && !checkMode && !baselineMode && (
           <div className="absolute z-30 top-full mt-1 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-200 p-2 min-w-[180px]">
-            <p className="text-[10px] text-gray-400 text-center mb-1 font-bold">#{num}（複数選択可）</p>
+            <p className="text-xs text-gray-400 text-center mb-1 font-bold">#{num}（複数選択可）</p>
             {Object.entries(TOOTH_STATUS).map(([k, v]) => {
               const isActive = statuses.includes(k);
               return (
@@ -628,8 +628,8 @@ function SessionContent() {
                   if (!record) return;
                   const newChart = toggleToothStatus(record.tooth_chart || {}, num, k);
                   setRecord({ ...record, tooth_chart: newChart });
-                }} className={`w-full text-left px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 ${isActive ? "bg-sky-50 text-sky-700" : "text-gray-600 hover:bg-gray-50"}`}>
-                  <span className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center text-[8px] ${isActive ? "bg-sky-500 border-sky-500 text-white" : "border-gray-300"}`}>
+                }} className={`w-full text-left px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 ${isActive ? "bg-sky-50 text-sky-700" : "text-gray-600 hover:bg-gray-50"}`}>
+                  <span className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center text-xs ${isActive ? "bg-sky-500 border-sky-500 text-white" : "border-gray-300"}`}>
                     {isActive ? "✓" : ""}
                   </span>
                   <span className={`${v.color}`}>{v.shortLabel}</span>
@@ -640,7 +640,7 @@ function SessionContent() {
             {/* 歯面管理（5面）— う蝕・充填・インレー関連ステータスがある場合のみ表示 */}
             {statuses.some(s => ["c1","c2","c3","c4","cr","inlay","in_treatment"].includes(s)) && (
               <div className="mt-2 pt-2 border-t border-gray-200">
-                <p className="text-[10px] text-gray-400 font-bold mb-1.5">🦷 罹患面（5面）</p>
+                <p className="text-xs text-gray-400 font-bold mb-1.5">🦷 罹患面（5面）</p>
                 <div className="flex justify-center gap-1 mb-1">
                   {(["M","D","B","L","O"] as const).map(surface => {
                     const surfaceLabels: Record<string, string> = { M: "近心", D: "遠心", B: "頬側", L: "舌側", O: "咬合" };
@@ -651,21 +651,21 @@ function SessionContent() {
                         const cur = toothSurfaces[num] || [];
                         const updated = isOn ? cur.filter(s => s !== surface) : [...cur, surface];
                         setToothSurfaces({ ...toothSurfaces, [num]: updated });
-                      }} className={`w-9 h-9 rounded-lg text-[10px] font-bold border-2 transition-all flex flex-col items-center justify-center leading-tight ${isOn ? "bg-sky-500 text-white border-sky-500 shadow-sm" : "bg-gray-50 text-gray-400 border-gray-200 hover:border-sky-300"}`}>
-                        <span className="text-[11px]">{surface}</span>
+                      }} className={`w-9 h-9 rounded-lg text-xs font-bold border-2 transition-all flex flex-col items-center justify-center leading-tight ${isOn ? "bg-sky-500 text-white border-sky-500 shadow-sm" : "bg-gray-50 text-gray-400 border-gray-200 hover:border-sky-300"}`}>
+                        <span className="text-xs">{surface}</span>
                         <span className="text-[7px]">{surfaceLabels[surface]}</span>
                       </button>
                     );
                   })}
                 </div>
-                <p className="text-[8px] text-center text-gray-400">
+                <p className="text-xs text-center text-gray-400">
                   {(toothSurfaces[num] || []).length === 0 ? "未選択" :
                    (toothSurfaces[num] || []).length === 1 ? "単純（1面）" :
                    `複雑（${(toothSurfaces[num] || []).length}面）`}
                 </p>
               </div>
             )}
-            <button onClick={() => setEditingTooth(null)} className="w-full mt-1 text-center text-[10px] text-gray-400 hover:text-gray-600 py-1">閉じる</button>
+            <button onClick={() => setEditingTooth(null)} className="w-full mt-1 text-center text-xs text-gray-400 hover:text-gray-600 py-1">閉じる</button>
           </div>
         )}
       </div>
@@ -700,64 +700,74 @@ function SessionContent() {
     <div className="min-h-screen bg-gray-50">
       {/* ヘッダー */}
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-20">
-        <div className="max-w-full mx-auto px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/consultation" className="text-gray-400 hover:text-gray-600 text-sm font-bold">← 戻る</Link>
-            <div className="flex items-center gap-3">
-              <div className="bg-sky-100 text-sky-700 w-9 h-9 rounded-full flex items-center justify-center text-base font-bold">{patient.name_kanji.charAt(0)}</div>
+        <div className="max-w-full mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-5">
+            <Link href={`/consultation/hub?appointment_id=${appointmentId}`} className="text-gray-400 hover:text-gray-600 text-base font-bold">← 戻る</Link>
+            <div className="flex items-center gap-4">
+              <div className={`${isReturning ? "bg-green-500" : "bg-sky-500"} text-white w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold`}>{patient.name_kanji.charAt(0)}</div>
               <div>
-                <div className="flex items-center gap-2"><h1 className="text-base font-bold text-gray-900">{patient.name_kanji}</h1><span className="text-xs text-gray-400">({patient.name_kana})</span>{isReturning ? <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded font-bold">再診</span> : <span className="bg-red-100 text-red-600 text-[10px] px-2 py-0.5 rounded font-bold">初診</span>}</div>
-                <p className="text-xs text-gray-400">{getAge(patient.date_of_birth)}歳 / {patient.insurance_type} {patient.burden_ratio * 10}割</p>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-xl font-bold text-gray-900">{patient.name_kanji}</h1>
+                  <span className="text-sm text-gray-400">({patient.name_kana})</span>
+                  {isReturning
+                    ? <span className="bg-green-100 text-green-700 text-xs px-3 py-1 rounded-lg font-bold">再診</span>
+                    : <span className="bg-red-100 text-red-600 text-xs px-3 py-1 rounded-lg font-bold">初診</span>}
+                  {flowParam && <span className="bg-purple-100 text-purple-700 text-xs px-3 py-1 rounded-lg font-bold">{flowParam === "continue" ? "🩺 継続" : flowParam === "maintenance" ? "🪥 メンテ" : "⚡ 新規主訴"}</span>}
+                </div>
+                <div className="flex items-center gap-4 text-sm text-gray-400 mt-0.5">
+                  <span>{getAge(patient.date_of_birth)}歳</span>
+                  <span>{patient.insurance_type} {patient.burden_ratio * 10}割</span>
+                  <span>{patient.phone}</span>
+                  <span>{patient.date_of_birth}</span>
+                </div>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {saveMsg && <span className="text-xs font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full">{saveMsg}</span>}
-            <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full font-mono text-base font-bold ${isRecording ? "bg-red-50 text-red-600 border border-red-200" : "bg-gray-100 text-gray-600"}`}>
-              {isRecording && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}{formatTimer(elapsedSeconds)}
+          <div className="flex items-center gap-3">
+            {saveMsg && <span className="text-sm font-bold text-green-600 bg-green-50 px-4 py-2 rounded-full">{saveMsg}</span>}
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-xl font-mono text-xl font-bold ${isRecording ? "bg-red-50 text-red-600 border-2 border-red-200" : "bg-gray-100 text-gray-600"}`}>
+              {isRecording && <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />}{formatTimer(elapsedSeconds)}
             </div>
-            {transcribing ? <div className="bg-amber-100 text-amber-700 px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-1"><span className="animate-spin">⚙️</span> 処理中...</div>
-            : isRecording ? <div className="flex items-center gap-1">
-                {isPaused ? <button onClick={resumeRecording} className="bg-sky-500 text-white px-3 py-1.5 rounded-full text-xs font-bold">▶️ 再開</button> : <button onClick={pauseRecording} className="bg-amber-500 text-white px-3 py-1.5 rounded-full text-xs font-bold">⏸️ 一時停止</button>}
-                <button onClick={stopRecording} className="bg-red-600 text-white px-3 py-1.5 rounded-full text-xs font-bold">⏹️ 停止</button>
+            {transcribing ? <div className="bg-amber-100 text-amber-700 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2"><span className="animate-spin">⚙️</span> 処理中...</div>
+            : isRecording ? <div className="flex items-center gap-2">
+                {isPaused ? <button onClick={resumeRecording} className="bg-sky-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold">▶️ 再開</button> : <button onClick={pauseRecording} className="bg-amber-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold">⏸️ 一時停止</button>}
+                <button onClick={stopRecording} className="bg-red-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold">⏹️ 停止</button>
               </div>
-            : <button onClick={startRecording} className="bg-sky-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-md shadow-sky-200">🎙️ 録音開始</button>}
+            : <button onClick={startRecording} className="bg-sky-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-sky-200 hover:bg-sky-700">🎙️ 録音開始</button>}
           </div>
         </div>
       </header>
 
       {/* アレルギー警告バナー */}
       {patient.allergies && Array.isArray(patient.allergies) && patient.allergies.length > 0 && !patient.allergies.includes("なし") && (
-        <div className="bg-red-50 border-b-2 border-red-300 px-4 py-2 flex items-center gap-3 sticky top-[52px] z-10">
-          <span className="text-lg">⚠️</span>
+        <div className="bg-red-50 border-b-2 border-red-300 px-6 py-3 flex items-center gap-4 sticky top-[68px] z-10">
+          <span className="text-2xl">⚠️</span>
           <div>
-            <span className="text-xs font-bold text-red-700">アレルギー: </span>
-            <span className="text-xs font-bold text-red-600">{patient.allergies.join("、")}</span>
+            <span className="text-sm font-bold text-red-700">アレルギー: </span>
+            <span className="text-sm font-bold text-red-600">{patient.allergies.join("、")}</span>
           </div>
-          <span className="text-[10px] text-red-400 ml-auto">処方・麻酔時に注意</span>
+          <span className="text-xs text-red-400 ml-auto">処方・麻酔時に注意</span>
         </div>
       )}
 
-      <main className="max-w-full mx-auto px-4 py-3">
-        <div className="flex gap-3">
-          <div className="flex-1 space-y-3">
-            {/* ★ ステップ進行バー */}
-            <div className="flex gap-1 bg-white rounded-xl border border-gray-200 p-1.5">
+      <main className="max-w-5xl mx-auto px-6 py-4">
+        <div className="space-y-4">
+            {/* ★ ステップ進行バー — 大きく */}
+            <div className="flex gap-2 bg-white rounded-2xl border border-gray-200 p-2 shadow-sm">
               {STEP_LABELS.map((s, i) => {
                 const stepIdx = STEP_LABELS.findIndex(x => x.key === activeTab);
                 const isActive = activeTab === s.key;
                 const isDone = i < stepIdx;
                 return (
                   <button key={s.key} onClick={() => setActiveTab(s.key)}
-                    className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-[11px] font-bold transition-all ${
-                      isActive ? "bg-sky-500 text-white shadow-md"
-                      : isDone ? "bg-green-50 text-green-600 border border-green-200"
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-3.5 rounded-xl text-sm font-bold transition-all ${
+                      isActive ? "bg-sky-500 text-white shadow-lg shadow-sky-200"
+                      : isDone ? "bg-green-50 text-green-600 border-2 border-green-200"
                       : "bg-gray-50 text-gray-400 hover:bg-gray-100"
                     }`}>
-                    <span>{isDone ? "✓" : s.icon}</span>
-                    <span className="hidden md:inline">{s.label}</span>
-                    <span className="md:hidden">{s.label.slice(0, 2)}</span>
-                    <span className={`text-[8px] px-1 py-0 rounded-full ${
+                    <span className="text-lg">{isDone ? "✓" : s.icon}</span>
+                    <span>{s.label}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${
                       isActive ? "bg-white/30 text-white"
                       : isDone ? "bg-green-100 text-green-500"
                       : "bg-gray-100 text-gray-400"
@@ -769,18 +779,18 @@ function SessionContent() {
 
             {/* ===== ① 主訴確認 ===== */}
             {activeTab === "chief" && (
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <h3 className="text-sm font-bold text-gray-900 mb-4">
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">
                   💬 Step 1: 主訴確認（S）
                 </h3>
-                <p className="text-xs text-gray-400 mb-3">
+                <p className="text-sm text-gray-400 mb-4">
                   患者さんの訴えを確認・記録します。問診票の内容がある場合は表示されます。
                 </p>
 
                 {/* 再診時: 前回情報 */}
                 {isReturning && previousVisit && (
                   <div className="mb-4 p-3 bg-blue-50 rounded-xl border border-blue-200">
-                    <p className="text-[10px] text-blue-500 font-bold mb-1">
+                    <p className="text-xs text-blue-500 font-bold mb-1">
                       前回（{formatDateJP(previousVisit.date)}）の計画
                     </p>
                     <p className="text-sm text-blue-800 font-bold">
@@ -791,7 +801,7 @@ function SessionContent() {
                         {plannedProcedures.map((p, i) => (
                           <button key={i}
                             onClick={() => togglePlannedProcedure(i)}
-                            className={`text-[11px] font-bold px-2.5 py-1 rounded-full border transition-all ${
+                            className={`text-xs font-bold px-2.5 py-1 rounded-full border transition-all ${
                               p.checked
                                 ? "bg-blue-100 text-blue-700 border-blue-300"
                                 : "bg-gray-100 text-gray-400 border-gray-200 line-through"
@@ -819,29 +829,29 @@ function SessionContent() {
                 {/* S欄入力 */}
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="bg-red-500 text-white text-[10px] font-bold w-5 h-5 rounded flex items-center justify-center">S</span>
-                    <span className="text-xs font-bold text-gray-600">主観（患者さんの訴え）</span>
+                    <span className="bg-red-500 text-white text-sm font-bold w-7 h-7 rounded flex items-center justify-center">S</span>
+                    <span className="text-sm font-bold text-gray-600">主観（患者さんの訴え）</span>
                   </div>
                   <textarea
                     value={record.soap_s || ""}
                     onChange={e => updateSOAP("soap_s", e.target.value)}
                     placeholder="患者さんの訴え・主訴を入力..."
-                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-sky-400 resize-none"
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 text-base focus:outline-none focus:border-sky-400 resize-none"
                     rows={4}
                   />
                 </div>
 
                 {/* 専用録音 → AI分析 → S欄比較 */}
-                <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
-                  <p className="text-xs font-bold text-sky-700 mb-3">
+                <div className="bg-sky-50 rounded-xl p-5 border border-sky-200">
+                  <p className="text-sm font-bold text-sky-700 mb-4">
                     🎙 音声で主訴を記録
                   </p>
-                  <p className="text-[10px] text-sky-500 mb-3">
+                  <p className="text-xs text-sky-500 mb-3">
                     ヘッダーの録音ボタンで録音 → 文字起こし完了後、下のボタンでS分析
                   </p>
                   {transcripts.length > 0 && (
                     <div className="mb-3 bg-white rounded-lg p-3 border border-sky-100">
-                      <p className="text-[10px] text-gray-400 font-bold mb-1">
+                      <p className="text-xs text-gray-400 font-bold mb-1">
                         文字起こし（{transcripts.length}件）
                       </p>
                       <p className="text-xs text-gray-600 line-clamp-3">
@@ -891,7 +901,7 @@ function SessionContent() {
                       }
                     }}
                     disabled={transcripts.length === 0}
-                    className="w-full bg-sky-500 text-white py-2.5 rounded-lg text-xs font-bold hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full bg-sky-500 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     🤖 音声からS欄を分析・更新
                   </button>
@@ -900,7 +910,7 @@ function SessionContent() {
                 {/* 次のステップへ */}
                 <div className="mt-4 flex justify-end">
                   <button onClick={() => setActiveTab("tooth")}
-                    className="bg-sky-500 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-600 shadow-md shadow-sky-200">
+                    className="bg-sky-500 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-sky-600 shadow-md shadow-sky-200">
                     次へ: 歯式記録 →
                   </button>
                 </div>
@@ -909,19 +919,19 @@ function SessionContent() {
 
             {/* ===== ② 歯式タブ ===== */}
             {activeTab === "tooth" && (
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <h3 className="text-sm font-bold text-gray-700">🦷 歯式チャート</h3>
                     <div className="flex bg-gray-100 rounded-lg p-0.5">
-                      <button onClick={() => setDentitionMode("permanent")} className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${dentitionMode === "permanent" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400"}`}>永久歯</button>
-                      <button onClick={() => setDentitionMode("mixed")} className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${dentitionMode === "mixed" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400"}`}>混合歯列</button>
+                      <button onClick={() => setDentitionMode("permanent")} className={`px-2.5 py-1 rounded-md text-xs font-bold ${dentitionMode === "permanent" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400"}`}>永久歯</button>
+                      <button onClick={() => setDentitionMode("mixed")} className={`px-2.5 py-1 rounded-md text-xs font-bold ${dentitionMode === "mixed" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400"}`}>混合歯列</button>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {Object.keys(chartStats).length > 0 && <div className="flex gap-1">{Object.entries(chartStats).map(([s, c]) => (<span key={s} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${TOOTH_STATUS[s]?.bg} ${TOOTH_STATUS[s]?.color} ${TOOTH_STATUS[s]?.border} border`}>{TOOTH_STATUS[s]?.label} {c}</span>))}</div>}
-                    {!isReturning && !baselineMode && <button onClick={() => { setBaselineMode(true); setBaselineIndex(0); setCheckMode(false); }} className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-sky-50 text-sky-600 border border-sky-200 hover:bg-sky-100">📋 ベースライン記録</button>}
-                    {!baselineMode && <button onClick={() => { setCheckMode(!checkMode); setEditingTooth(null); }} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold ${checkMode ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-600 border border-orange-200"}`}>{checkMode ? "✓ チェック中" : "🖊 一括チェック"}</button>}
+                    {Object.keys(chartStats).length > 0 && <div className="flex gap-1">{Object.entries(chartStats).map(([s, c]) => (<span key={s} className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${TOOTH_STATUS[s]?.bg} ${TOOTH_STATUS[s]?.color} ${TOOTH_STATUS[s]?.border} border`}>{TOOTH_STATUS[s]?.label} {c}</span>))}</div>}
+                    {!isReturning && !baselineMode && <button onClick={() => { setBaselineMode(true); setBaselineIndex(0); setCheckMode(false); }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-600 border border-sky-200 hover:bg-sky-100">📋 ベースライン記録</button>}
+                    {!baselineMode && <button onClick={() => { setCheckMode(!checkMode); setEditingTooth(null); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${checkMode ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-600 border border-orange-200"}`}>{checkMode ? "✓ チェック中" : "🖊 一括チェック"}</button>}
                   </div>
                 </div>
 
@@ -933,7 +943,7 @@ function SessionContent() {
                     </span>
                     <div className="flex gap-2">
                       <label className="cursor-pointer">
-                        <span className="text-[10px] font-bold bg-purple-500 text-white px-3 py-1.5 rounded-lg hover:bg-purple-600 inline-block">
+                        <span className="text-xs font-bold bg-purple-500 text-white px-3 py-1.5 rounded-lg hover:bg-purple-600 inline-block">
                           📸 カメラで撮影
                         </span>
                         <input type="file"
@@ -1014,7 +1024,7 @@ function SessionContent() {
                         />
                       </label>
                       <label className="cursor-pointer">
-                        <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-200 inline-block">
+                        <span className="text-xs font-bold bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-200 inline-block">
                           📤 ファイル選択
                         </span>
                         <input type="file" accept="image/*"
@@ -1094,7 +1104,7 @@ function SessionContent() {
                       </label>
                     </div>
                   </div>
-                  <p className="text-[10px] text-purple-500">
+                  <p className="text-xs text-purple-500">
                     📸 カメラ: モニターに表示されたレントゲンを直接撮影して分析　|　📤 ファイル: 画像ファイルを選択
                   </p>
                 </div>
@@ -1125,7 +1135,7 @@ function SessionContent() {
 
                 {checkMode && !baselineMode && (
                   <div className="mb-3 p-2.5 bg-orange-50 rounded-xl border border-orange-200">
-                    <p className="text-[10px] text-orange-600 font-bold mb-2">状態を選んで歯をタップ → 一括記録</p>
+                    <p className="text-xs text-orange-600 font-bold mb-2">状態を選んで歯をタップ → 一括記録</p>
                     <div className="flex gap-1.5 flex-wrap">{CHECK_STATUSES.map(s => { const cfg = TOOTH_STATUS[s]; return (<button key={s} onClick={() => setCheckBrush(s)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${checkBrush === s ? `${cfg.bg} ${cfg.border} ${cfg.color} ring-2 ring-offset-1 ring-sky-400` : "bg-white border-gray-200 text-gray-500"}`}>{cfg.label}</button>); })}</div>
                   </div>
                 )}
@@ -1133,21 +1143,21 @@ function SessionContent() {
                 {/* 歯式表示 */}
                 <div className="flex justify-center">
                   <div className="flex flex-col items-center gap-1">
-                    <div className="flex items-center gap-0.5"><span className="text-[9px] text-gray-300 w-6 text-right mr-1">右</span><div className="flex gap-1">{UPPER_RIGHT.map(t => renderTooth(t))}</div><div className="w-px h-10 bg-gray-300 mx-2" /><div className="flex gap-1">{UPPER_LEFT.map(t => renderTooth(t))}</div><span className="text-[9px] text-gray-300 w-6 ml-1">左</span></div>
-                    {dentitionMode === "mixed" && <div className="flex items-center gap-0.5 mt-0.5"><span className="text-[9px] text-gray-300 w-6 text-right mr-1" /><div className="flex gap-1" style={{ marginLeft: "108px" }}>{DECID_UPPER_RIGHT.map(t => renderTooth(t, true))}</div><div className="w-px h-8 bg-gray-200 mx-2" /><div className="flex gap-1" style={{ marginRight: "108px" }}>{DECID_UPPER_LEFT.map(t => renderTooth(t, true))}</div><span className="text-[9px] text-gray-300 w-6 ml-1" /></div>}
-                    <div className="flex items-center gap-1 my-1" style={{ width: "100%" }}><span className="text-[9px] text-gray-300 w-6 text-right mr-1" /><div className="flex-1 border-t-2 border-gray-400" /><span className="text-[9px] text-gray-300 w-6 ml-1" /></div>
-                    {dentitionMode === "mixed" && <div className="flex items-center gap-0.5 mb-0.5"><span className="text-[9px] text-gray-300 w-6 text-right mr-1" /><div className="flex gap-1" style={{ marginLeft: "108px" }}>{DECID_LOWER_RIGHT.map(t => renderTooth(t, true))}</div><div className="w-px h-8 bg-gray-200 mx-2" /><div className="flex gap-1" style={{ marginRight: "108px" }}>{DECID_LOWER_LEFT.map(t => renderTooth(t, true))}</div><span className="text-[9px] text-gray-300 w-6 ml-1" /></div>}
-                    <div className="flex items-center gap-0.5"><span className="text-[9px] text-gray-300 w-6 text-right mr-1">右</span><div className="flex gap-1">{LOWER_RIGHT.map(t => renderTooth(t))}</div><div className="w-px h-10 bg-gray-300 mx-2" /><div className="flex gap-1">{LOWER_LEFT.map(t => renderTooth(t))}</div><span className="text-[9px] text-gray-300 w-6 ml-1">左</span></div>
+                    <div className="flex items-center gap-0.5"><span className="text-xs text-gray-300 w-6 text-right mr-1">右</span><div className="flex gap-1">{UPPER_RIGHT.map(t => renderTooth(t))}</div><div className="w-px h-10 bg-gray-300 mx-2" /><div className="flex gap-1">{UPPER_LEFT.map(t => renderTooth(t))}</div><span className="text-xs text-gray-300 w-6 ml-1">左</span></div>
+                    {dentitionMode === "mixed" && <div className="flex items-center gap-0.5 mt-0.5"><span className="text-xs text-gray-300 w-6 text-right mr-1" /><div className="flex gap-1" style={{ marginLeft: "108px" }}>{DECID_UPPER_RIGHT.map(t => renderTooth(t, true))}</div><div className="w-px h-8 bg-gray-200 mx-2" /><div className="flex gap-1" style={{ marginRight: "108px" }}>{DECID_UPPER_LEFT.map(t => renderTooth(t, true))}</div><span className="text-xs text-gray-300 w-6 ml-1" /></div>}
+                    <div className="flex items-center gap-1 my-1" style={{ width: "100%" }}><span className="text-xs text-gray-300 w-6 text-right mr-1" /><div className="flex-1 border-t-2 border-gray-400" /><span className="text-xs text-gray-300 w-6 ml-1" /></div>
+                    {dentitionMode === "mixed" && <div className="flex items-center gap-0.5 mb-0.5"><span className="text-xs text-gray-300 w-6 text-right mr-1" /><div className="flex gap-1" style={{ marginLeft: "108px" }}>{DECID_LOWER_RIGHT.map(t => renderTooth(t, true))}</div><div className="w-px h-8 bg-gray-200 mx-2" /><div className="flex gap-1" style={{ marginRight: "108px" }}>{DECID_LOWER_LEFT.map(t => renderTooth(t, true))}</div><span className="text-xs text-gray-300 w-6 ml-1" /></div>}
+                    <div className="flex items-center gap-0.5"><span className="text-xs text-gray-300 w-6 text-right mr-1">右</span><div className="flex gap-1">{LOWER_RIGHT.map(t => renderTooth(t))}</div><div className="w-px h-10 bg-gray-300 mx-2" /><div className="flex gap-1">{LOWER_LEFT.map(t => renderTooth(t))}</div><span className="text-xs text-gray-300 w-6 ml-1">左</span></div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2 mt-4 justify-center">{Object.entries(TOOTH_STATUS).map(([k, v]) => (<span key={k} className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${v.border} ${v.bg} ${v.color}`}>{v.label}</span>))}</div>
+                <div className="flex flex-wrap gap-2 mt-4 justify-center">{Object.entries(TOOTH_STATUS).map(([k, v]) => (<span key={k} className={`text-xs font-bold px-2.5 py-1 rounded-full border ${v.border} ${v.bg} ${v.color}`}>{v.label}</span>))}</div>
                 {/* 歯面記録サマリ */}
                 {Object.keys(toothSurfaces).filter(t => (toothSurfaces[t] || []).length > 0).length > 0 && (
                   <div className="mt-3 p-3 bg-sky-50 rounded-xl border border-sky-200">
-                    <p className="text-[10px] text-sky-600 font-bold mb-2">🦷 歯面記録（罹患面）</p>
+                    <p className="text-xs text-sky-600 font-bold mb-2">🦷 歯面記録（罹患面）</p>
                     <div className="flex flex-wrap gap-2">
                       {Object.entries(toothSurfaces).filter(([, surfaces]) => surfaces.length > 0).map(([tooth, surfaces]) => (
-                        <span key={tooth} className="bg-white border border-sky-200 px-2 py-1 rounded-lg text-[10px] font-bold text-sky-700">
+                        <span key={tooth} className="bg-white border border-sky-200 px-2 py-1 rounded-lg text-xs font-bold text-sky-700">
                           #{tooth}: {surfaces.join("")} <span className="text-sky-400">({surfaces.length}面{surfaces.length >= 2 ? "・複雑" : "・単純"})</span>
                         </span>
                       ))}
@@ -1155,22 +1165,22 @@ function SessionContent() {
                   </div>
                 )}
                 <div className="mt-4 flex justify-between">
-                  <button onClick={() => setActiveTab("chief")} className="text-sm text-gray-400 hover:text-gray-600 font-bold">← 主訴確認</button>
-                  <button onClick={() => setActiveTab("perio")} className="bg-sky-500 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-600 shadow-md shadow-sky-200">次へ: P検・BOP →</button>
+                  <button onClick={() => setActiveTab("chief")} className="text-base text-gray-400 hover:text-gray-600 font-bold">← 主訴確認</button>
+                  <button onClick={() => setActiveTab("perio")} className="bg-sky-500 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-sky-600 shadow-md shadow-sky-200">次へ: P検・BOP →</button>
                 </div>
               </div>
             )}
 
             {/* ===== 📊 P検タブ ===== */}
             {activeTab === "perio" && (
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-bold text-gray-700">
                     📊 歯周検査（6点法）
                   </h3>
                   <div className="flex items-center gap-2">
                     {perioSummary.count > 0 && (
-                      <div className="flex gap-2 text-[10px]">
+                      <div className="flex gap-2 text-xs">
                         <span className={`font-bold px-2 py-0.5 rounded ${
                           perioSummary.bopRate > 30
                             ? "bg-red-100 text-red-600"
@@ -1186,7 +1196,7 @@ function SessionContent() {
                         </span>
                       </div>
                     )}
-                    <div className="flex items-center gap-2 text-[10px]">
+                    <div className="flex items-center gap-2 text-xs">
                       <span className="flex items-center gap-1">
                         <span className="w-2.5 h-2.5 rounded bg-red-500" />
                         BOP(+)
@@ -1208,14 +1218,14 @@ function SessionContent() {
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-sky-700">🎙 音声P検入力</span>
                     <div className="flex items-center gap-2">
-                      <select className="text-[10px] border border-sky-200 rounded-lg px-2 py-1 bg-white font-bold text-sky-700"
+                      <select className="text-xs border border-sky-200 rounded-lg px-2 py-1 bg-white font-bold text-sky-700"
                         value={perioProbePoints}
                         onChange={(e) => { setPerioProbePoints(Number(e.target.value)); showMsg(`P検方式: ${e.target.value}点式`); }}>
                         <option value={1}>1点式</option>
                         <option value={4}>4点式</option>
                         <option value={6}>6点式</option>
                       </select>
-                      <select className="text-[10px] border border-sky-200 rounded-lg px-2 py-1 bg-white font-bold text-sky-700"
+                      <select className="text-xs border border-sky-200 rounded-lg px-2 py-1 bg-white font-bold text-sky-700"
                         value={perioOrderType}
                         onChange={(e) => { setPerioOrderType(e.target.value); setPerioCurrentIdx(0); setPerioSide("buccal"); }}>
                         <option value="U">コの字</option>
@@ -1247,11 +1257,11 @@ function SessionContent() {
                     const totalDone = order.filter(t => !!perioData[t]).length;
                     const pct = order.length > 0 ? Math.round((totalDone / order.length) * 100) : 0;
                     return (<div>
-                      {excluded.length > 0 && <p className="text-[10px] text-gray-400 mb-2">除外歯: {excluded.join(", ")}</p>}
+                      {excluded.length > 0 && <p className="text-xs text-gray-400 mb-2">除外歯: {excluded.join(", ")}</p>}
                       <div className="mb-3">
                         <div className="flex justify-between mb-1">
-                          <span className="text-[10px] text-sky-600 font-bold">進捗: {totalDone}/{order.length}歯</span>
-                          <span className="text-[10px] text-sky-500">{pct}%</span>
+                          <span className="text-xs text-sky-600 font-bold">進捗: {totalDone}/{order.length}歯</span>
+                          <span className="text-xs text-sky-500">{pct}%</span>
                         </div>
                         <div className="bg-gray-200 rounded-full h-2">
                           <div className="bg-sky-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
@@ -1262,7 +1272,7 @@ function SessionContent() {
                           const done = !!perioData[t];
                           const isCur = i === perioCurrentIdx;
                           return (<button key={t} onClick={() => { setPerioCurrentIdx(i); setPerioSide("buccal"); }}
-                            className={`text-[9px] px-1.5 py-1 rounded font-bold transition-all ${
+                            className={`text-xs px-1.5 py-1 rounded font-bold transition-all ${
                               isCur ? "bg-sky-500 text-white ring-2 ring-sky-300 scale-110"
                               : done ? "bg-green-100 text-green-700"
                               : "bg-white text-gray-400 border border-gray-200"
@@ -1281,7 +1291,7 @@ function SessionContent() {
                         </div>
                         {hasCur && (<div className="flex justify-center gap-6 mb-3">
                           <div className="text-center">
-                            <p className="text-[9px] text-gray-400 mb-1">頬側(MB/B/DB)</p>
+                            <p className="text-xs text-gray-400 mb-1">頬側(MB/B/DB)</p>
                             <div className="flex gap-1 justify-center">
                               {(perioData[curT]?.buccal || [2,2,2]).map((v, i) => (
                                 <span key={i} className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-sm ${
@@ -1291,7 +1301,7 @@ function SessionContent() {
                             </div>
                           </div>
                           <div className="text-center">
-                            <p className="text-[9px] text-gray-400 mb-1">舌側(ML/L/DL)</p>
+                            <p className="text-xs text-gray-400 mb-1">舌側(ML/L/DL)</p>
                             <div className="flex gap-1 justify-center">
                               {(perioData[curT]?.lingual || [2,2,2]).map((v, i) => (
                                 <span key={i} className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-sm ${
@@ -1304,23 +1314,23 @@ function SessionContent() {
                         {/* === リアルタイム音声入力 === */}
                         <div className="mb-3 p-3 bg-green-50 rounded-xl border border-green-200">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-[10px] font-bold text-green-700">
+                            <span className="text-xs font-bold text-green-700">
                               🎤 リアルタイム音声入力
                             </span>
                             <div className="flex gap-1">
                               <button onClick={() => setPerioVoiceMode(false)}
-                                className={`text-[9px] px-2 py-1 rounded font-bold ${!perioVoiceMode ? "bg-green-500 text-white" : "bg-white text-gray-400 border"}`}>
+                                className={`text-xs px-2 py-1 rounded font-bold ${!perioVoiceMode ? "bg-green-500 text-white" : "bg-white text-gray-400 border"}`}>
                                 手動
                               </button>
                               <button onClick={() => setPerioVoiceMode(true)}
-                                className={`text-[9px] px-2 py-1 rounded font-bold ${perioVoiceMode ? "bg-green-500 text-white" : "bg-white text-gray-400 border"}`}>
+                                className={`text-xs px-2 py-1 rounded font-bold ${perioVoiceMode ? "bg-green-500 text-white" : "bg-white text-gray-400 border"}`}>
                                 音声
                               </button>
                             </div>
                           </div>
                           {perioVoiceMode && (
                             <div>
-                              <p className="text-[9px] text-green-600 mb-2">
+                              <p className="text-xs text-green-600 mb-2">
                                 数字を読み上げると自動入力されます。
                                 {perioProbePoints === 1
                                   ? "1つ言うと次の歯へ"
@@ -1330,7 +1340,7 @@ function SessionContent() {
                               </p>
                               {perioInputBuffer.length > 0 && (
                                 <div className="flex gap-1 mb-2 items-center">
-                                  <span className="text-[9px] text-gray-400">バッファ:</span>
+                                  <span className="text-xs text-gray-400">バッファ:</span>
                                   {perioInputBuffer.map((v, i) => (
                                     <span key={i} className="bg-green-200 text-green-800 text-xs font-bold px-1.5 py-0.5 rounded">{v}</span>
                                   ))}
@@ -1458,7 +1468,7 @@ function SessionContent() {
                           )}
                         </div>
 
-                        <p className="text-[10px] text-gray-400 text-center mb-2">タップで数値入力（手動 / 音声の補助用）</p>
+                        <p className="text-xs text-gray-400 text-center mb-2">タップで数値入力（手動 / 音声の補助用）</p>
                         <div className="flex justify-center gap-1 mb-3">
                           {[1,2,3,4,5,6,7,8,9,10].map(v => (
                             <button key={v} onClick={() => {
@@ -1484,12 +1494,12 @@ function SessionContent() {
                         <div className="flex justify-between items-center">
                           <button onClick={() => { if (perioCurrentIdx > 0) { setPerioCurrentIdx(perioCurrentIdx - 1); setPerioSide("buccal"); } }}
                             disabled={perioCurrentIdx === 0} className="text-xs text-gray-400 hover:text-gray-600 font-bold disabled:opacity-30">← 前の歯</button>
-                          <span className="text-[10px] text-gray-400">{perioCurrentIdx + 1} / {order.length}</span>
+                          <span className="text-xs text-gray-400">{perioCurrentIdx + 1} / {order.length}</span>
                           <button onClick={() => { if (perioCurrentIdx < order.length - 1) { setPerioCurrentIdx(perioCurrentIdx + 1); setPerioSide("buccal"); } }}
                             disabled={perioCurrentIdx >= order.length - 1} className="text-xs text-sky-600 hover:text-sky-800 font-bold disabled:opacity-30">次の歯 →</button>
                         </div>
                       </div>
-                      <p className="text-[10px] text-sky-600 mb-2">📌 録音→解析で一括入力もOK</p>
+                      <p className="text-xs text-sky-600 mb-2">📌 録音→解析で一括入力もOK</p>
                       <div className="flex gap-2">
                         <button onClick={async () => {
                           if (transcripts.length === 0) { showMsg("⚠️ 先に録音してください"); return; }
@@ -1535,23 +1545,23 @@ function SessionContent() {
                 </div>
 
                 {/* 上顎 P検チャート */}
-                <div className="text-[9px] text-gray-400 mb-0.5 ml-10">上顎</div>
+                <div className="text-xs text-gray-400 mb-0.5 ml-10">上顎</div>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[640px]"><tbody>
-                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-[9px]"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
+                    <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-xs"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
                     </tr>
-                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                    <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
                       {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
-                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
-                    <tr><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">上顎</td>
+                    <tr><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">上顎</td>
                       {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing"); const isE = perioEditTooth===t;
-                        return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":primary_st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-[8px] text-gray-400">{t}</span>{primary_st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
+                        return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-xs font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":primary_st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-xs text-gray-400">{t}</span>{primary_st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
                     </tr>
-                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                    <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
                       {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
-                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                   </tbody></table>
                 </div>
@@ -1559,23 +1569,23 @@ function SessionContent() {
                 <div className="my-2 border-t border-gray-200" />
 
                 {/* 下顎 P検チャート */}
-                <div className="text-[9px] text-gray-400 mb-0.5 ml-10">下顎</div>
+                <div className="text-xs text-gray-400 mb-0.5 ml-10">下顎</div>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[640px]"><tbody>
-                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                    <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
                       {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
-                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
-                    <tr><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">下顎</td>
+                    <tr><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">下顎</td>
                       {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing"); const isE = perioEditTooth===t;
-                        return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":primary_st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-[8px] text-gray-400">{t}</span>{primary_st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
+                        return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-xs font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":primary_st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-xs text-gray-400">{t}</span>{primary_st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
                     </tr>
-                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
+                    <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
                       {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
-                        return <td key={t} className="text-center px-0">{isM?<span className="text-[8px] text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-[8px] text-gray-300">· · ·</span>}</div>}</td>; })}
+                        return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
-                    <tr className="h-5"><td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-[9px]"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
+                    <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-xs"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
                     </tr>
                   </tbody></table>
                 </div>
@@ -1592,27 +1602,27 @@ function SessionContent() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <p className="text-[10px] text-gray-500 font-bold mb-1">頬側 (MB / B / DB)</p>
+                          <p className="text-xs text-gray-500 font-bold mb-1">頬側 (MB / B / DB)</p>
                           <div className="flex gap-1">{[0,1,2].map(i => <input key={i} type="number" min={0} max={15} value={pd?.buccal[i] ?? 2} onChange={e => updatePerioPocket(t, "buccal", i, parseInt(e.target.value)||0)} className={`w-10 text-center border-2 rounded-lg py-1 text-sm font-bold ${(pd?.buccal[i]??2)>=6?"bg-red-500 text-white border-red-500":(pd?.buccal[i]??2)>=4?"bg-red-100 text-red-700 border-red-300":"border-gray-200"}`} />)}</div>
                         </div>
                         <div>
-                          <p className="text-[10px] text-gray-500 font-bold mb-1">舌側 (ML / L / DL)</p>
+                          <p className="text-xs text-gray-500 font-bold mb-1">舌側 (ML / L / DL)</p>
                           <div className="flex gap-1">{[0,1,2].map(i => <input key={i} type="number" min={0} max={15} value={pd?.lingual[i] ?? 2} onChange={e => updatePerioPocket(t, "lingual", i, parseInt(e.target.value)||0)} className={`w-10 text-center border-2 rounded-lg py-1 text-sm font-bold ${(pd?.lingual[i]??2)>=6?"bg-red-500 text-white border-red-500":(pd?.lingual[i]??2)>=4?"bg-red-100 text-red-700 border-red-300":"border-gray-200"}`} />)}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 mt-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-gray-500 font-bold">BOP:</span>
+                          <span className="text-xs text-gray-500 font-bold">BOP:</span>
                           <button onClick={() => updatePerio(t, "bop", !(pd?.bop))} className={`px-3 py-1 rounded-lg text-xs font-bold border-2 ${pd?.bop ? "bg-red-500 text-white border-red-500" : "bg-white border-gray-300 text-gray-400"}`}>{pd?.bop ? "(+) 出血あり" : "(-) 出血なし"}</button>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-gray-500 font-bold">動揺:</span>
+                          <span className="text-xs text-gray-500 font-bold">動揺:</span>
                           {[0,1,2,3].map(m => <button key={m} onClick={() => updatePerio(t, "mobility", m)} className={`w-7 h-7 rounded-lg text-xs font-bold border-2 ${(pd?.mobility??0)===m ? "bg-sky-500 text-white border-sky-500" : "bg-white border-gray-200 text-gray-500"}`}>{m}</button>)}
                         </div>
                         {/* B13 根分岐部病変 (臼歯のみ) */}
                         {["16","17","18","26","27","28","36","37","38","46","47","48","14","15","24","25","34","35","44","45"].includes(t) && (
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-gray-500 font-bold">分岐部:</span>
+                            <span className="text-xs text-gray-500 font-bold">分岐部:</span>
                             {[0,1,2,3].map(f => <button key={f} onClick={() => updatePerio(t, "furcation", f)} className={`w-7 h-7 rounded-lg text-xs font-bold border-2 ${(pd as Record<string, unknown>)?.furcation===f ? "bg-purple-500 text-white border-purple-500" : "bg-white border-gray-200 text-gray-500"}`}>{f === 0 ? "—" : `F${f}`}</button>)}
                           </div>
                         )}
@@ -1621,8 +1631,8 @@ function SessionContent() {
                   );
                 })()}
                 <div className="mt-4 flex justify-between">
-                  <button onClick={() => setActiveTab("tooth")} className="text-sm text-gray-400 hover:text-gray-600 font-bold">← 歯式記録</button>
-                  <button onClick={() => setActiveTab("dh_record")} className="bg-sky-500 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-sky-600 shadow-md shadow-sky-200">次へ: DH記録 →</button>
+                  <button onClick={() => setActiveTab("tooth")} className="text-base text-gray-400 hover:text-gray-600 font-bold">← 歯式記録</button>
+                  <button onClick={() => setActiveTab("dh_record")} className="bg-sky-500 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-sky-600 shadow-md shadow-sky-200">次へ: DH記録 →</button>
                 </div>
               </div>
             )}
@@ -1634,7 +1644,7 @@ function SessionContent() {
                   <p className="text-xs font-bold text-sky-700">
                     📝 Step 4: DH記録 — クリーニング後のO入力・文字起こし
                   </p>
-                  <p className="text-[10px] text-sky-500 mt-1">
+                  <p className="text-xs text-sky-500 mt-1">
                     患者さんにフィードバックする内容を音声で記録 → O欄に反映
                   </p>
                 </div>
@@ -1643,7 +1653,7 @@ function SessionContent() {
                 {record.soap_s && (
                   <div className="bg-red-50 rounded-xl border border-red-200 p-3">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="bg-red-500 text-white text-[10px] font-bold w-5 h-5 rounded flex items-center justify-center">S</span>
+                      <span className="bg-red-500 text-white text-sm font-bold w-7 h-7 rounded flex items-center justify-center">S</span>
                       <span className="text-xs font-bold text-red-600">確定済みの主訴</span>
                     </div>
                     <p className="text-sm text-gray-700">{record.soap_s}</p>
@@ -1653,8 +1663,8 @@ function SessionContent() {
                 {/* 予定処置パネル（再診時） */}
                 {isReturning && hasPreviousPlan && !quickSoapApplied && visitCondition === "" && (
                   <div className="bg-white rounded-xl border-2 border-purple-200 p-4">
-                    <div className="flex items-center gap-2 mb-3"><span className="text-lg">📋</span><h3 className="text-sm font-bold text-gray-900">今日の予定処置</h3><span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">前回 {formatDateJP(previousVisit!.date)} より</span></div>
-                    {previousVisit!.soap_a && <div className="bg-gray-50 rounded-lg px-3 py-2 mb-3"><p className="text-[10px] text-gray-400 font-bold mb-0.5">前回の診断</p><p className="text-sm text-gray-700">{previousVisit!.soap_a}</p></div>}
+                    <div className="flex items-center gap-2 mb-3"><span className="text-lg">📋</span><h3 className="text-sm font-bold text-gray-900">今日の予定処置</h3><span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">前回 {formatDateJP(previousVisit!.date)} より</span></div>
+                    {previousVisit!.soap_a && <div className="bg-gray-50 rounded-lg px-3 py-2 mb-3"><p className="text-xs text-gray-400 font-bold mb-0.5">前回の診断</p><p className="text-sm text-gray-700">{previousVisit!.soap_a}</p></div>}
                     <div className="space-y-1.5 mb-4">{plannedProcedures.map((proc, idx) => (<button key={idx} onClick={() => togglePlannedProcedure(idx)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border-2 text-left ${proc.checked ? "border-purple-300 bg-purple-50" : "border-gray-200 bg-white"}`}><span className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold border-2 flex-shrink-0 ${proc.checked ? "bg-purple-500 border-purple-500 text-white" : "border-gray-300 text-transparent"}`}>✓</span><span className={`text-sm font-bold ${proc.checked ? "text-gray-800" : "text-gray-400 line-through"}`}>{proc.name}</span></button>))}</div>
                     <div className="flex gap-2"><button onClick={applyQuickSOAP} disabled={plannedProcedures.filter(p => p.checked).length === 0} className="flex-1 bg-green-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-green-700 disabled:opacity-50">✅ 予定通り完了</button><button onClick={() => setVisitCondition("changed")} className="flex-1 bg-orange-50 text-orange-700 border-2 border-orange-200 py-3 rounded-xl text-sm font-bold hover:bg-orange-100">⚠️ 変化あり</button></div>
                   </div>
@@ -1672,13 +1682,13 @@ function SessionContent() {
                 <div className="bg-blue-50 rounded-xl border-2 border-blue-200 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-blue-700">🎤 DH専用録音 → O欄自動入力</span>
-                    {stepTranscript && <span className="text-[9px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">文字起こし済</span>}
+                    {stepTranscript && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">文字起こし済</span>}
                   </div>
-                  <p className="text-[10px] text-blue-500 mb-3">患者さんへのフィードバックを話すだけでO欄に自動入力されます</p>
+                  <p className="text-xs text-blue-500 mb-3">患者さんへのフィードバックを話すだけでO欄に自動入力されます</p>
 
                   {stepTranscript && (
                     <div className="bg-white rounded-lg p-3 mb-3 border border-blue-100">
-                      <p className="text-[9px] text-gray-400 font-bold mb-1">文字起こし結果</p>
+                      <p className="text-xs text-gray-400 font-bold mb-1">文字起こし結果</p>
                       <p className="text-xs text-gray-700 whitespace-pre-wrap">{stepTranscript}</p>
                     </div>
                   )}
@@ -1778,7 +1788,7 @@ function SessionContent() {
                 {/* 文字起こしパネル */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <div className="flex items-center gap-2"><span className="text-lg">📝</span><h3 className="text-sm font-bold text-gray-800">音声文字起こし</h3>{transcripts.length > 0 && <span className="text-[10px] font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{transcripts.length}件</span>}</div>
+                    <div className="flex items-center gap-2"><span className="text-lg">📝</span><h3 className="text-sm font-bold text-gray-800">音声文字起こし</h3>{transcripts.length > 0 && <span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{transcripts.length}件</span>}</div>
                     {transcripts.length > 0 && <button onClick={generateSOAPFromTranscripts} disabled={generatingSOAP} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-50 shadow-md shadow-purple-200">{generatingSOAP ? "⚙️ 生成中..." : "🤖 SOAP生成"}</button>}
                   </div>
                   {transcripts.length === 0 ? <div className="text-center py-8"><p className="text-3xl mb-2">🎙️</p><p className="text-sm text-gray-400">右上の「録音開始」で記録</p></div>
@@ -1786,8 +1796,8 @@ function SessionContent() {
                     {transcripts.map(entry => (
                       <div key={entry.id} className="px-4 py-3 hover:bg-gray-50">
                         <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2"><span className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full">録音{entry.recording_number}</span>{entry.duration_seconds && <span className="text-[10px] text-gray-400">{formatTimer(entry.duration_seconds)}</span>}{entry.is_edited && <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-bold">修正済</span>}</div>
-                          <div className="flex items-center gap-1">{editingTranscriptId === entry.id ? <><button onClick={saveEditTranscript} className="text-[10px] text-green-600 font-bold px-2 py-1 rounded hover:bg-green-50">✅ 保存</button><button onClick={() => setEditingTranscriptId(null)} className="text-[10px] text-gray-400 font-bold px-2 py-1 rounded hover:bg-gray-100">取消</button></> : <><button onClick={() => startEditTranscript(entry)} className="text-[10px] text-gray-400 font-bold px-2 py-1 rounded hover:bg-sky-50">✏️ 修正</button><button onClick={() => deleteTranscript(entry.id)} className="text-[10px] text-gray-300 font-bold px-1 py-1 rounded hover:bg-red-50">✕</button></>}</div>
+                          <div className="flex items-center gap-2"><span className="text-xs font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full">録音{entry.recording_number}</span>{entry.duration_seconds && <span className="text-xs text-gray-400">{formatTimer(entry.duration_seconds)}</span>}{entry.is_edited && <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-bold">修正済</span>}</div>
+                          <div className="flex items-center gap-1">{editingTranscriptId === entry.id ? <><button onClick={saveEditTranscript} className="text-xs text-green-600 font-bold px-2 py-1 rounded hover:bg-green-50">✅ 保存</button><button onClick={() => setEditingTranscriptId(null)} className="text-xs text-gray-400 font-bold px-2 py-1 rounded hover:bg-gray-100">取消</button></> : <><button onClick={() => startEditTranscript(entry)} className="text-xs text-gray-400 font-bold px-2 py-1 rounded hover:bg-sky-50">✏️ 修正</button><button onClick={() => deleteTranscript(entry.id)} className="text-xs text-gray-300 font-bold px-1 py-1 rounded hover:bg-red-50">✕</button></>}</div>
                         </div>
                         {editingTranscriptId === entry.id ? <textarea value={editingText} onChange={e => setEditingText(e.target.value)} rows={4} className="w-full border-2 border-sky-300 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" /> : <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{entry.transcript_text}</p>}
                       </div>
@@ -1796,10 +1806,10 @@ function SessionContent() {
                 </div>
 
                 {/* 口腔内写真5枚法 */}
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-gray-700">📷 口腔内写真（5枚法）</span>
-                    <span className="text-[10px] text-gray-400">{Object.keys(intraoralPhotos).length}/5 撮影済</span>
+                    <span className="text-xs text-gray-400">{Object.keys(intraoralPhotos).length}/5 撮影済</span>
                   </div>
                   <div className="grid grid-cols-5 gap-2">
                     {([
@@ -1819,9 +1829,9 @@ function SessionContent() {
                               <span className="text-2xl">{photo.icon}</span>
                             )}
                           </div>
-                          <p className="text-[9px] text-gray-500 font-bold mt-1 text-center">{photo.label}</p>
+                          <p className="text-xs text-gray-500 font-bold mt-1 text-center">{photo.label}</p>
                           <label className="cursor-pointer mt-1">
-                            <span className={`text-[9px] font-bold px-2 py-1 rounded-lg inline-block ${existing ? "bg-green-100 text-green-600 border border-green-200" : "bg-sky-500 text-white"}`}>
+                            <span className={`text-xs font-bold px-2 py-1 rounded-lg inline-block ${existing ? "bg-green-100 text-green-600 border border-green-200" : "bg-sky-500 text-white"}`}>
                               {existing ? "✓ 撮り直し" : "📸 撮影"}
                             </span>
                             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => {
@@ -1854,7 +1864,7 @@ function SessionContent() {
                 <div className="grid grid-cols-2 gap-3">
                   {[soapItems[0], soapItems[1]].map(item => (
                     <div key={item.key} className={`bg-white rounded-xl border ${item.borderColor} overflow-hidden`}>
-                      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100"><span className={`w-6 h-6 rounded-md text-[11px] font-bold flex items-center justify-center text-white ${item.color}`}>{item.label}</span><span className="text-sm font-bold text-gray-700">{item.title}</span>{record[item.key] && <span className="w-2 h-2 rounded-full bg-green-400 ml-auto" />}</div>
+                      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100"><span className={`w-6 h-6 rounded-md text-xs font-bold flex items-center justify-center text-white ${item.color}`}>{item.label}</span><span className="text-sm font-bold text-gray-700">{item.title}</span>{record[item.key] && <span className="w-2 h-2 rounded-full bg-green-400 ml-auto" />}</div>
                       <textarea value={record[item.key] || ""} onChange={e => updateSOAP(item.key, e.target.value)} placeholder={item.placeholder} rows={5} className="w-full px-3 py-2 text-sm text-gray-700 placeholder-gray-300 focus:outline-none resize-none leading-relaxed" />
                     </div>
                   ))}
@@ -1862,8 +1872,8 @@ function SessionContent() {
 
                 {/* ナビ */}
                 <div className="flex justify-between">
-                  <button onClick={() => setActiveTab("perio")} className="text-sm text-gray-400 hover:text-gray-600 font-bold">← P検・BOP</button>
-                  <button onClick={() => setActiveTab("dr_exam")} className="bg-orange-500 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-orange-600 shadow-md shadow-orange-200">🩺 Dr引継ぎ →</button>
+                  <button onClick={() => setActiveTab("perio")} className="text-base text-gray-400 hover:text-gray-600 font-bold">← P検・BOP</button>
+                  <button onClick={() => setActiveTab("dr_exam")} className="bg-orange-500 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-orange-600 shadow-md shadow-orange-200">🩺 Dr引継ぎ →</button>
                 </div>
               </div>
             )}
@@ -1875,7 +1885,7 @@ function SessionContent() {
                   <p className="text-xs font-bold text-orange-700">
                     🩺 Step 5: Dr診察 — 治療後のまとめ・A,P入力
                   </p>
-                  <p className="text-[10px] text-orange-500 mt-1">
+                  <p className="text-xs text-orange-500 mt-1">
                     患者さんに行った内容のまとめを音声で記録 → A(評価)・P(計画)に反映
                   </p>
                 </div>
@@ -1894,7 +1904,7 @@ function SessionContent() {
                     </div>
                   </div>
                   {perioSummary.count > 0 && (
-                    <div className="mt-2 flex gap-2 text-[10px]">
+                    <div className="mt-2 flex gap-2 text-xs">
                       <span className={`font-bold px-2 py-0.5 rounded ${perioSummary.bopRate > 30 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"}`}>BOP {perioSummary.bopRate}%</span>
                       <span className="font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">PPD≧4mm {perioSummary.d4pct}%</span>
                       <span className="font-bold px-2 py-0.5 rounded bg-gray-100 text-gray-600">{perioSummary.count}歯測定</span>
@@ -1903,7 +1913,7 @@ function SessionContent() {
                   {Object.keys(chartStats).length > 0 && (
                     <div className="mt-2 flex gap-1 flex-wrap">
                       {Object.entries(chartStats).map(([s, c]) => (
-                        <span key={s} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${TOOTH_STATUS[s]?.bg} ${TOOTH_STATUS[s]?.color} ${TOOTH_STATUS[s]?.border} border`}>{TOOTH_STATUS[s]?.label} {c}</span>
+                        <span key={s} className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${TOOTH_STATUS[s]?.bg} ${TOOTH_STATUS[s]?.color} ${TOOTH_STATUS[s]?.border} border`}>{TOOTH_STATUS[s]?.label} {c}</span>
                       ))}
                     </div>
                   )}
@@ -1913,13 +1923,13 @@ function SessionContent() {
                 <div className="bg-orange-50 rounded-xl border-2 border-orange-200 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-orange-700">🎤 Dr専用録音 → A,P欄自動入力</span>
-                    {stepTranscript && activeTab === "dr_exam" && <span className="text-[9px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">文字起こし済</span>}
+                    {stepTranscript && activeTab === "dr_exam" && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">文字起こし済</span>}
                   </div>
-                  <p className="text-[10px] text-orange-500 mb-3">患者さんへのフィードバックを話すだけでA(評価)・P(計画)に自動入力されます</p>
+                  <p className="text-xs text-orange-500 mb-3">患者さんへのフィードバックを話すだけでA(評価)・P(計画)に自動入力されます</p>
 
                   {stepTranscript && activeTab === "dr_exam" && (
                     <div className="bg-white rounded-lg p-3 mb-3 border border-orange-100">
-                      <p className="text-[9px] text-gray-400 font-bold mb-1">文字起こし結果</p>
+                      <p className="text-xs text-gray-400 font-bold mb-1">文字起こし結果</p>
                       <p className="text-xs text-gray-700 whitespace-pre-wrap">{stepTranscript}</p>
                     </div>
                   )}
@@ -2018,11 +2028,11 @@ function SessionContent() {
                 {/* 文字起こし（再利用） */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <div className="flex items-center gap-2"><span className="text-lg">🎙</span><h3 className="text-sm font-bold text-gray-800">音声記録</h3>{transcripts.length > 0 && <span className="text-[10px] font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{transcripts.length}件</span>}</div>
+                    <div className="flex items-center gap-2"><span className="text-lg">🎙</span><h3 className="text-sm font-bold text-gray-800">音声記録</h3>{transcripts.length > 0 && <span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{transcripts.length}件</span>}</div>
                     {transcripts.length > 0 && <button onClick={generateSOAPFromTranscripts} disabled={generatingSOAP} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-50 shadow-md shadow-purple-200">{generatingSOAP ? "⚙️ 生成中..." : "🤖 SOAP自動生成"}</button>}
                   </div>
                   {transcripts.length === 0 ? <div className="text-center py-6"><p className="text-sm text-gray-400">右上の「録音開始」でまとめを記録</p></div>
-                  : <div className="divide-y divide-gray-100 max-h-[200px] overflow-y-auto">{transcripts.map(e => (<div key={e.id} className="px-4 py-2"><div className="flex items-center gap-2 mb-1"><span className="text-[10px] text-sky-600 font-bold bg-sky-50 px-2 py-0.5 rounded-full">録音{e.recording_number}</span></div><p className="text-xs text-gray-600 whitespace-pre-wrap">{e.transcript_text}</p></div>))}</div>}
+                  : <div className="divide-y divide-gray-100 max-h-[200px] overflow-y-auto">{transcripts.map(e => (<div key={e.id} className="px-4 py-2"><div className="flex items-center gap-2 mb-1"><span className="text-xs text-sky-600 font-bold bg-sky-50 px-2 py-0.5 rounded-full">録音{e.recording_number}</span></div><p className="text-xs text-gray-600 whitespace-pre-wrap">{e.transcript_text}</p></div>))}</div>}
                 </div>
 
                 {/* AI プレビュー */}
@@ -2046,7 +2056,7 @@ function SessionContent() {
                 <div className="grid grid-cols-2 gap-3">
                   {[soapItems[2], soapItems[3]].map(item => (
                     <div key={item.key} className={`bg-white rounded-xl border ${item.borderColor} overflow-hidden`}>
-                      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100"><span className={`w-6 h-6 rounded-md text-[11px] font-bold flex items-center justify-center text-white ${item.color}`}>{item.label}</span><span className="text-sm font-bold text-gray-700">{item.title}</span>{record[item.key] && <span className="w-2 h-2 rounded-full bg-green-400 ml-auto" />}</div>
+                      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100"><span className={`w-6 h-6 rounded-md text-xs font-bold flex items-center justify-center text-white ${item.color}`}>{item.label}</span><span className="text-sm font-bold text-gray-700">{item.title}</span>{record[item.key] && <span className="w-2 h-2 rounded-full bg-green-400 ml-auto" />}</div>
                       <textarea value={record[item.key] || ""} onChange={e => updateSOAP(item.key, e.target.value)} placeholder={item.placeholder} rows={5} className="w-full px-3 py-2 text-sm text-gray-700 placeholder-gray-300 focus:outline-none resize-none leading-relaxed" />
                     </div>
                   ))}
@@ -2054,7 +2064,7 @@ function SessionContent() {
 
                 {/* ナビ */}
                 <div className="flex justify-between">
-                  <button onClick={() => setActiveTab("dh_record")} className="text-sm text-gray-400 hover:text-gray-600 font-bold">← DH記録</button>
+                  <button onClick={() => setActiveTab("dh_record")} className="text-base text-gray-400 hover:text-gray-600 font-bold">← DH記録</button>
                   <button onClick={() => setActiveTab("confirm")} className="bg-green-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-green-700 shadow-md shadow-green-200">確定画面へ →</button>
                 </div>
               </div>
@@ -2070,12 +2080,12 @@ function SessionContent() {
                 </div>
 
                 {/* SOAP最終確認 */}
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <h4 className="text-sm font-bold text-gray-900 mb-3">📋 SOAP最終確認</h4>
                   <div className="grid grid-cols-2 gap-3">
                     {soapItems.map(item => (
                       <div key={item.key} className={`bg-white rounded-xl border ${item.borderColor} overflow-hidden`}>
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100"><span className={`w-6 h-6 rounded-md text-[11px] font-bold flex items-center justify-center text-white ${item.color}`}>{item.label}</span><span className="text-sm font-bold text-gray-700">{item.title}</span>{record[item.key] && <span className="w-2 h-2 rounded-full bg-green-400 ml-auto" />}</div>
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100"><span className={`w-6 h-6 rounded-md text-xs font-bold flex items-center justify-center text-white ${item.color}`}>{item.label}</span><span className="text-sm font-bold text-gray-700">{item.title}</span>{record[item.key] && <span className="w-2 h-2 rounded-full bg-green-400 ml-auto" />}</div>
                         <textarea value={record[item.key] || ""} onChange={e => updateSOAP(item.key, e.target.value)} placeholder={item.placeholder} rows={3} className="w-full px-3 py-2 text-sm text-gray-700 placeholder-gray-300 focus:outline-none resize-none leading-relaxed" />
                       </div>
                     ))}
@@ -2083,17 +2093,17 @@ function SessionContent() {
                 </div>
 
                 {/* 算定情報 */}
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-bold text-gray-700">💊 算定内容</h3>
                     {billingTotal > 0 && <span className="text-sm font-bold text-sky-600 bg-sky-50 px-3 py-1 rounded-full">合計 {billingTotal.toLocaleString()}点</span>}
                   </div>
                   {billingItems.length === 0 ? <div className="text-center py-6"><p className="text-xs text-gray-400">診察完了後に自動算定されます</p></div>
                   : <div className="space-y-1">
-                    <div className="flex items-center px-2 py-1 text-[10px] text-gray-400 font-bold border-b border-gray-100"><span className="w-24">コード</span><span className="flex-1">項目名</span><span className="w-16 text-right">点数</span><span className="w-12 text-center">回数</span><span className="w-16 text-right">小計</span></div>
+                    <div className="flex items-center px-2 py-1 text-xs text-gray-400 font-bold border-b border-gray-100"><span className="w-24">コード</span><span className="flex-1">項目名</span><span className="w-16 text-right">点数</span><span className="w-12 text-center">回数</span><span className="w-16 text-right">小計</span></div>
                     {billingItems.map((item, idx) => (
                       <div key={idx} className="flex items-center px-2 py-1.5 rounded-lg hover:bg-gray-50 text-xs">
-                        <span className="w-24 text-gray-400 font-mono text-[10px]">{item.code}</span><span className="flex-1 text-gray-700 font-bold">{item.name}{item.tooth && <span className="text-[10px] text-gray-400 ml-1">({item.tooth})</span>}</span><span className="w-16 text-right text-gray-600">{item.points}</span>
+                        <span className="w-24 text-gray-400 font-mono text-xs">{item.code}</span><span className="flex-1 text-gray-700 font-bold">{item.name}{item.tooth && <span className="text-xs text-gray-400 ml-1">({item.tooth})</span>}</span><span className="w-16 text-right text-gray-600">{item.points}</span>
                         <span className="w-12 text-center text-gray-500">×{item.count}</span>
                         <span className="w-16 text-right font-bold text-gray-800">{(item.points * item.count).toLocaleString()}</span>
                       </div>
@@ -2107,7 +2117,7 @@ function SessionContent() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-bold text-blue-700">🤖 AI処方提案</h3>
-                      <p className="text-[10px] text-blue-500 mt-0.5">SOAP内容から適切な処方薬を提案します</p>
+                      <p className="text-xs text-blue-500 mt-0.5">SOAP内容から適切な処方薬を提案します</p>
                     </div>
                     <button onClick={async () => {
                       showMsg("🤖 処方提案を生成中...");
@@ -2156,7 +2166,7 @@ function SessionContent() {
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-sm font-bold text-green-700">💊 処方箋</h3>
-                        <p className="text-[10px] text-green-500 mt-0.5">
+                        <p className="text-xs text-green-500 mt-0.5">
                           {billingItems.filter(i => i.code.startsWith("DRUG-") || i.code.startsWith("MED-") || i.name.includes("錠") || i.name.includes("カプセル") || i.name.includes("うがい") || i.name.includes("軟膏")).length}品目の処方あり
                         </p>
                       </div>
@@ -2258,7 +2268,7 @@ ${drugItems.map((d, i) => {
                       {generatingPlan ? "⚙️ 生成中..." : "🤖 AI生成"}
                     </button>
                   </div>
-                  <p className="text-[10px] text-purple-500 mb-3">
+                  <p className="text-xs text-purple-500 mb-3">
                     SOAP・歯式・P検の全データからAIが治療計画書を自動生成します
                   </p>
 
@@ -2274,14 +2284,14 @@ ${drugItems.map((d, i) => {
                     <div className="space-y-3">
                       {/* サマリ */}
                       <div className="bg-white rounded-lg p-3 border border-purple-100">
-                        <p className="text-[9px] text-purple-400 font-bold mb-1">概要</p>
+                        <p className="text-xs text-purple-400 font-bold mb-1">概要</p>
                         <p className="text-sm text-gray-800">{treatmentPlan.summary}</p>
                       </div>
 
                       {/* 診断まとめ */}
                       {treatmentPlan.diagnosis_summary && (
                         <div className="bg-white rounded-lg p-3 border border-purple-100">
-                          <p className="text-[9px] text-purple-400 font-bold mb-1">診断まとめ</p>
+                          <p className="text-xs text-purple-400 font-bold mb-1">診断まとめ</p>
                           <p className="text-sm text-gray-800">{treatmentPlan.diagnosis_summary}</p>
                         </div>
                       )}
@@ -2289,11 +2299,11 @@ ${drugItems.map((d, i) => {
                       {/* 処置一覧 */}
                       {treatmentPlan.procedures && treatmentPlan.procedures.length > 0 && (
                         <div className="bg-white rounded-lg p-3 border border-purple-100">
-                          <p className="text-[9px] text-purple-400 font-bold mb-2">治療項目</p>
+                          <p className="text-xs text-purple-400 font-bold mb-2">治療項目</p>
                           <div className="space-y-2">
                             {treatmentPlan.procedures.map((p, i) => (
                               <div key={i} className="flex items-start gap-2">
-                                <span className={`flex-shrink-0 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white ${
+                                <span className={`flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center text-white ${
                                   p.priority === 1 ? "bg-red-500"
                                   : p.priority === 2 ? "bg-orange-500"
                                   : "bg-gray-400"
@@ -2302,14 +2312,14 @@ ${drugItems.map((d, i) => {
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs font-bold text-gray-800">{p.name}</span>
                                     {p.tooth && (
-                                      <span className="text-[9px] bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold">{p.tooth}</span>
+                                      <span className="text-xs bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold">{p.tooth}</span>
                                     )}
                                     {p.estimated_visits && (
-                                      <span className="text-[9px] text-gray-400">約{p.estimated_visits}回</span>
+                                      <span className="text-xs text-gray-400">約{p.estimated_visits}回</span>
                                     )}
                                   </div>
                                   {p.description && (
-                                    <p className="text-[10px] text-gray-500 mt-0.5">{p.description}</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">{p.description}</p>
                                   )}
                                 </div>
                               </div>
@@ -2322,13 +2332,13 @@ ${drugItems.map((d, i) => {
                       <div className="grid grid-cols-2 gap-2">
                         {treatmentPlan.estimated_total_visits && (
                           <div className="bg-white rounded-lg p-3 border border-purple-100 text-center">
-                            <p className="text-[9px] text-purple-400 font-bold">予想来院回数</p>
+                            <p className="text-xs text-purple-400 font-bold">予想来院回数</p>
                             <p className="text-xl font-bold text-purple-700">{treatmentPlan.estimated_total_visits}回</p>
                           </div>
                         )}
                         {treatmentPlan.estimated_duration_months && (
                           <div className="bg-white rounded-lg p-3 border border-purple-100 text-center">
-                            <p className="text-[9px] text-purple-400 font-bold">予想期間</p>
+                            <p className="text-xs text-purple-400 font-bold">予想期間</p>
                             <p className="text-xl font-bold text-purple-700">{treatmentPlan.estimated_duration_months}ヶ月</p>
                           </div>
                         )}
@@ -2337,7 +2347,7 @@ ${drugItems.map((d, i) => {
                       {/* 治療目標 */}
                       {treatmentPlan.goals && (
                         <div className="bg-white rounded-lg p-3 border border-purple-100">
-                          <p className="text-[9px] text-purple-400 font-bold mb-1">治療目標</p>
+                          <p className="text-xs text-purple-400 font-bold mb-1">治療目標</p>
                           <p className="text-sm text-gray-800">{treatmentPlan.goals}</p>
                         </div>
                       )}
@@ -2345,7 +2355,7 @@ ${drugItems.map((d, i) => {
                       {/* 患者さんへの説明 */}
                       {treatmentPlan.patient_instructions && (
                         <div className="bg-green-50 rounded-lg p-3 border border-green-200">
-                          <p className="text-[9px] text-green-600 font-bold mb-1">患者さんへの説明</p>
+                          <p className="text-xs text-green-600 font-bold mb-1">患者さんへの説明</p>
                           <p className="text-sm text-gray-800">{treatmentPlan.patient_instructions}</p>
                         </div>
                       )}
@@ -2391,7 +2401,7 @@ ${drugItems.map((d, i) => {
 
                 {/* ナビ + 確定ボタン */}
                 <div className="flex justify-between items-center">
-                  <button onClick={() => setActiveTab("dr_exam")} className="text-sm text-gray-400 hover:text-gray-600 font-bold">← Dr診察</button>
+                  <button onClick={() => setActiveTab("dr_exam")} className="text-base text-gray-400 hover:text-gray-600 font-bold">← Dr診察</button>
                   <div className="flex gap-2">
                     <button onClick={saveRecord} disabled={saving} className="bg-white border-2 border-sky-500 text-sky-600 px-4 py-3 rounded-xl text-sm font-bold hover:bg-sky-50 disabled:opacity-50">💾 一時保存</button>
                     <button onClick={completeSession} disabled={saving} className="bg-green-600 text-white px-8 py-3.5 rounded-xl text-sm font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">✅ 診察完了（カルテ確定・自動算定）</button>
@@ -2399,34 +2409,19 @@ ${drugItems.map((d, i) => {
                 </div>
               </div>
             )}
-          </div>
-
-          {/* 右サイドバー */}
-          <div className="w-[200px] flex-shrink-0 space-y-3">
-            <div className="bg-white rounded-xl border border-gray-200 p-3">
-              <h3 className="text-xs font-bold text-gray-400 mb-2">患者情報</h3>
-              <div className="space-y-1.5 text-xs"><div className="flex justify-between"><span className="text-gray-400">生年月日</span><span className="text-gray-700 font-bold">{patient.date_of_birth}</span></div><div className="flex justify-between"><span className="text-gray-400">電話</span><span className="text-gray-700 font-bold">{patient.phone}</span></div><div className="flex justify-between"><span className="text-gray-400">保険</span><span className="text-gray-700 font-bold">{patient.insurance_type} {patient.burden_ratio * 10}割</span></div></div>
-            </div>
-            {/* アレルギー情報 */}
-            {patient.allergies && Array.isArray(patient.allergies) && patient.allergies.length > 0 && !patient.allergies.includes("なし") && (
-              <div className="bg-red-50 rounded-xl border-2 border-red-300 p-3">
-                <h3 className="text-xs font-bold text-red-600 mb-1">⚠️ アレルギー</h3>
-                <div className="flex flex-wrap gap-1">
-                  {patient.allergies.map((a, i) => (
-                    <span key={i} className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-200">{a}</span>
-                  ))}
+          {/* 固定フッター: 一時保存 + 診察完了 */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-3">
+              {isReturning && previousVisit && previousVisit.nextPlan && (
+                <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-2">
+                  <span className="text-xs text-purple-500 font-bold">前回予定: </span>
+                  <span className="text-sm text-purple-800 font-bold">{previousVisit.nextPlan}</span>
                 </div>
-              </div>
-            )}
-            {isReturning && previousVisit && (
-              <div className="bg-purple-50 rounded-xl border border-purple-200 p-3">
-                <h3 className="text-xs font-bold text-purple-700 mb-2">📋 前回の情報</h3>
-                <div className="space-y-1.5 text-xs"><div><span className="text-purple-400">前回</span><p className="text-purple-800 font-bold">{formatDateJP(previousVisit.date)}</p></div>{previousVisit.soap_a && <div><span className="text-purple-400">診断</span><p className="text-purple-800 font-bold">{previousVisit.soap_a}</p></div>}{previousVisit.nextPlan && <div><span className="text-purple-400">次回予定</span><p className="text-purple-800 font-bold">{previousVisit.nextPlan}</p></div>}</div>
-              </div>
-            )}
-            <div className="space-y-2">
-              <button onClick={saveRecord} disabled={saving} className="w-full bg-white border-2 border-sky-500 text-sky-600 py-3 rounded-xl text-sm font-bold hover:bg-sky-50 disabled:opacity-50">💾 一時保存</button>
-              <button onClick={completeSession} disabled={saving} className="w-full bg-green-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">✅ 診察完了（カルテ確定）</button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={saveRecord} disabled={saving} className="bg-white border-2 border-sky-500 text-sky-600 px-6 py-3 rounded-xl text-base font-bold hover:bg-sky-50 disabled:opacity-50">💾 一時保存</button>
+              <button onClick={completeSession} disabled={saving} className="bg-green-600 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">✅ 診察完了（カルテ確定）</button>
             </div>
           </div>
         </div>
