@@ -296,6 +296,7 @@ export default function PatientDetailPage() {
   const [cm, setCM] = useState<CM>("status");
   const [sel, setSel] = useState<string | null>(null);
   const [es, setES] = useState(false);
+  const [expandedVisitDate, setExpandedVisitDate] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -875,40 +876,109 @@ export default function PatientDetailPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             {th.length === 0 ? (
               <E t="歯式の変遷データはまだありません" />
-            ) : (
-              <div className="border-l-2 border-sky-200 ml-3 pl-5 space-y-4">
-                {th.map((h) => (
-                  <div key={h.id} className="relative">
-                    <div className="absolute -left-[27px] top-1 w-3 h-3 rounded-full bg-sky-500 border-2 border-white"></div>
-                    <div className="text-xs font-bold text-sky-600 mb-0.5">{fd(h.created_at)}</div>
-                    <div className="text-sm">
-                      <span className="font-bold text-gray-700">
-                        #{h.tooth_number}（{tl(h.tooth_number)}）
-                      </span>
-                      {h.change_type === "status_change" && (
-                        <span className="ml-2">
-                          {TS[h.previous_status || ""]?.label} →{" "}
-                          <span className="font-bold text-sky-700">
-                            {TS[h.new_status || ""]?.label}
-                          </span>
-                        </span>
-                      )}
-                      {h.change_type === "perio_update" && (
-                        <span className="ml-2 text-teal-600">
-                          P検 — 頬[{h.pocket_buccal?.join(",") || ""}] 舌[
-                          {h.pocket_lingual?.join(",") || ""}]{h.bop && " BOP(+)"}
-                        </span>
-                      )}
-                      {h.change_type === "baseline" && (
-                        <span className="ml-2 text-amber-600">
-                          ベースライン → {TS[h.new_status || ""]?.label}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            ) : (() => {
+              // 診察日ごとにグループ化
+              const grouped: Record<string, ToothHistoryEntry[]> = {};
+              th.forEach(h => {
+                const date = h.created_at.split("T")[0];
+                if (!grouped[date]) grouped[date] = [];
+                grouped[date].push(h);
+              });
+              const dates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+              return (
+                <div className="space-y-3">
+                  {dates.map(date => {
+                    const entries = grouped[date];
+                    const statusChanges = entries.filter(e => e.change_type === "status_change" || e.change_type === "baseline");
+                    const perioUpdates = entries.filter(e => e.change_type === "perio_update");
+                    const isExpanded = expandedVisitDate === date;
+                    // ユニークな歯番号を取得
+                    const affectedTeeth = Array.from(new Set(statusChanges.map(e => e.tooth_number)));
+                    const perioTeeth = Array.from(new Set(perioUpdates.map(e => e.tooth_number)));
+                    return (
+                      <div key={date} className="border border-gray-200 rounded-xl overflow-hidden">
+                        <button onClick={() => setExpandedVisitDate(isExpanded ? null : date)}
+                          className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full bg-sky-500" />
+                            <span className="text-sm font-bold text-gray-800">{new Date(date).toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" })}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {statusChanges.length > 0 && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">🦷 歯式変更 {affectedTeeth.length}歯</span>}
+                            {perioUpdates.length > 0 && <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full font-bold">📊 P検 {perioTeeth.length}歯</span>}
+                            <span className="text-gray-400 text-sm">{isExpanded ? "▲" : "▼"}</span>
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="p-4 space-y-4">
+                            {/* 歯式変更 */}
+                            {statusChanges.length > 0 && (
+                              <div>
+                                <p className="text-xs font-bold text-orange-600 mb-2">🦷 歯式チャート変更</p>
+                                <div className="overflow-x-auto">
+                                  <table className="text-xs border-collapse">
+                                    <tbody>
+                                      <tr>
+                                        {UR.map(t => {
+                                          const e = statusChanges.find(s => s.tooth_number === t);
+                                          return <td key={t} className="text-center px-[2px] py-1"><div className={`w-8 h-8 rounded border flex flex-col items-center justify-center text-[9px] font-bold ${e ? "bg-orange-50 border-orange-300" : "bg-gray-50 border-gray-200 text-gray-300"}`}><span>{t}</span>{e && <span className="text-orange-700">{TS[e.new_status || ""]?.sl || ""}</span>}</div></td>;
+                                        })}
+                                        <td className="px-1" />
+                                        {UL.map(t => {
+                                          const e = statusChanges.find(s => s.tooth_number === t);
+                                          return <td key={t} className="text-center px-[2px] py-1"><div className={`w-8 h-8 rounded border flex flex-col items-center justify-center text-[9px] font-bold ${e ? "bg-orange-50 border-orange-300" : "bg-gray-50 border-gray-200 text-gray-300"}`}><span>{t}</span>{e && <span className="text-orange-700">{TS[e.new_status || ""]?.sl || ""}</span>}</div></td>;
+                                        })}
+                                      </tr>
+                                      <tr>
+                                        {LR.map(t => {
+                                          const e = statusChanges.find(s => s.tooth_number === t);
+                                          return <td key={t} className="text-center px-[2px] py-1"><div className={`w-8 h-8 rounded border flex flex-col items-center justify-center text-[9px] font-bold ${e ? "bg-orange-50 border-orange-300" : "bg-gray-50 border-gray-200 text-gray-300"}`}><span>{t}</span>{e && <span className="text-orange-700">{TS[e.new_status || ""]?.sl || ""}</span>}</div></td>;
+                                        })}
+                                        <td className="px-1" />
+                                        {LL.map(t => {
+                                          const e = statusChanges.find(s => s.tooth_number === t);
+                                          return <td key={t} className="text-center px-[2px] py-1"><div className={`w-8 h-8 rounded border flex flex-col items-center justify-center text-[9px] font-bold ${e ? "bg-orange-50 border-orange-300" : "bg-gray-50 border-gray-200 text-gray-300"}`}><span>{t}</span>{e && <span className="text-orange-700">{TS[e.new_status || ""]?.sl || ""}</span>}</div></td>;
+                                        })}
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </div>
+                                <div className="mt-2 space-y-1">
+                                  {statusChanges.map(e => (
+                                    <div key={e.id} className="text-xs text-gray-600 flex items-center gap-2">
+                                      <span className="font-bold text-orange-700">#{e.tooth_number}</span>
+                                      <span>{TS[e.previous_status || ""]?.label || "—"} → <span className="font-bold text-sky-700">{TS[e.new_status || ""]?.label}</span></span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {/* P検 */}
+                            {perioUpdates.length > 0 && (
+                              <div>
+                                <p className="text-xs font-bold text-teal-600 mb-2">📊 歯周検査結果</p>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                  {perioUpdates.map(e => (
+                                    <div key={e.id} className="border border-teal-200 rounded-lg p-2 bg-teal-50">
+                                      <div className="text-xs font-bold text-teal-700 mb-1">#{e.tooth_number}</div>
+                                      <div className="text-[10px] text-gray-600">
+                                        {e.pocket_buccal && <div>頬: [{e.pocket_buccal.join(",")}]</div>}
+                                        {e.pocket_lingual && <div>舌: [{e.pocket_lingual.join(",")}]</div>}
+                                        {e.bop && <span className="text-red-500 font-bold">BOP(+)</span>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
