@@ -231,6 +231,7 @@ export default function ReceiptCheckPage() {
   const [rulesLoaded, setRulesLoaded] = useState(false);
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
   const [recheckingId, setRecheckingId] = useState<string | null>(null);
+  const [henreiItems, setHenreiItems] = useState<{ patient_name: string; ym: string; reason: string; points: string }[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -649,6 +650,72 @@ export default function ReceiptCheckPage() {
                           🔄 再チェック
                         </button>
                       </div>
+
+                      {/* ★ 直接修正パネル */}
+                      {billing && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-[10px] text-gray-400 font-bold mb-2">🔧 この画面で直接修正</p>
+                          {/* 算定項目の削除 */}
+                          <div className="bg-white rounded-lg border border-gray-200 p-2 mb-2">
+                            <p className="text-[10px] text-gray-500 font-bold mb-1">算定項目（クリックで削除）</p>
+                            <div className="flex flex-wrap gap-1">
+                              {(billing.procedures_detail || []).map((proc: { code: string; name: string; points: number; count: number }, pi: number) => (
+                                <button key={pi} onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!confirm(`「${proc.name}」(${proc.points}点)を削除しますか？`)) return;
+                                  const newProcs = billing.procedures_detail.filter((_: unknown, i: number) => i !== pi);
+                                  const newTotal = newProcs.reduce((s: number, p: { points: number; count: number }) => s + p.points * p.count, 0);
+                                  await supabase.from("billing").update({
+                                    procedures_detail: newProcs,
+                                    total_points: newTotal,
+                                    patient_burden: Math.round(newTotal * 10 * billing.burden_ratio),
+                                    insurance_claim: Math.round(newTotal * 10 * (1 - billing.burden_ratio)),
+                                  }).eq("id", billing.id);
+                                  setBillings(prev => prev.map(b => b.id === billing.id ? { ...b, procedures_detail: newProcs, total_points: newTotal, patient_burden: Math.round(newTotal * 10 * billing.burden_ratio), insurance_claim: Math.round(newTotal * 10 * (1 - billing.burden_ratio)) } : b));
+                                  recheckOne(r.billing_id);
+                                }} className="text-[10px] bg-gray-50 border border-gray-200 rounded px-2 py-1 hover:bg-red-50 hover:border-red-300 hover:text-red-600 transition-colors"
+                                  title="クリックで削除">
+                                  {proc.name} ({proc.points}点) ✕
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {/* 傷病名クイック追加 */}
+                          {r.errors.some(e => e.includes("傷病名")) && (
+                            <div className="bg-white rounded-lg border border-gray-200 p-2">
+                              <p className="text-[10px] text-gray-500 font-bold mb-1">傷病名クイック追加</p>
+                              <div className="flex flex-wrap gap-1">
+                                {[
+                                  { name: "う蝕(C2)", code: "K022" },
+                                  { name: "歯髄炎(Pul)", code: "K040" },
+                                  { name: "根尖性歯周炎(Per)", code: "K045" },
+                                  { name: "歯周炎(P)", code: "K051" },
+                                  { name: "Hys", code: "K120" },
+                                  { name: "智歯周囲炎", code: "K081" },
+                                ].map(d => (
+                                  <button key={d.code} onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const tooth = prompt(`${d.name}の対象歯番号を入力（例: 46）`);
+                                    if (!tooth) return;
+                                    await supabase.from("patient_diagnoses").insert({
+                                      patient_id: r.patient_id,
+                                      diagnosis_code: d.code,
+                                      diagnosis_name: d.name,
+                                      tooth_number: tooth,
+                                      start_date: new Date().toISOString().split("T")[0],
+                                      outcome: "ongoing",
+                                      is_primary: true,
+                                    });
+                                    recheckOne(r.billing_id);
+                                  }} className="text-[10px] bg-blue-50 border border-blue-200 rounded px-2 py-1 hover:bg-blue-100 text-blue-700 font-bold">
+                                    + {d.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -669,6 +736,72 @@ export default function ReceiptCheckPage() {
             </Link>
           </div>
         )}
+
+        {/* ===== 返戻管理 ===== */}
+        <div className="mt-8 bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-gray-800">📨 返戻管理</h2>
+            <label className="cursor-pointer">
+              <span className="text-xs font-bold bg-gray-100 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-200 inline-block border border-gray-200">
+                📤 返戻UKEファイルを読み込む
+              </span>
+              <input type="file" accept=".uke,.UKE,.csv,.txt" className="hidden" onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const text = await file.text();
+                const lines = text.split("\n").filter(l => l.trim());
+                const henreiList: { patient_name: string; ym: string; reason: string; points: string }[] = [];
+                for (const line of lines) {
+                  // HRレコードまたは簡易CSV解析
+                  if (line.startsWith("HR,") || line.includes("返戻")) {
+                    const parts = line.split(",");
+                    henreiList.push({
+                      patient_name: parts[3] || parts[1] || "不明",
+                      ym: parts[2] || "",
+                      reason: parts[5] || parts[4] || "理由不明",
+                      points: parts[6] || parts[3] || "0",
+                    });
+                  }
+                }
+                if (henreiList.length === 0) {
+                  // フリーテキスト解析
+                  henreiList.push({ patient_name: "ファイル読込済", ym: "", reason: `${lines.length}行のデータ。手動確認が必要`, points: "" });
+                }
+                setHenreiItems(henreiList);
+              }} />
+            </label>
+          </div>
+          {henreiItems.length === 0 ? (
+            <div className="text-center py-6">
+              <p className="text-xs text-gray-400">返戻UKEファイルをアップロードすると、返戻理由と対象患者が表示されます</p>
+              <p className="text-[10px] text-gray-300 mt-1">社保: 支払基金サイト → 返戻ファイルDL / 国保: 国保連合会ポータル → 返戻ファイルDL</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {henreiItems.map((h, i) => (
+                <div key={i} className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                  <span className="text-red-500 text-lg">📨</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-gray-800">{h.patient_name}</p>
+                    <p className="text-[10px] text-gray-500">{h.ym && `診療年月: ${h.ym} ・ `}{h.points && `${h.points}点 ・ `}{h.reason}</p>
+                  </div>
+                  <span className="text-[10px] bg-red-100 text-red-700 px-2 py-1 rounded font-bold">要再請求</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ===== オンライン請求ガイド ===== */}
+        <div className="mt-6 bg-sky-50 rounded-xl border border-sky-200 p-5 mb-8">
+          <h2 className="text-sm font-bold text-sky-800 mb-3">🌐 オンライン請求手順</h2>
+          <div className="space-y-2 text-xs text-gray-600">
+            <div className="flex gap-2"><span className="bg-sky-200 text-sky-800 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold flex-shrink-0">1</span><p>会計画面「📄 レセ電」でUKEファイルをダウンロード</p></div>
+            <div className="flex gap-2"><span className="bg-sky-200 text-sky-800 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold flex-shrink-0">2</span><p><strong>社保</strong>: <a href="https://www.ssk.or.jp/" target="_blank" className="text-sky-600 underline">支払基金オンラインシステム</a>にログイン → 請求ファイル送信</p></div>
+            <div className="flex gap-2"><span className="bg-sky-200 text-sky-800 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold flex-shrink-0">3</span><p><strong>国保</strong>: <a href="https://www.kokuho.or.jp/" target="_blank" className="text-sky-600 underline">国保連合会ポータル</a>にログイン → 請求ファイル送信</p></div>
+            <div className="flex gap-2"><span className="bg-sky-200 text-sky-800 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold flex-shrink-0">4</span><p>送信後、返戻ファイルが届いたら上の「返戻管理」で読み込み → 修正 → 再請求</p></div>
+          </div>
+        </div>
       </main>
     </div>
   );
