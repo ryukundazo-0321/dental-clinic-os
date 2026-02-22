@@ -10,11 +10,11 @@ type BillingRow = {
   procedures_detail: { code: string; name: string; points: number; category: string; count: number; note: string; tooth_numbers?: string[] }[];
   ai_check_warnings: string[];
   document_provided: boolean;
-  claim_status: string; payment_status: string; created_at: string;
+  claim_status: string; payment_status: string; created_at: string; notes?: string;
   patients: { name_kanji: string; name_kana: string; insurance_type: string; burden_ratio: number } | null;
 };
 
-type MainTab = "billing" | "unpaid_all" | "receipt";
+type MainTab = "billing" | "unpaid_all" | "receipt" | "estimate";
 
 function getTodayJST(): string {
   const now = new Date();
@@ -29,6 +29,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<BillingRow | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [showEstimate, setShowEstimate] = useState(false);
   const [paidPatientInfo, setPaidPatientInfo] = useState<{ patientId: string; name: string } | null>(null);
   const [selectedDate, setSelectedDate] = useState(getTodayJST);
   const [receiptMonth, setReceiptMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
@@ -233,9 +234,32 @@ export default function BillingPage() {
               <div><p className="text-[10px] text-gray-400">保険請求</p><p className="text-lg font-bold text-sky-600">¥{bill.insurance_claim.toLocaleString()}</p></div>
             </div>
             {bill.payment_status === "unpaid" ? (
-              <button onClick={() => markPaid(bill)} disabled={processing} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">
-                {processing ? "処理中..." : "💰 精算完了"}
-              </button>
+              <div className="space-y-2">
+                <button onClick={() => markPaid(bill)} disabled={processing} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">
+                  {processing ? "処理中..." : "💰 精算完了（一括）"}
+                </button>
+                {/* 分割払い */}
+                <button onClick={async () => {
+                  const amountStr = prompt(`分割払い: 本日のお支払い額を入力してください\n（残高: ¥${bill.patient_burden.toLocaleString()}）`, String(Math.ceil(bill.patient_burden / 2)));
+                  if (!amountStr) return;
+                  const amount = parseInt(amountStr);
+                  if (isNaN(amount) || amount <= 0) { alert("正しい金額を入力してください"); return; }
+                  if (amount >= bill.patient_burden) { markPaid(bill); return; }
+                  const remaining = bill.patient_burden - amount;
+                  await supabase.from("billing").update({
+                    notes: `分割払い: ¥${amount.toLocaleString()} 入金済 / 残額 ¥${remaining.toLocaleString()} (${new Date().toLocaleDateString("ja-JP")})`,
+                  }).eq("id", bill.id);
+                  alert(`¥${amount.toLocaleString()} を入金しました。\n残額: ¥${remaining.toLocaleString()}`);
+                  loadBillings();
+                }} disabled={processing} className="w-full bg-amber-50 text-amber-700 border-2 border-amber-200 py-3 rounded-xl font-bold text-sm hover:bg-amber-100 disabled:opacity-50">
+                  💳 分割払い
+                </button>
+                {bill.notes && bill.notes.includes("分割") && (
+                  <div className="bg-amber-50 rounded-lg px-3 py-2 border border-amber-200">
+                    <p className="text-[10px] text-amber-700 font-bold">{bill.notes}</p>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <div className="text-center py-3 bg-green-100 rounded-xl"><p className="text-green-700 font-bold">✅ 精算済み</p></div>
@@ -269,6 +293,7 @@ export default function BillingPage() {
             { key: "billing" as MainTab, label: "💰 日別会計" },
             { key: "unpaid_all" as MainTab, label: "🔴 全未会計" },
             { key: "receipt" as MainTab, label: "📄 レセ電ダウンロード" },
+            { key: "estimate" as MainTab, label: "💎 自費見積" },
           ]).map(t => (
             <button key={t.key} onClick={() => { setMainTab(t.key); setSelected(null); }}
               className={`px-5 py-2.5 text-sm font-bold border-b-2 transition-colors ${mainTab === t.key ? "border-sky-500 text-sky-600" : "border-transparent text-gray-400 hover:text-gray-600"}`}>
@@ -415,6 +440,95 @@ export default function BillingPage() {
                   <p>• 対象: 指定月の「精算済み」会計データのみ</p>
                   <p>• 患者の保険証情報は電子カルテの「🏥 保険証情報」で登録してください</p>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 💎 自費見積タブ ===== */}
+        {mainTab === "estimate" && (
+          <div className="max-w-2xl mx-auto py-6">
+            <div className="bg-white rounded-2xl border border-gray-200 p-6">
+              <div className="text-center mb-6">
+                <p className="text-4xl mb-2">💎</p>
+                <h2 className="text-xl font-bold text-gray-900">自費見積書作成</h2>
+                <p className="text-sm text-gray-400">患者に提示する自費治療の見積書を作成・印刷</p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs text-gray-400 block mb-1">患者名</label>
+                    <input type="text" id="est_name" placeholder="山田 太郎" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
+                  <div><label className="text-xs text-gray-400 block mb-1">作成日</label>
+                    <input type="date" id="est_date" defaultValue={new Date().toISOString().split("T")[0]} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">見積項目</label>
+                  <p className="text-[10px] text-gray-300 mb-2">よく使う自費メニューを選択、または手動入力</p>
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {[
+                      { name: "セラミックインレー", price: 55000 },
+                      { name: "ジルコニアクラウン", price: 120000 },
+                      { name: "e.maxクラウン", price: 100000 },
+                      { name: "ゴールドインレー", price: 70000 },
+                      { name: "ゴールドクラウン", price: 110000 },
+                      { name: "CAD/CAMインレー（自費）", price: 40000 },
+                      { name: "インプラント（1本）", price: 350000 },
+                      { name: "ホワイトニング（上下）", price: 35000 },
+                      { name: "マウスピース矯正", price: 400000 },
+                      { name: "ラミネートベニア", price: 90000 },
+                    ].map(item => (
+                      <button key={item.name} onClick={() => {
+                        const list = document.getElementById("est_items") as HTMLTextAreaElement;
+                        if (list) list.value += `${item.name}\t¥${item.price.toLocaleString()}\n`;
+                      }} className="text-[10px] bg-purple-50 border border-purple-200 text-purple-700 px-2 py-1 rounded font-bold hover:bg-purple-100">
+                        + {item.name} ¥{item.price.toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea id="est_items" rows={6} placeholder={"セラミックインレー\t¥55,000\nジルコニアクラウン\t¥120,000"} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 font-mono" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs text-gray-400 block mb-1">有効期限</label>
+                    <input type="text" id="est_expiry" defaultValue="発行日より1ヶ月" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
+                  <div><label className="text-xs text-gray-400 block mb-1">備考</label>
+                    <input type="text" id="est_note" placeholder="分割払い可" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
+                </div>
+
+                <button onClick={() => {
+                  const name = (document.getElementById("est_name") as HTMLInputElement)?.value || "患者";
+                  const date = (document.getElementById("est_date") as HTMLInputElement)?.value || "";
+                  const items = (document.getElementById("est_items") as HTMLTextAreaElement)?.value || "";
+                  const expiry = (document.getElementById("est_expiry") as HTMLInputElement)?.value || "";
+                  const note = (document.getElementById("est_note") as HTMLInputElement)?.value || "";
+                  const rows = items.split("\n").filter(l => l.trim()).map(l => {
+                    const parts = l.split("\t");
+                    return { name: parts[0]?.trim() || "", price: parts[1]?.trim() || "¥0" };
+                  });
+                  const total = rows.reduce((s, r) => s + parseInt(r.price.replace(/[¥,]/g, "")) || 0, 0);
+                  const dateLabel = date ? new Date(date + "T00:00:00").toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" }) : "";
+                  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>自費見積書</title>
+<style>@media print{.no-print{display:none!important}@page{size:A4;margin:15mm}}body{font-family:"Yu Gothic","Hiragino Kaku Gothic ProN",sans-serif;max-width:650px;margin:0 auto;padding:20px;color:#333}h1{text-align:center;font-size:22px;border-bottom:3px double #333;padding-bottom:8px;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin:15px 0}td,th{border:1px solid #999;padding:8px 12px;font-size:13px}th{background:#f8f8f8;text-align:left}.total{font-size:18px;font-weight:bold;color:#1a56db;text-align:right}.info{display:flex;justify-content:space-between;margin-bottom:15px;font-size:12px}.sig{margin-top:30px;text-align:right;font-size:11px;color:#666}</style></head><body>
+<div class="no-print" style="text-align:center;margin-bottom:15px"><button onclick="window.print()" style="padding:10px 30px;font-size:14px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer">🖨️ 印刷する</button></div>
+<h1>見 積 書</h1>
+<div class="info"><div><strong>${name}</strong> 様</div><div>作成日: ${dateLabel}</div></div>
+<p style="font-size:12px;color:#666">以下の通りお見積もり申し上げます。</p>
+<table><tr><th style="width:60%">項目</th><th style="text-align:right">金額（税込）</th></tr>
+${rows.map(r => `<tr><td>${r.name}</td><td style="text-align:right">${r.price}</td></tr>`).join("")}
+<tr style="border-top:2px solid #333"><td><strong>合計金額</strong></td><td class="total">¥${total.toLocaleString()}</td></tr>
+</table>
+${note ? `<p style="font-size:11px;color:#666">備考: ${note}</p>` : ""}
+<p style="font-size:11px;color:#666">有効期限: ${expiry}</p>
+<p style="font-size:10px;color:#999;margin-top:10px">※上記は概算です。治療内容により変動する場合があります。<br>※自費診療には別途消費税がかかります。</p>
+<div class="sig"><p>医療機関名: ______________________</p><p style="margin-top:8px">歯科医師: ______________________ 印</p></div>
+</body></html>`;
+                  const pw = window.open("", "_blank");
+                  if (pw) { pw.document.write(html); pw.document.close(); }
+                }} className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-purple-700 shadow-lg shadow-purple-200">
+                  🖨️ 見積書を印刷
+                </button>
               </div>
             </div>
           </div>
