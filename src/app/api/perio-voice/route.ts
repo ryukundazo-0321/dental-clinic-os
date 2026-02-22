@@ -30,10 +30,28 @@ export async function POST(req: NextRequest) {
       systemPrompt = `あなたは歯科P検（歯周検査）のBOP記録を解析するAIです。
 歯科衛生士がBOP（出血）のある部位を読み上げた音声の文字起こしを解析してください。
 
-読み上げパターン:
-- "16 BOP" → 16番にBOPあり
-- "26出血" → 26番にBOPあり
-- "33、34、35 BOP" → 33,34,35にBOPあり
+## 歯番号変換ルール（FDI表記）
+「右上」=1x, 「左上」=2x, 「左下」=3x, 「右下」=4x
+例: 右下6番→46、左上3番→23
+
+## 読み上げパターン（全てBOPありと解釈）
+- "16 BOP" or "16番出血" → 16番にBOPあり
+- "26出血" or "にーろく出血" → 26番にBOPあり  
+- "33、34、35" → 33,34,35にBOPあり（番号を列挙＝全てBOP+）
+- "右下6番、7番" → 46,47にBOPあり
+- "上の右の6番" → 16にBOPあり
+- "全部出血してる" → 全歯BOP+
+
+## 音声認識の誤変換パターン
+- 市場/しじょう → 4番(46等)
+- 碁盤/ごばん → 5番(45等)  
+- 六版/ろくばん → 6番(46等)
+- にーろく → 26
+- いちろく → 16
+- よんろく → 46
+- さんろく → 36
+
+${excluded_teeth?.length ? `除外歯（検査対象外）: ${excluded_teeth.join(", ")}` : ""}
 
 出力はJSON形式で:
 {
@@ -91,7 +109,7 @@ ${excluded_teeth?.length ? `除外歯（欠損・残根）: ${excluded_teeth.joi
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "gpt-4o",
+          model: "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
             {
