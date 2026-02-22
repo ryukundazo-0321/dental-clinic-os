@@ -343,6 +343,14 @@ export default function ReservationManagePage() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowDailySummary(true)} className="bg-gray-100 text-gray-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-200">📊 日計表</button>
+            <button onClick={async () => {
+              const res = await fetch("/api/reminder");
+              const data = await res.json();
+              if (data.success) {
+                const msg = `📩 明日(${data.date})のリマインド対象: ${data.total}件\n\n📱 電話あり: ${data.summary.with_phone}件\n📧 メールあり: ${data.summary.with_email}件\n⚠ 連絡先なし: ${data.summary.no_contact}件\n\n${data.reminders.slice(0, 5).map((r: { patient_name: string; time: string }) => `  ${r.time} ${r.patient_name}`).join("\n")}${data.total > 5 ? `\n  ...他${data.total - 5}件` : ""}`;
+                alert(msg);
+              } else { alert("❌ " + (data.error || "取得失敗")); }
+            }} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-100">📩 リマインド</button>
             <button onClick={() => setShowAddModal(true)} className="bg-sky-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-sky-700">＋ 予約追加</button>
           </div>
         </div>
