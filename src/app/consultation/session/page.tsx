@@ -307,7 +307,7 @@ function SessionContent() {
     const mimeType = blob.type || "audio/wav"; let fileName = "recording.wav";
     if (mimeType.includes("webm")) fileName = "recording.webm"; else if (mimeType.includes("mp4") || mimeType.includes("m4a")) fileName = "recording.m4a"; else if (mimeType.includes("ogg")) fileName = "recording.ogg";
     const whisperFd = new FormData(); whisperFd.append("file", blob, fileName); whisperFd.append("model", "whisper-1"); whisperFd.append("language", "ja");
-    whisperFd.append("prompt", "歯科診療所での医師と患者の会話。「右下6番、C2ですね。CR充填しましょう。浸麻します。」「痛みはどうですか？」「冷たいものがしみます。」う蝕 FMC CR充填 抜髄 根管治療 SC SRP インレー 印象 右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番");
+    whisperFd.append("prompt", "歯科診療所での医師・衛生士と患者の会話。「右下6番、C2ですね。CR充填しましょう。浸麻します。」「痛みはどうですか？」「冷たいものがしみます。」う蝕 C1 C2 C3 C4 FMC CAD/CAM冠 CR充填 インレー 抜髄 根管治療 感根治 根充 TEK SC SRP PMTC TBI P検 BOP 印象 咬合採得 形成 装着 ロキソニン フロモックス カロナール 右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番 歯周炎 歯髄炎 根尖性歯周炎");
     whisperFd.append("temperature", "0");
     const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: whisperFd });
     if (!whisperRes.ok) { console.error("Whisper error:", whisperRes.status); return ""; }
