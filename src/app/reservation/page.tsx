@@ -35,6 +35,7 @@ type TreatmentSummary = {
   } | null;
   nextPlan: string;
   activeTeeth: string[];
+  treatmentPlanSummary?: string;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
@@ -252,7 +253,21 @@ export default function ReservationManagePage() {
       lastVisit = { date: lastApt.scheduled_at, soap_p: soapP, soap_a: soapA, procedures };
     }
 
-    return { diagnoses, lastVisit, nextPlan, activeTeeth };
+    // (c) 治療計画書を取得
+    let treatmentPlanSummary = "";
+    const { data: tp } = await supabase
+      .from("treatment_plans")
+      .select("summary, procedures, estimated_total_visits, estimated_duration_months")
+      .eq("patient_id", patientId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    if (tp) {
+      const procs = (tp.procedures as { name: string; tooth?: string }[] || []).map(p => `${p.name}${p.tooth ? `(${p.tooth})` : ""}`).join("、");
+      treatmentPlanSummary = `${tp.summary || ""}\n処置: ${procs}\n予定: ${tp.estimated_total_visits || "?"}回 / ${tp.estimated_duration_months || "?"}ヶ月`;
+    }
+
+    return { diagnoses, lastVisit, nextPlan, activeTeeth, treatmentPlanSummary };
   }
 
   // ===== 手動予約追加 =====
@@ -662,6 +677,14 @@ export default function ReservationManagePage() {
                         <div className="border-t border-gray-100 pt-2">
                           <p className="text-[10px] font-bold text-gray-400 mb-1">次回予定</p>
                           <p className="text-xs font-bold text-purple-700">{treatmentSummary.nextPlan}</p>
+                        </div>
+                      )}
+
+                      {/* 治療計画書 */}
+                      {treatmentSummary.treatmentPlanSummary && (
+                        <div className="border-t border-gray-100 pt-2">
+                          <p className="text-[10px] font-bold text-gray-400 mb-1">📋 治療計画</p>
+                          <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">{treatmentSummary.treatmentPlanSummary}</p>
                         </div>
                       )}
                     </div>
