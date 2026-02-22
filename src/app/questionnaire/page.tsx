@@ -82,6 +82,15 @@ function QuestionnaireContent() {
   const [addressLoading, setAddressLoading] = useState(false);
   const [formPage, setFormPage] = useState(1);
 
+  // ★ 患者ID・PIN設定用
+  const [patientNumber_assigned, setPatientNumber_assigned] = useState("");
+  const [patientIdForSetup, setPatientIdForSetup] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinDone, setPinDone] = useState(false);
+
   const [form, setForm] = useState({
     sex: "",
     postal_code: "",
@@ -219,8 +228,38 @@ function QuestionnaireContent() {
       await supabase.from("patients").update(patientUpdate).eq("id", apt.patient_id);
     }
 
+    // ★ 患者ID自動発番（未設定の場合）
+    let assignedPatientNumber = "";
+    const { data: existingPat } = await supabase.from("patients").select("patient_number").eq("id", apt.patient_id).single();
+    if (!existingPat?.patient_number) {
+      // 最大番号を取得して+1
+      const { data: maxRow } = await supabase.from("patients").select("patient_number").not("patient_number", "is", null).order("patient_number", { ascending: false }).limit(1).single();
+      let nextNum = 1;
+      if (maxRow?.patient_number) {
+        const m = maxRow.patient_number.match(/(\d+)/);
+        if (m) nextNum = parseInt(m[1]) + 1;
+      }
+      assignedPatientNumber = `P-${String(nextNum).padStart(5, "0")}`;
+      await supabase.from("patients").update({ patient_number: assignedPatientNumber }).eq("id", apt.patient_id);
+    } else {
+      assignedPatientNumber = existingPat.patient_number;
+    }
+    setPatientNumber_assigned(assignedPatientNumber);
+    setPatientIdForSetup(apt.patient_id);
+
     setSaving(false);
     setStep("complete");
+  }
+
+  // ★ PIN設定
+  async function setupPin() {
+    if (newPin.length < 4) { setPinError("4桁以上で設定してください"); return; }
+    if (newPin !== confirmPin) { setPinError("PINが一致しません"); return; }
+    setPinSaving(true);
+    setPinError("");
+    await supabase.from("patients").update({ pin: newPin }).eq("id", patientIdForSetup);
+    setPinDone(true);
+    setPinSaving(false);
   }
 
   const btnSelected = "bg-sky-600 text-white shadow-sm";
@@ -538,13 +577,127 @@ function QuestionnaireContent() {
         })()}
 
         {step === "complete" && (
-          <div className="text-center py-8">
-            <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">回答が完了しました</h2>
-            <p className="text-gray-500 text-sm mb-4">ご回答ありがとうございます。</p>
-            <div className="bg-sky-50 rounded-xl p-4 text-left">
-              <p className="text-xs font-bold text-sky-600 mb-1">反映される情報</p>
-              <p className="text-xs text-gray-500">ご回答いただいた内容は、診察カルテおよび患者情報に自動反映されます。ご来院時にスムーズに診察いたします。</p>
+          <div className="py-6">
+            {/* Step 1: 回答完了 + 患者ID表示 */}
+            <div className="text-center mb-6">
+              <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-4">✅</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">回答が完了しました</h2>
+              <p className="text-gray-500 text-sm mb-4">ご回答ありがとうございます。</p>
+            </div>
+
+            {/* 患者ID表示 */}
+            {patientNumber_assigned && (
+              <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-6 mb-6 text-center">
+                <p className="text-sm font-bold text-sky-600 mb-2">あなたの診察券番号</p>
+                <div className="bg-white rounded-xl py-4 px-6 inline-block shadow-sm border border-sky-100">
+                  <span className="text-4xl font-black text-sky-700 tracking-wider font-mono">{patientNumber_assigned}</span>
+                </div>
+                <p className="text-xs text-sky-500 mt-3">この番号はチェックイン・マイページログインに使います。<br />スクリーンショットで保存してください。</p>
+              </div>
+            )}
+
+            {/* PIN設定 */}
+            {!pinDone ? (
+              <div className="bg-white border-2 border-purple-200 rounded-2xl p-6 mb-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="bg-purple-100 w-10 h-10 rounded-full flex items-center justify-center text-xl">🔐</div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">マイページ用PINの設定</h3>
+                    <p className="text-xs text-gray-500">4桁以上の数字を設定してください</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm font-bold text-gray-600 mb-1 block">PIN（4桁以上）</label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={8}
+                      value={newPin}
+                      onChange={e => { setNewPin(e.target.value.replace(/\D/g, "")); setPinError(""); }}
+                      placeholder="例: 1234"
+                      className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-2xl text-center font-mono tracking-widest focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-gray-600 mb-1 block">PIN（確認）</label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={8}
+                      value={confirmPin}
+                      onChange={e => { setConfirmPin(e.target.value.replace(/\D/g, "")); setPinError(""); }}
+                      placeholder="もう一度入力"
+                      className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-2xl text-center font-mono tracking-widest focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                  {pinError && <p className="text-red-500 text-sm font-bold">{pinError}</p>}
+                  <button
+                    onClick={setupPin}
+                    disabled={pinSaving || newPin.length < 4}
+                    className="w-full bg-purple-600 text-white py-3.5 rounded-xl text-base font-bold hover:bg-purple-700 disabled:opacity-50 shadow-lg shadow-purple-200"
+                  >
+                    {pinSaving ? "設定中..." : "🔐 PINを設定する"}
+                  </button>
+                  <button
+                    onClick={() => setPinDone(true)}
+                    className="w-full text-gray-400 py-2 text-sm font-bold hover:text-gray-600"
+                  >
+                    あとで設定する →
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-6 mb-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="bg-green-100 w-10 h-10 rounded-full flex items-center justify-center text-xl">✅</div>
+                  <div>
+                    <h3 className="text-lg font-bold text-green-800">準備が完了しました！</h3>
+                    <p className="text-sm text-green-600">マイページにログインできます</p>
+                  </div>
+                </div>
+
+                {/* マイページ案内 */}
+                <div className="bg-white rounded-xl p-4 border border-green-100 mb-4">
+                  <p className="text-sm font-bold text-gray-700 mb-2">マイページでできること</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: "📅", text: "次回予約の確認" },
+                      { icon: "🦷", text: "歯式チャートの閲覧" },
+                      { icon: "📋", text: "治療履歴の確認" },
+                      { icon: "📸", text: "レントゲン写真の閲覧" },
+                    ].map(item => (
+                      <div key={item.text} className="flex items-center gap-2 text-sm text-gray-600">
+                        <span>{item.icon}</span>
+                        <span>{item.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 mb-4">
+                  <p className="text-xs text-gray-500 mb-2">ログイン情報</p>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-sm text-gray-600">診察券番号</span>
+                    <span className="text-base font-bold font-mono text-gray-900">{patientNumber_assigned}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">PIN</span>
+                    <span className="text-base font-bold text-gray-900">{newPin ? "設定済み ✓" : "未設定"}</span>
+                  </div>
+                </div>
+
+                <a
+                  href="/mypage"
+                  className="block w-full bg-sky-600 text-white py-3.5 rounded-xl text-base font-bold text-center hover:bg-sky-700 shadow-lg shadow-sky-200"
+                >
+                  📱 マイページを開く →
+                </a>
+              </div>
+            )}
+
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-xs text-gray-400">ご来院時にスムーズに診察いたします。<br />待合室でお待ちください。</p>
             </div>
           </div>
         )}
