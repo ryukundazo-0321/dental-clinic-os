@@ -10,7 +10,7 @@ type TodayAppointment = {
   patient_type: string;
   status: string;
   doctor_id: string | null;
-  patients: { id: string; name_kanji: string; name_kana: string; phone: string } | null;
+  patients: { id: string; name_kanji: string; name_kana: string; phone: string; alert_memo?: string | null; infection_flags?: string | null; allergies?: unknown } | null;
 };
 
 type QueueEntry = {
@@ -54,7 +54,7 @@ export default function CheckinPage() {
     const { data: apts } = await supabase
       .from("appointments")
       .select(`id, scheduled_at, patient_type, status, doctor_id,
-        patients ( id, name_kanji, name_kana, phone )`)
+        patients ( id, name_kanji, name_kana, phone, alert_memo, infection_flags, allergies )`)
       .gte("scheduled_at", `${todayStr}T00:00:00`)
       .lte("scheduled_at", `${todayStr}T23:59:59`)
       .neq("status", "cancelled")
@@ -97,6 +97,17 @@ export default function CheckinPage() {
       number: nextNumber,
       name: appointment.patients?.name_kanji || "",
     });
+
+    // 来院時アラート表示 (D13)
+    const alerts: string[] = [];
+    if (appointment.patients?.alert_memo) alerts.push("📌 " + appointment.patients.alert_memo);
+    if (appointment.patients?.infection_flags) alerts.push("🦠 感染症: " + appointment.patients.infection_flags);
+    if (appointment.patients?.allergies && JSON.stringify(appointment.patients.allergies) !== "null" && JSON.stringify(appointment.patients.allergies) !== "[]" && JSON.stringify(appointment.patients.allergies) !== "{}") {
+      alerts.push("⚠️ アレルギー: " + JSON.stringify(appointment.patients.allergies));
+    }
+    if (alerts.length > 0) {
+      setTimeout(() => alert("⚠️ 患者アラート ⚠️\n\n" + alerts.join("\n")), 500);
+    }
 
     // 3秒後に結果を消す
     setTimeout(() => setCheckinResult(null), 5000);
