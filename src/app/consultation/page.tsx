@@ -249,11 +249,23 @@ export default function ConsultationPage() {
             {/* カラムヘッダー */}
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200 flex shadow-sm">
               <div className="w-16 flex-shrink-0 border-r border-gray-200" />
-              {columns.map(col => (
+              {columns.map(col => {
+                // チェアビュー時のリアルタイム状態
+                const colApts = aptsByColumn.get(col.id) || [];
+                const inUse = colApts.find(a => a.status === "in_consultation");
+                const waiting = colApts.filter(a => a.status === "checked_in");
+                const chairStatus = viewMode === "chair" && col.id !== "__unassigned__"
+                  ? inUse ? "in_use" : waiting.length > 0 ? "waiting" : "empty"
+                  : null;
+                return (
                 <div key={col.id} className={`flex-1 min-w-[160px] px-2 py-2.5 border-r border-gray-100 text-center ${col.id === "__unassigned__" ? "bg-amber-50" : ""}`}>
                   <p className={`text-xs font-bold ${col.id === "__unassigned__" ? "text-amber-700" : "text-gray-700"}`}>{col.label}</p>
+                  {chairStatus === "in_use" && <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full mt-0.5 inline-block">🩺 使用中 — {inUse?.patients?.name_kanji}</span>}
+                  {chairStatus === "waiting" && <span className="text-[9px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full mt-0.5 inline-block">📱 待機{waiting.length}人</span>}
+                  {chairStatus === "empty" && <span className="text-[9px] font-bold bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full mt-0.5 inline-block">空き</span>}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* 時間グリッド */}
