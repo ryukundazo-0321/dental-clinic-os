@@ -232,6 +232,104 @@ export default function ReceiptCheckPage() {
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
   const [recheckingId, setRecheckingId] = useState<string | null>(null);
   const [henreiItems, setHenreiItems] = useState<{ patient_name: string; ym: string; reason: string; points: string }[]>([]);
+  const [aiChecking, setAiChecking] = useState(false);
+
+  async function runAICheck() {
+    // ルールチェックで問題があった件 + OKの件からサンプリングしてAIに判定させる
+    const targets = results.filter(r => r.status === "error" || r.status === "warn");
+    const okSamples = results.filter(r => r.status === "ok").slice(0, 3); // OKからも3件サンプル
+    const allTargets = [...targets, ...okSamples];
+
+    if (allTargets.length === 0) { alert("チェック対象がありません"); return; }
+    setAiChecking(true);
+
+    try {
+      const tokenRes = await fetch("/api/whisper-token");
+      const tk = await tokenRes.json();
+      if (!tk.key) { alert("APIキー取得失敗"); setAiChecking(false); return; }
+
+      for (const target of allTargets) {
+        const idx = results.findIndex(r => r.billing_id === target.billing_id);
+        const billing = billings[idx];
+        if (!billing) continue;
+
+        const patientDiags = await fetchDiagnoses([billing.patient_id]);
+        const procs = billing.procedures_detail || [];
+
+        const prompt = `歯科レセプトの査定・返戻リスクを判定してください。
+
+【患者】${billing.patients?.name_kanji || "不明"}
+【保険種別】${billing.patients?.insurance_type || "不明"}
+【合計点数】${billing.total_points}点
+【算定項目】
+${procs.map(p => `- ${p.name}(${p.code}) ${p.points}点×${p.count}回${p.tooth_numbers?.length ? " 歯:" + p.tooth_numbers.join(",") : ""}`).join("\n")}
+
+【傷病名】
+${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.tooth_number} 転帰:${d.outcome}`).join("\n") || "なし"}
+
+【ルールチェック結果】
+エラー: ${target.errors.join("; ") || "なし"}
+警告: ${target.warnings.join("; ") || "なし"}
+
+以下をJSON形式で出力:
+{
+  "risk_level": "high/medium/low/ok",
+  "ai_findings": ["追加で発見した問題点（ルールで拾えなかったもの）"],
+  "risk_areas": ["査定リスクが高い項目"],
+  "suggestions": ["改善提案"]
+}
+ルールチェックと重複する指摘は不要。ルールで拾えない微妙な問題のみ指摘。`;
+
+        try {
+          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${tk.key}` },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              messages: [
+                { role: "system", content: "あなたは歯科レセプト審査の専門家です。社保・国保の審査基準に精通し、査定・返戻リスクを正確に判定します。ルールベースチェックで拾えないグレーゾーンの問題を指摘してください。" },
+                { role: "user", content: prompt },
+              ],
+              temperature: 0.1,
+              max_tokens: 1000,
+              response_format: { type: "json_object" },
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const content = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+            const aiFindings = content.ai_findings || [];
+            const riskAreas = content.risk_areas || [];
+            const suggestions = content.suggestions || [];
+
+            if (aiFindings.length > 0 || riskAreas.length > 0) {
+              const newWarnings = [
+                ...target.warnings,
+                ...aiFindings.map((f: string) => `🤖 AI: ${f}`),
+                ...riskAreas.map((r: string) => `🤖 査定リスク: ${r}`),
+                ...suggestions.map((s: string) => `💡 AI提案: ${s}`),
+              ];
+              const newErrors = target.errors;
+
+              setResults(prev => prev.map((r, i) => i === idx ? {
+                ...r,
+                status: newErrors.length > 0 ? "error" : newWarnings.length > 0 ? "warn" : "ok",
+                warnings: newWarnings,
+              } : r));
+            }
+          }
+        } catch (e) {
+          console.error("AI check error for", target.billing_id, e);
+        }
+      }
+    } catch (e) {
+      console.error("AI check failed:", e);
+      alert("AI分析でエラーが発生しました");
+    }
+
+    setAiChecking(false);
+  }
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -496,10 +594,14 @@ export default function ReceiptCheckPage() {
               </div>
             )}
             {checkDone && !checking && (
-              <div className="pt-5">
+              <div className="pt-5 flex gap-2">
                 <button onClick={recheckAll}
                   className="bg-emerald-600 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-emerald-700 transition-all">
                   🔄 全件再チェック
+                </button>
+                <button onClick={runAICheck} disabled={aiChecking}
+                  className="bg-purple-600 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-purple-700 transition-all disabled:opacity-50 shadow-lg shadow-purple-200">
+                  {aiChecking ? "🤖 AI分析中..." : "🤖 AI深層チェック"}
                 </button>
               </div>
             )}
