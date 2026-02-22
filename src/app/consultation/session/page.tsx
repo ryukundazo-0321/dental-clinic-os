@@ -1785,26 +1785,6 @@ function SessionContent() {
                   </div>
                 </div>
 
-                {/* 文字起こしパネル */}
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <div className="flex items-center gap-2"><span className="text-lg">📝</span><h3 className="text-sm font-bold text-gray-800">音声文字起こし</h3>{transcripts.length > 0 && <span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{transcripts.length}件</span>}</div>
-                    {transcripts.length > 0 && <button onClick={generateSOAPFromTranscripts} disabled={generatingSOAP} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-50 shadow-md shadow-purple-200">{generatingSOAP ? "⚙️ 生成中..." : "🤖 SOAP生成"}</button>}
-                  </div>
-                  {transcripts.length === 0 ? <div className="text-center py-8"><p className="text-3xl mb-2">🎙️</p><p className="text-sm text-gray-400">右上の「録音開始」で記録</p></div>
-                  : <div className="divide-y divide-gray-100 max-h-[300px] overflow-y-auto">
-                    {transcripts.map(entry => (
-                      <div key={entry.id} className="px-4 py-3 hover:bg-gray-50">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2"><span className="text-xs font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full">録音{entry.recording_number}</span>{entry.duration_seconds && <span className="text-xs text-gray-400">{formatTimer(entry.duration_seconds)}</span>}{entry.is_edited && <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-bold">修正済</span>}</div>
-                          <div className="flex items-center gap-1">{editingTranscriptId === entry.id ? <><button onClick={saveEditTranscript} className="text-xs text-green-600 font-bold px-2 py-1 rounded hover:bg-green-50">✅ 保存</button><button onClick={() => setEditingTranscriptId(null)} className="text-xs text-gray-400 font-bold px-2 py-1 rounded hover:bg-gray-100">取消</button></> : <><button onClick={() => startEditTranscript(entry)} className="text-xs text-gray-400 font-bold px-2 py-1 rounded hover:bg-sky-50">✏️ 修正</button><button onClick={() => deleteTranscript(entry.id)} className="text-xs text-gray-300 font-bold px-1 py-1 rounded hover:bg-red-50">✕</button></>}</div>
-                        </div>
-                        {editingTranscriptId === entry.id ? <textarea value={editingText} onChange={e => setEditingText(e.target.value)} rows={4} className="w-full border-2 border-sky-300 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" /> : <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{entry.transcript_text}</p>}
-                      </div>
-                    ))}
-                  </div>}
-                </div>
-
                 {/* 口腔内写真5枚法 */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-3">
@@ -2023,16 +2003,6 @@ function SessionContent() {
                       {stepAnalyzing ? "⚙️ 分析中..." : "🤖 A,P欄を自動生成"}
                     </button>
                   </div>
-                </div>
-
-                {/* 文字起こし（再利用） */}
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <div className="flex items-center gap-2"><span className="text-lg">🎙</span><h3 className="text-sm font-bold text-gray-800">音声記録</h3>{transcripts.length > 0 && <span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{transcripts.length}件</span>}</div>
-                    {transcripts.length > 0 && <button onClick={generateSOAPFromTranscripts} disabled={generatingSOAP} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-50 shadow-md shadow-purple-200">{generatingSOAP ? "⚙️ 生成中..." : "🤖 SOAP自動生成"}</button>}
-                  </div>
-                  {transcripts.length === 0 ? <div className="text-center py-6"><p className="text-sm text-gray-400">右上の「録音開始」でまとめを記録</p></div>
-                  : <div className="divide-y divide-gray-100 max-h-[200px] overflow-y-auto">{transcripts.map(e => (<div key={e.id} className="px-4 py-2"><div className="flex items-center gap-2 mb-1"><span className="text-xs text-sky-600 font-bold bg-sky-50 px-2 py-0.5 rounded-full">録音{e.recording_number}</span></div><p className="text-xs text-gray-600 whitespace-pre-wrap">{e.transcript_text}</p></div>))}</div>}
                 </div>
 
                 {/* AI プレビュー */}
