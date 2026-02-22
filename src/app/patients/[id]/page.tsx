@@ -29,6 +29,10 @@ type Patient = {
   insurer_number: string | null;
   insured_number: string | null;
   insured_symbol: string | null;
+  infection_flags?: string | null;
+  alert_memo?: string | null;
+  assigned_dh_id?: string | null;
+  subchart_notes?: string | null;
 };
 type ToothData = {
   status?: string;
@@ -227,7 +231,7 @@ const PST: Record<string, { label: string; color: string; bg: string }> = {
   completed: { label: "完了", color: "text-gray-500", bg: "bg-gray-100" },
 };
 
-type Tab = "records" | "timeline" | "perio" | "images" | "info";
+type Tab = "records" | "timeline" | "perio" | "images" | "info" | "subchart" | "documents";
 type PatientImage = {
   id: string;
   image_type: string;
@@ -461,6 +465,16 @@ export default function PatientDetailPage() {
             {hd(patient.allergies) && (
               <span className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold">
                 ⚠ アレルギー
+              </span>
+            )}
+            {patient.infection_flags && (
+              <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">
+                🦠 {patient.infection_flags}
+              </span>
+            )}
+            {patient.alert_memo && (
+              <span className="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-1 rounded font-bold max-w-[200px] truncate" title={patient.alert_memo}>
+                📌 {patient.alert_memo}
               </span>
             )}
             <Link
@@ -767,6 +781,8 @@ export default function PatientDetailPage() {
             { k: "timeline" as Tab, l: "🔄 歯式の変遷", n: th.length },
             { k: "perio" as Tab, l: "📊 P検推移", n: ps.length },
             { k: "images" as Tab, l: "📷 画像", n: images.length },
+            { k: "subchart" as Tab, l: "📝 サブカルテ" },
+            { k: "documents" as Tab, l: "📄 文書" },
             { k: "info" as Tab, l: "ℹ️ 基本情報" },
           ].map((t) => (
             <button
@@ -1137,6 +1153,48 @@ export default function PatientDetailPage() {
                 <h3 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2">
                   保険・医療情報
                 </h3>
+                {/* D03 保険証OCR */}
+                <div className="bg-sky-50 rounded-lg border border-sky-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-sky-700 font-bold">📷 保険証スキャン（OCR）</p>
+                    <label className="cursor-pointer">
+                      <span className="text-[10px] font-bold bg-sky-600 text-white px-3 py-1.5 rounded-lg hover:bg-sky-700 inline-block">📸 保険証を撮影/選択</span>
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={async (ev) => {
+                        const file = ev.target.files?.[0]; if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = async () => {
+                          const b64 = (reader.result as string).split(",")[1];
+                          try {
+                            const res = await fetch("/api/insurance-ocr", {
+                              method: "POST", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ image_base64: b64 }),
+                            });
+                            const data = await res.json();
+                            if (data.success && data.ocr) {
+                              const o = data.ocr;
+                              const updates: Record<string, unknown> = {};
+                              if (o.insurance_type) updates.insurance_type = o.insurance_type;
+                              if (o.insurer_number) updates.insurer_number = o.insurer_number;
+                              if (o.insured_symbol) updates.insured_symbol = o.insured_symbol;
+                              if (o.insured_number) updates.insured_number = o.insured_number;
+                              if (o.burden_ratio) updates.burden_ratio = o.burden_ratio;
+                              if (o.name_kanji && !patient.name_kanji) updates.name_kanji = o.name_kanji;
+                              if (o.date_of_birth && !patient.date_of_birth) updates.date_of_birth = o.date_of_birth;
+                              if (o.sex && !patient.sex) updates.sex = o.sex;
+                              if (Object.keys(updates).length > 0) {
+                                await supabase.from("patients").update(updates).eq("id", pid);
+                                setPatient({ ...patient, ...updates } as typeof patient);
+                                alert(`✅ OCR完了（信頼度: ${Math.round((o.confidence || 0) * 100)}%）\n${Object.keys(updates).length}項目を更新しました${o.notes ? "\n⚠ " + o.notes : ""}`);
+                              } else { alert("読み取れましたが、更新する項目がありませんでした"); }
+                            } else { alert("❌ " + (data.error || "OCR失敗")); }
+                          } catch { alert("❌ OCRエラー"); }
+                        };
+                        reader.readAsDataURL(file);
+                        ev.target.value = "";
+                      }} />
+                    </label>
+                  </div>
+                </div>
                 <IR l="保険種別" v={patient.insurance_type} />
                 <IR
                   l="負担割合"
@@ -1156,7 +1214,164 @@ export default function PatientDetailPage() {
                 />
                 <IR l="備考" v={patient.notes} />
                 <IR l="登録日" v={fd(patient.created_at)} />
+                <h3 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 pt-4">🏥 管理情報</h3>
+                <div className="space-y-2">
+                  <div><label className="text-[10px] text-gray-400 block">🦠 感染症フラグ</label>
+                    <div className="flex gap-1 flex-wrap mt-1">
+                      {["HBV", "HCV", "HIV", "梅毒", "MRSA", "TB"].map(flag => (
+                        <button key={flag} onClick={async () => {
+                          const cur = patient.infection_flags || "";
+                          const flags = cur.split(",").map(f => f.trim()).filter(Boolean);
+                          const newFlags = flags.includes(flag) ? flags.filter(f => f !== flag) : [...flags, flag];
+                          const val = newFlags.join(", ") || null;
+                          await supabase.from("patients").update({ infection_flags: val }).eq("id", pid);
+                          setPatient({ ...patient, infection_flags: val });
+                        }} className={`text-[10px] px-2 py-1 rounded-full font-bold border ${(patient.infection_flags || "").includes(flag) ? "bg-red-100 border-red-300 text-red-700" : "bg-gray-50 border-gray-200 text-gray-400"}`}>
+                          {(patient.infection_flags || "").includes(flag) ? "✓ " : ""}{flag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div><label className="text-[10px] text-gray-400 block">📌 患者メモ・アラート（来院時に表示）</label>
+                    <textarea value={patient.alert_memo || ""} onChange={e => setPatient({ ...patient, alert_memo: e.target.value })}
+                      onBlur={async () => { await supabase.from("patients").update({ alert_memo: patient.alert_memo || null }).eq("id", pid); }}
+                      rows={2} placeholder="来院時に注意すべき情報（例: 車椅子、聴覚障害、要通訳）" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+                  <div><label className="text-[10px] text-gray-400 block">👩‍⚕️ 担当DH</label>
+                    <select value={patient.assigned_dh_id || ""} onChange={async (e) => {
+                      const val = e.target.value || null;
+                      await supabase.from("patients").update({ assigned_dh_id: val }).eq("id", pid);
+                      setPatient({ ...patient, assigned_dh_id: val });
+                    }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400">
+                      <option value="">未割当</option>
+                      <option value="DH1">DH1</option><option value="DH2">DH2</option><option value="DH3">DH3</option>
+                    </select></div>
+                </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== サブカルテ (D12) ===== */}
+        {tab === "subchart" && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-gray-900">📝 サブカルテ（自由記載）</h3>
+              <span className="text-[10px] text-gray-400">自動保存</span>
+            </div>
+            <textarea value={patient.subchart_notes || ""} onChange={e => setPatient({ ...patient, subchart_notes: e.target.value })}
+              onBlur={async () => { await supabase.from("patients").update({ subchart_notes: patient.subchart_notes || null }).eq("id", pid); }}
+              rows={15} placeholder={"自由記載欄（治療方針メモ、患者の特記事項、家族情報など）\n\n例:\n・補綴希望: 自費セラミック希望\n・家族: 娘(30代)が当院通院中\n・性格: 説明を詳しく聞きたいタイプ\n・前医からの引き継ぎ: 右下67ブリッジ予定だった"} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-sky-400 resize-none leading-relaxed" />
+            {/* 旧カルテPDFファイリング (F03) */}
+            <div className="mt-6 pt-4 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold text-gray-700">📂 旧カルテ・紹介状PDF</h4>
+                <label className="cursor-pointer">
+                  <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200 border border-gray-200">📤 PDFをアップロード</span>
+                  <input type="file" accept="application/pdf,image/*" className="hidden" onChange={async (e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const fd = new FormData(); fd.append("file", file); fd.append("patient_id", pid); fd.append("record_id", ""); fd.append("image_type", "old_chart_pdf");
+                    const res = await fetch("/api/image-upload", { method: "POST", body: fd });
+                    const data = await res.json();
+                    if (data.success) { alert("✅ アップロード完了"); fetchData(); } else { alert("❌ " + (data.error || "失敗")); }
+                    e.target.value = "";
+                  }} />
+                </label>
+              </div>
+              <div className="space-y-1">
+                {images.filter(img => (img as unknown as Record<string, string>).image_type === "old_chart_pdf").length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-4">旧カルテPDFはまだアップロードされていません</p>
+                ) : (
+                  images.filter(img => (img as unknown as Record<string, string>).image_type === "old_chart_pdf").map((img) => {
+                    const i = img as unknown as Record<string, string>;
+                    return <div key={i.id} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
+                      <span className="text-lg">📄</span>
+                      <span className="text-xs text-gray-700 flex-1">{i.file_name || "旧カルテ"}</span>
+                      <a href={i.image_url || i.storage_path} target="_blank" className="text-[10px] text-sky-600 font-bold hover:underline">開く</a>
+                    </div>;
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 文書タブ (B23紹介状, B24同意書) ===== */}
+        {tab === "documents" && (
+          <div className="space-y-4">
+            {/* B23 紹介状 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-3">📋 紹介状作成</h3>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div><label className="text-[10px] text-gray-400">紹介先医療機関</label>
+                  <input type="text" id="ref_hospital" placeholder="○○大学病院 口腔外科" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+                <div><label className="text-[10px] text-gray-400">紹介先医師名</label>
+                  <input type="text" id="ref_doctor" placeholder="○○先生" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+              </div>
+              <div className="mb-3"><label className="text-[10px] text-gray-400">紹介理由・傷病名</label>
+                <textarea id="ref_reason" rows={3} placeholder="例: 右下8番埋伏智歯の抜歯依頼\n#48 水平埋伏智歯" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+              <div className="mb-3"><label className="text-[10px] text-gray-400">経過・治療状況</label>
+                <textarea id="ref_history" rows={3} placeholder="例: パノラマX線にて右下8番の水平埋伏を確認。対合歯との干渉あり。" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+              <button onClick={() => {
+                const hospital = (document.getElementById("ref_hospital") as HTMLInputElement)?.value || "";
+                const doctor = (document.getElementById("ref_doctor") as HTMLInputElement)?.value || "";
+                const reason = (document.getElementById("ref_reason") as HTMLTextAreaElement)?.value || "";
+                const history = (document.getElementById("ref_history") as HTMLTextAreaElement)?.value || "";
+                const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>紹介状</title>
+<style>@media print{.no-print{display:none!important}@page{size:A4;margin:20mm}}body{font-family:"Yu Gothic",sans-serif;max-width:600px;margin:0 auto;padding:20px;font-size:12px}h1{text-align:center;font-size:20px;border-bottom:2px solid #333;padding-bottom:8px}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #999;padding:6px 10px;text-align:left}th{background:#f5f5f5;width:100px}.sig{margin-top:30px;text-align:right}</style></head><body>
+<div class="no-print" style="text-align:center;margin-bottom:12px"><button onclick="window.print()" style="padding:8px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨️ 印刷</button></div>
+<h1>診療情報提供書（紹介状）</h1>
+<p style="text-align:right">${today}</p>
+<table>
+<tr><th>紹介先</th><td>${hospital} ${doctor ? doctor + " 先生" : ""}</td></tr>
+<tr><th>患者氏名</th><td>${patient.name_kanji}（${patient.name_kana}）</td></tr>
+<tr><th>生年月日</th><td>${patient.date_of_birth ? fd(patient.date_of_birth) : ""} ${age(patient.date_of_birth)}</td></tr>
+<tr><th>性別</th><td>${patient.sex || ""}</td></tr>
+<tr><th>傷病名</th><td>${reason}</td></tr>
+<tr><th>経過・治療状況</th><td style="white-space:pre-wrap">${history}</td></tr>
+<tr><th>アレルギー</th><td>${hd(patient.allergies) ? JSON.stringify(patient.allergies) : "特になし"}</td></tr>
+<tr><th>服薬</th><td>${hd(patient.medications) ? JSON.stringify(patient.medications) : "特になし"}</td></tr>
+</table>
+<p>上記の患者さんをご紹介申し上げます。ご高診のほどよろしくお願いいたします。</p>
+<div class="sig"><p>医療機関名: ______________________</p><p>歯科医師: ______________________ 印</p></div>
+</body></html>`;
+                const pw = window.open("", "_blank"); if (pw) { pw.document.write(html); pw.document.close(); }
+              }} className="w-full bg-sky-600 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-sky-700">🖨️ 紹介状を印刷</button>
+            </div>
+
+            {/* B24 同意書 */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-3">✍️ 同意書</h3>
+              <div className="mb-3"><label className="text-[10px] text-gray-400">処置内容</label>
+                <input type="text" id="consent_procedure" placeholder="例: 右下6番 インプラント埋入手術" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+              <div className="mb-3"><label className="text-[10px] text-gray-400">説明内容</label>
+                <textarea id="consent_detail" rows={4} placeholder={"1. 処置の目的と方法\n2. 予想される効果\n3. リスク・合併症の可能性\n4. 代替治療の選択肢\n5. 処置を行わない場合のリスク"} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:border-sky-400" /></div>
+              <button onClick={() => {
+                const proc = (document.getElementById("consent_procedure") as HTMLInputElement)?.value || "";
+                const detail = (document.getElementById("consent_detail") as HTMLTextAreaElement)?.value || "";
+                const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>同意書</title>
+<style>@media print{.no-print{display:none!important}@page{size:A4;margin:20mm}}body{font-family:"Yu Gothic",sans-serif;max-width:600px;margin:0 auto;padding:20px;font-size:12px}h1{text-align:center;font-size:20px;margin-bottom:20px}.sig-box{border:1px solid #333;padding:15px;margin-top:30px;display:grid;grid-template-columns:1fr 1fr;gap:15px}.sig-line{border-bottom:1px solid #333;padding-bottom:5px;margin-bottom:3px}</style></head><body>
+<div class="no-print" style="text-align:center;margin-bottom:12px"><button onclick="window.print()" style="padding:8px 24px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨️ 印刷</button></div>
+<h1>同 意 書</h1>
+<p style="text-align:right">${today}</p>
+<p><strong>患者氏名:</strong> ${patient.name_kanji}（${patient.name_kana}）</p>
+<p><strong>生年月日:</strong> ${patient.date_of_birth ? fd(patient.date_of_birth) : ""}</p>
+<hr style="margin:15px 0">
+<p><strong>処置内容:</strong> ${proc}</p>
+<p style="margin-top:10px"><strong>説明内容:</strong></p>
+<p style="white-space:pre-wrap;margin-left:10px">${detail}</p>
+<hr style="margin:20px 0">
+<p>上記の内容について、担当歯科医師より十分な説明を受け、理解した上で、本処置の実施に同意いたします。</p>
+<div class="sig-box">
+<div><p class="sig-line">&nbsp;</p><p style="text-align:center;font-size:10px">患者署名</p></div>
+<div><p class="sig-line">&nbsp;</p><p style="text-align:center;font-size:10px">日付</p></div>
+<div><p class="sig-line">&nbsp;</p><p style="text-align:center;font-size:10px">説明医師署名</p></div>
+<div><p class="sig-line">&nbsp;</p><p style="text-align:center;font-size:10px">日付</p></div>
+</div>
+</body></html>`;
+                const pw = window.open("", "_blank"); if (pw) { pw.document.write(html); pw.document.close(); }
+              }} className="w-full bg-green-600 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-green-700">🖨️ 同意書を印刷</button>
             </div>
           </div>
         )}
