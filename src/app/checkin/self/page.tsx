@@ -66,10 +66,21 @@ export default function SelfCheckinPage() {
     const todayStr = getJSTDateStr();
 
     // 患者照合: patient_number + date_of_birth
+    // P-00001 でも 00001 でも P00001 でもマッチするようにする
+    let inputId = patientId.trim().toUpperCase();
+    // 数字のみの場合は P- プレフィックスを付与
+    if (/^\d+$/.test(inputId)) {
+      inputId = `P-${inputId.padStart(5, "0")}`;
+    }
+    // P00001 → P-00001 に正規化
+    if (/^P\d+$/.test(inputId)) {
+      inputId = `P-${inputId.slice(1).padStart(5, "0")}`;
+    }
+
     const { data: patient } = await supabase
       .from("patients")
       .select("id, name_kanji")
-      .eq("patient_number", patientId.trim())
+      .eq("patient_number", inputId)
       .eq("date_of_birth", dob)
       .single();
 
