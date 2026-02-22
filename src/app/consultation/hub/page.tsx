@@ -56,6 +56,7 @@ function HubContent() {
   const [prevRecord, setPrevRecord] = useState<PrevRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [showFlow, setShowFlow] = useState(false);
+  const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
 
   useEffect(() => { if (appointmentId) loadData(); }, [appointmentId]);
 
@@ -191,12 +192,29 @@ function HubContent() {
             const badge = tile.badge(counts);
             return (
               <button key={tile.id} onClick={() => {
-                if (tile.id === "exam") { isReturning ? setShowFlow(true) : goSession(); }
-                else if (tile.id === "images") goPatientPage("images");
-                else if (tile.id === "tooth") goPatientPage("timeline");
-                else if (tile.id === "history") goPatientPage("records");
-                else if (tile.id === "perio") goPatientPage("perio");
-                else if (tile.id === "documents") goPatientPage("documents");
+                const active = tile.check(counts);
+                if (tile.id === "exam") {
+                  if (isReturning) setShowFlow(true);
+                  else goSession();
+                } else if (!active) {
+                  // データがない場合 → メッセージ表示
+                  const msgs: Record<string, string> = {
+                    images: "📸 画像はまだ登録されていません。\n診察で撮影すると、ここに表示されます。",
+                    tooth: "🦷 歯式データはまだありません。\n診察で歯式を記録すると、ここに表示されます。",
+                    history: "📋 治療履歴はまだありません。\n診察を完了すると、ここに履歴が溜まっていきます。",
+                    perio: "📊 P検データはまだありません。\n診察でP検を実施すると、ここに推移が表示されます。",
+                    documents: "📄 文書はまだ作成されていません。\n紹介状・同意書・計画書などをここから確認できます。",
+                  };
+                  setEmptyMessage(msgs[tile.id] || "まだデータがありません");
+                  setTimeout(() => setEmptyMessage(null), 3000);
+                } else {
+                  // データがある場合 → 患者詳細の該当タブへ
+                  if (tile.id === "images") goPatientPage("images");
+                  else if (tile.id === "tooth") goPatientPage("timeline");
+                  else if (tile.id === "history") goPatientPage("records");
+                  else if (tile.id === "perio") goPatientPage("perio");
+                  else if (tile.id === "documents") goPatientPage("documents");
+                }
               }} style={{
                 position: "relative", background: active ? "#fff" : "#f8fafc",
                 border: `2px solid ${active ? tile.bg : "#e2e8f0"}`, borderRadius: 18,
@@ -218,6 +236,20 @@ function HubContent() {
             );
           })}
         </div>
+
+        {/* Empty message toast */}
+        {emptyMessage && (
+          <div style={{
+            background: "#fff", border: "2px solid #e2e8f0", borderRadius: 14,
+            padding: "18px 24px", marginBottom: 20, textAlign: "center",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+            animation: "fadeIn 0.2s ease",
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#64748b", whiteSpace: "pre-line", lineHeight: 1.6 }}>
+              {emptyMessage}
+            </div>
+          </div>
+        )}
 
         {/* ===== Previous Record (revisit only) ===== */}
         {isReturning && prevRecord && (
