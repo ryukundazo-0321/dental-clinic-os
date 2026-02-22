@@ -481,13 +481,13 @@ export default function ConsultationPage() {
                 {selectedApt.status === "checked_in" && (
                   <button onClick={async () => {
                     await updateStatus(selectedApt, "in_consultation");
-                    window.location.href = `/consultation/session?appointment_id=${selectedApt.id}`;
+                    window.location.href = `/consultation/hub?appointment_id=${selectedApt.id}`;
                   }}
                     className="w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 呼び出し（診察開始）→</button>
                 )}
                 {selectedApt.status === "in_consultation" && (
                   <>
-                    <a href={`/consultation/session?appointment_id=${selectedApt.id}`}
+                    <a href={`/consultation/hub?appointment_id=${selectedApt.id}`}
                       className="block w-full py-3 rounded-lg text-sm font-bold bg-sky-500 text-white hover:bg-sky-600 text-center shadow-lg shadow-sky-200">📋 診察画面を開く →</a>
                     <button onClick={() => updateStatus(selectedApt, "completed")}
                       className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
