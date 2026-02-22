@@ -129,6 +129,7 @@ function SessionContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const appointmentId = searchParams.get("appointment_id");
+  const flowParam = searchParams.get("flow") as "continue" | "new_chief" | "maintenance" | null;
 
   // Core state
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -220,8 +221,9 @@ function SessionContent() {
   const [changeNote, setChangeNote] = useState("");
   const [quickSoapApplied, setQuickSoapApplied] = useState(false);
 
-  // ★ タブ
-  const [activeTab, setActiveTab] = useState<SessionTab>("chief");
+  // ★ タブ — flowに応じて初期タブを変える
+  const initialTab: SessionTab = flowParam === "continue" ? "dr_exam" : flowParam === "maintenance" ? "perio" : "chief";
+  const [activeTab, setActiveTab] = useState<SessionTab>(initialTab);
 
   const isReturning = patientType === "returning";
   const hasPreviousPlan = previousVisit && previousVisit.nextPlan;
@@ -272,6 +274,28 @@ function SessionContent() {
           if (!rec.tooth_chart || Object.keys(rec.tooth_chart as object).length === 0) {
             setRecord({ ...(rec as unknown as MedicalRecord), tooth_chart: prevChart });
           }
+        }
+      }
+      // ★ フローモードに応じてS欄自動入力
+      if (flowParam === "continue" && rec) {
+        const { data: prevAptForS } = await supabase.from("appointments")
+          .select("scheduled_at, medical_records(soap_p)")
+          .eq("patient_id", p.id).eq("status", "completed")
+          .order("scheduled_at", { ascending: false }).limit(1).single();
+        if (prevAptForS) {
+          const prevMr = ((prevAptForS as Record<string, unknown>).medical_records as Record<string, string>[])?.[0];
+          const prevDate = new Date((prevAptForS as Record<string, unknown>).scheduled_at as string).toLocaleDateString("ja-JP", { month: "short", day: "numeric" });
+          const autoS = `前回（${prevDate}）からの継続治療。特に症状の変化なし。\n前回予定: ${prevMr?.soap_p || ""}`;
+          if (!(rec as unknown as MedicalRecord).soap_s) {
+            setRecord({ ...(rec as unknown as MedicalRecord), soap_s: autoS });
+            await supabase.from("medical_records").update({ soap_s: autoS }).eq("id", (rec as Record<string, unknown>).id);
+          }
+        }
+      } else if (flowParam === "maintenance" && rec) {
+        const autoS = "定期メンテナンス来院。";
+        if (!(rec as unknown as MedicalRecord).soap_s) {
+          setRecord({ ...(rec as unknown as MedicalRecord), soap_s: autoS });
+          await supabase.from("medical_records").update({ soap_s: autoS }).eq("id", (rec as Record<string, unknown>).id);
         }
       }
     }
