@@ -279,7 +279,21 @@ export default function ConsultationPage() {
                     return parseScheduledHourMin(apt)[0] === hour;
                   });
                   return (
-                    <div key={col.id} className={`flex-1 min-w-[160px] border-r border-gray-50 relative px-1 py-0.5 ${col.id === "__unassigned__" ? "bg-amber-50/30" : ""}`}>
+                    <div key={col.id}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; (e.currentTarget as HTMLElement).classList.add("bg-sky-50"); }}
+                      onDragLeave={(e) => { (e.currentTarget as HTMLElement).classList.remove("bg-sky-50"); }}
+                      onDrop={async (e) => {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLElement).classList.remove("bg-sky-50");
+                        const aptId = e.dataTransfer.getData("apt_id");
+                        if (!aptId || col.id === "__unassigned__") return;
+                        if (viewMode === "chair") {
+                          await assignUnit(aptId, col.id);
+                        } else {
+                          await assignDoctor(aptId, col.id);
+                        }
+                      }}
+                      className={`flex-1 min-w-[160px] border-r border-gray-50 relative px-1 py-0.5 transition-colors ${col.id === "__unassigned__" ? "bg-amber-50/30" : ""}`}>
                       {colApts.map(apt => {
                         const st = STATUS_CONFIG[apt.status] || STATUS_CONFIG.reserved;
                         const duration = apt.duration_min || 30;
@@ -292,8 +306,15 @@ export default function ConsultationPage() {
 
                         return (
                           <div key={apt.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("apt_id", apt.id);
+                              e.dataTransfer.effectAllowed = "move";
+                              (e.currentTarget as HTMLElement).style.opacity = "0.5";
+                            }}
+                            onDragEnd={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
                             onClick={() => setSelectedApt(apt)}
-                            className={`absolute left-1 right-1 rounded-lg border-l-4 ${st.border} ${st.blockBg} border border-gray-200 cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all overflow-hidden ${selectedApt?.id === apt.id ? "ring-2 ring-sky-400 shadow-md" : ""}`}
+                            className={`absolute left-1 right-1 rounded-lg border-l-4 ${st.border} ${st.blockBg} border border-gray-200 cursor-grab hover:shadow-md hover:scale-[1.01] transition-all overflow-hidden ${selectedApt?.id === apt.id ? "ring-2 ring-sky-400 shadow-md" : ""}`}
                             style={{ top: `${topOffset}px`, height: `${blockHeight}px`, zIndex: selectedApt?.id === apt.id ? 5 : 1 }}>
                             <div className="px-2 py-1 h-full flex flex-col">
                               <div className="flex items-center justify-between">
