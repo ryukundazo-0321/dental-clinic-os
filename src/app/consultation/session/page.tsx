@@ -1552,15 +1552,15 @@ function SessionContent() {
                       {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; return <td key={t} className="text-center text-xs"><span className={(pd?.mobility||0)>0?"text-amber-600 font-bold bg-amber-100 px-1 rounded":"text-gray-300"}>{(pd?.mobility||0)>0?pd?.mobility:""}</span></td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing") || hasStatus(record?.tooth_chart||null, t, "root_remain");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                     <tr><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">上顎</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing"); const isE = perioEditTooth===t;
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing") || hasStatus(record?.tooth_chart||null, t, "root_remain"); const isE = perioEditTooth===t;
                         return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-xs font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":primary_st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-xs text-gray-400">{t}</span>{primary_st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
+                      {[...UPPER_RIGHT,...UPPER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing") || hasStatus(record?.tooth_chart||null, t, "root_remain");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                   </tbody></table>
@@ -1573,15 +1573,15 @@ function SessionContent() {
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse min-w-[640px]"><tbody>
                     <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing") || hasStatus(record?.tooth_chart||null, t, "root_remain");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.buccal||[]).length>0?(pd?.buccal||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                     <tr><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">下顎</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing"); const isE = perioEditTooth===t;
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const primary_st = primaryStatus(record?.tooth_chart||null, t); const cfg = TOOTH_STATUS[primary_st]||TOOTH_STATUS.normal; const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing") || hasStatus(record?.tooth_chart||null, t, "root_remain"); const isE = perioEditTooth===t;
                         return <td key={t} className="text-center px-[1px] py-[2px]"><button onClick={()=>setPerioEditTooth(isE?null:t)} className={`w-full min-w-[36px] h-8 rounded border-2 flex flex-col items-center justify-center text-xs font-bold transition-all hover:scale-105 ${isM?"bg-gray-200 border-gray-300 text-gray-400":pd?.bop?"bg-red-50 border-red-300 text-gray-700":primary_st!=="normal"?`${cfg.bg} ${cfg.border} ${cfg.color}`:"bg-white border-gray-200 text-gray-600"} ${isE?"ring-2 ring-sky-400 scale-110":""}`}><span className="text-xs text-gray-400">{t}</span>{primary_st!=="normal"&&<span className="text-[7px]">{cfg.label}</span>}{pd?.bop&&<span className="text-[7px] text-red-500">●</span>}</button></td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing");
+                      {[...LOWER_RIGHT,...LOWER_LEFT].map(t => { const pd = perioData[t]; const isM = hasStatus(record?.tooth_chart||null, t, "missing") || hasStatus(record?.tooth_chart||null, t, "root_remain");
                         return <td key={t} className="text-center px-0">{isM?<span className="text-xs text-gray-300">—</span>:<div className="flex justify-center gap-[1px]">{(pd?.lingual||[]).length>0?(pd?.lingual||[]).map((v,i)=><span key={i} className={`text-xs w-[13px] text-center rounded-sm ${v>=6?"bg-red-500 text-white font-bold":v>=4?"bg-red-200 text-red-800 font-bold":"text-gray-400"}`}>{v}</span>):<span className="text-xs text-gray-300">· · ·</span>}</div>}</td>; })}
                     </tr>
                     <tr className="h-5"><td className="text-xs text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
@@ -1593,7 +1593,7 @@ function SessionContent() {
                 {/* 歯タップ時の個別編集パネル */}
                 {perioEditTooth && (() => {
                   const t = perioEditTooth; const pd = perioData[t];
-                  if (hasStatus(record?.tooth_chart || null, t, "missing")) { setPerioEditTooth(null); return null; }
+                  if (hasStatus(record?.tooth_chart || null, t, "missing") || hasStatus(record?.tooth_chart || null, t, "root_remain")) { setPerioEditTooth(null); return null; }
                   return (
                     <div className="mt-3 p-3 bg-sky-50 rounded-xl border-2 border-sky-200">
                       <div className="flex items-center justify-between mb-2">
