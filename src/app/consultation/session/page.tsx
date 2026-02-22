@@ -80,6 +80,7 @@ type PerioData = {
   lingual: [number, number, number]; // ML, L, DL
   bop: boolean;
   mobility: number; // 0-3
+  furcation?: number; // 0-3 (B13)
 };
 
 const UPPER_RIGHT = ["18","17","16","15","14","13","12","11"];
@@ -1584,6 +1585,13 @@ function SessionContent() {
                           <span className="text-[10px] text-gray-500 font-bold">動揺:</span>
                           {[0,1,2,3].map(m => <button key={m} onClick={() => updatePerio(t, "mobility", m)} className={`w-7 h-7 rounded-lg text-xs font-bold border-2 ${(pd?.mobility??0)===m ? "bg-sky-500 text-white border-sky-500" : "bg-white border-gray-200 text-gray-500"}`}>{m}</button>)}
                         </div>
+                        {/* B13 根分岐部病変 (臼歯のみ) */}
+                        {["16","17","18","26","27","28","36","37","38","46","47","48","14","15","24","25","34","35","44","45"].includes(t) && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-gray-500 font-bold">分岐部:</span>
+                            {[0,1,2,3].map(f => <button key={f} onClick={() => updatePerio(t, "furcation", f)} className={`w-7 h-7 rounded-lg text-xs font-bold border-2 ${(pd as Record<string, unknown>)?.furcation===f ? "bg-purple-500 text-white border-purple-500" : "bg-white border-gray-200 text-gray-500"}`}>{f === 0 ? "—" : `F${f}`}</button>)}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -2068,6 +2076,54 @@ function SessionContent() {
                     ))}
                     <div className="flex items-center px-2 py-2 border-t-2 border-gray-300 mt-1"><span className="flex-1 text-sm font-bold text-gray-800">合計</span><span className="text-sm font-bold text-sky-600">{billingTotal.toLocaleString()}点</span><span className="text-xs text-gray-400 ml-2">(¥{Math.round(billingTotal * 10 * patient.burden_ratio).toLocaleString()})</span></div>
                   </div>}
+                </div>
+
+                {/* AI処方提案 (AI09) */}
+                <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-blue-700">🤖 AI処方提案</h3>
+                      <p className="text-[10px] text-blue-500 mt-0.5">SOAP内容から適切な処方薬を提案します</p>
+                    </div>
+                    <button onClick={async () => {
+                      showMsg("🤖 処方提案を生成中...");
+                      try {
+                        const tokenRes = await fetch("/api/whisper-token"); const tk = await tokenRes.json();
+                        if (!tk.key) { showMsg("❌ APIキー取得失敗"); return; }
+                        const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${tk.key}` },
+                          body: JSON.stringify({
+                            model: "gpt-4o-mini",
+                            messages: [
+                              { role: "system", content: `歯科医師として、SOAP内容から処方薬を提案してください。JSON形式で出力:
+{"drugs":[{"name":"薬名","dosage":"用量","frequency":"用法","days":"日数","reason":"処方理由"}],"notes":"注意事項"}
+一般的な歯科処方: ロキソプロフェン60mg(鎮痛), カロナール200mg(妊婦可), フロモックス100mg(感染予防), アモキシシリン250mg(感染), レバミピド100mg(胃保護), アズノール(うがい薬)
+アレルギー情報を必ず考慮し、禁忌がある場合は代替薬を提案。` },
+                              { role: "user", content: `S: ${record?.soap_s || ""}\nO: ${record?.soap_o || ""}\nA: ${record?.soap_a || ""}\nP: ${record?.soap_p || ""}\nアレルギー: ${patient ? JSON.stringify(patient.allergies) : "不明"}` }
+                            ],
+                            temperature: 0.2, max_tokens: 1000, response_format: { type: "json_object" },
+                          }),
+                        });
+                        if (aiRes.ok) {
+                          const data = await aiRes.json();
+                          const content = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+                          if (content.drugs?.length > 0) {
+                            const drugText = content.drugs.map((d: { name: string; dosage: string; frequency: string; days: string; reason: string }) =>
+                              `${d.name} ${d.dosage} ${d.frequency} ${d.days} (${d.reason})`).join("\n");
+                            const msg = `処方提案:\n${drugText}${content.notes ? "\n\n注意: " + content.notes : ""}`;
+                            if (confirm(msg + "\n\nP欄に反映しますか？")) {
+                              const curP = record?.soap_p || "";
+                              updateSOAP("soap_p", curP + (curP ? "\n" : "") + "【処方】\n" + drugText);
+                              showMsg("✅ P欄に反映しました");
+                            }
+                          } else { showMsg("💊 処方不要と判断されました"); }
+                        } else { showMsg("❌ AI提案失敗"); }
+                      } catch { showMsg("❌ エラーが発生"); }
+                    }} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700">
+                      💊 処方を提案
+                    </button>
+                  </div>
                 </div>
 
                 {/* 処方箋印刷 */}
