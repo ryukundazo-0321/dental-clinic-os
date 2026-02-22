@@ -36,6 +36,7 @@ function hd(v: unknown) { return v && JSON.stringify(v) !== "null" && JSON.strin
 
 const HUB_TILES = [
   { id: "exam", icon: "🩺", label: "診察", sub: "SOAP記録・治療", color: "#2563eb", bg: "#dbeafe", check: (c: Counts) => c.records > 0, badge: (c: Counts) => c.records > 0 ? `${c.records}回` : null },
+  { id: "questionnaire", icon: "📝", label: "問診票", sub: "初診用・再診用", color: "#8b5cf6", bg: "#ede9fe", check: () => true, badge: (c: Counts) => c.questionnaires > 0 ? "回答済み" : "未回答" },
   { id: "images", icon: "📸", label: "画像", sub: "レントゲン・口腔内写真", color: "#0891b2", bg: "#cffafe", check: (c: Counts) => c.images > 0, badge: (c: Counts) => c.images > 0 ? `${c.images}枚` : null },
   { id: "tooth", icon: "🦷", label: "歯式", sub: "チャート・歯周・歯面", color: "#7c3aed", bg: "#ede9fe", check: (c: Counts) => c.hasChart, badge: (c: Counts) => c.hasChart ? "記録あり" : null },
   { id: "history", icon: "📋", label: "治療履歴", sub: "過去のカルテ一覧", color: "#ea580c", bg: "#fff7ed", check: (c: Counts) => c.records > 0, badge: (c: Counts) => c.records > 0 ? `${c.records}回` : null },
@@ -43,7 +44,7 @@ const HUB_TILES = [
   { id: "documents", icon: "📄", label: "文書", sub: "紹介状・同意書・計画書", color: "#65a30d", bg: "#f7fee7", check: () => false, badge: () => null },
 ];
 
-type Counts = { records: number; images: number; perio: number; hasChart: boolean };
+type Counts = { records: number; images: number; perio: number; hasChart: boolean; questionnaires: number };
 
 function HubContent() {
   const sp = useSearchParams();
@@ -52,7 +53,7 @@ function HubContent() {
 
   const [patient, setPatient] = useState<PatientInfo | null>(null);
   const [patientType, setPatientType] = useState("new");
-  const [counts, setCounts] = useState<Counts>({ records: 0, images: 0, perio: 0, hasChart: false });
+  const [counts, setCounts] = useState<Counts>({ records: 0, images: 0, perio: 0, hasChart: false, questionnaires: 0 });
   const [prevRecord, setPrevRecord] = useState<PrevRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [showFlow, setShowFlow] = useState(false);
@@ -70,17 +71,19 @@ function HubContent() {
     setPatientType(String((apt as Record<string, unknown>).patient_type || "new"));
 
     // 集計
-    const [{ count: recCount }, { count: imgCount }, { count: perCount }, { data: ptData }] = await Promise.all([
+    const [{ count: recCount }, { count: imgCount }, { count: perCount }, { data: ptData }, { count: qCount }] = await Promise.all([
       supabase.from("medical_records").select("id", { count: "exact", head: true }).eq("patient_id", p.id),
       supabase.from("patient_images").select("id", { count: "exact", head: true }).eq("patient_id", p.id),
       supabase.from("perio_snapshots").select("id", { count: "exact", head: true }).eq("patient_id", p.id),
       supabase.from("patients").select("current_tooth_chart").eq("id", p.id).single(),
+      supabase.from("questionnaire_responses").select("id", { count: "exact", head: true }).eq("patient_id", p.id),
     ]);
     setCounts({
       records: recCount || 0,
       images: imgCount || 0,
       perio: perCount || 0,
       hasChart: !!(ptData?.current_tooth_chart && Object.keys(ptData.current_tooth_chart as object).length > 0),
+      questionnaires: qCount || 0,
     });
 
     // 前回記録（再診のみ）
@@ -196,6 +199,15 @@ function HubContent() {
                 if (tile.id === "exam") {
                   if (isReturning) setShowFlow(true);
                   else goSession();
+                } else if (tile.id === "questionnaire") {
+                  // 問診票は常にアクセス可能 — 初診用 or 再診用に分岐
+                  if (patient) {
+                    if (isNew) {
+                      router.push(`/questionnaire?appointment_id=${appointmentId}&patient_id=${patient.id}`);
+                    } else {
+                      router.push(`/questionnaire/revisit?appointment_id=${appointmentId}&patient_id=${patient.id}`);
+                    }
+                  }
                 } else if (!active) {
                   // データがない場合 → メッセージ表示
                   const msgs: Record<string, string> = {
@@ -230,7 +242,7 @@ function HubContent() {
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 800, color: active ? "#1e293b" : "#94a3b8" }}>{tile.label}</div>
                 <div style={{ fontSize: 11, color: active ? "#64748b" : "#cbd5e1", fontWeight: 500 }}>{tile.sub}</div>
-                {badge && <div style={{ position: "absolute", top: 10, right: 10, background: tile.color, color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 6 }}>{badge}</div>}
+                {badge && <div style={{ position: "absolute", top: 10, right: 10, background: badge === "未回答" ? "#f59e0b" : tile.color, color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 6 }}>{badge}</div>}
                 {!active && isNew && <div style={{ position: "absolute", top: 10, right: 10, background: "#e2e8f0", color: "#94a3b8", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 5 }}>未入力</div>}
               </button>
             );
