@@ -489,6 +489,8 @@ export default function ConsultationPage() {
                   <>
                     <a href={`/consultation/hub?appointment_id=${selectedApt.id}`}
                       className="block w-full py-3 rounded-lg text-sm font-bold bg-sky-500 text-white hover:bg-sky-600 text-center shadow-lg shadow-sky-200">📋 診察画面を開く →</a>
+                    <a href={`/karte-agent/unit?appointment_id=${selectedApt.id}`}
+                      className="block w-full py-3 rounded-lg text-sm font-bold bg-gray-900 text-white hover:bg-gray-800 text-center">🤖 カルテエージェントで開く →</a>
                     <button onClick={() => updateStatus(selectedApt, "completed")}
                       className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
                   </>
