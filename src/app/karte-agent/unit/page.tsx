@@ -100,22 +100,25 @@ export default function KarteAgentUnit() {
       const mr = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
       mediaRec.current = mr;
 
-      let chunks: Blob[] = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      const chunksRef = { current: [] as Blob[] };
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
 
-      // Send chunk every 5 seconds
+      // Send chunk every 15 seconds for better Whisper accuracy
       chunkTimerRef.current = setInterval(() => {
-        if (mr.state === "recording" && chunks.length > 0) {
-          const blob = new Blob(chunks, { type: "audio/webm" });
-          chunks = [];
+        if (mr.state === "recording" && chunksRef.current.length > 0) {
+          const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+          chunksRef.current = [];
           sendChunk(blob);
         }
-      }, 5000);
+      }, 15000);
+
+      // Store ref so stopRecording can flush remaining
+      (mediaRec as unknown as Record<string, unknown>).chunksRef = chunksRef;
 
       mr.start(1000); // collect data every 1s
       setRecording(true);
       setRecTime(0);
-      setStatus("録音中...");
+      setStatus("録音中... (15秒ごとに送信)");
     } catch (e) {
       console.error("Mic error:", e);
       setStatus("マイクにアクセスできません");
@@ -123,6 +126,13 @@ export default function KarteAgentUnit() {
   };
 
   const stopRecording = () => {
+    // Send any remaining audio
+    const chunksRef = (mediaRec as unknown as Record<string, unknown>).chunksRef as { current: Blob[] } | undefined;
+    if (chunksRef && chunksRef.current.length > 0) {
+      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      chunksRef.current = [];
+      sendChunk(blob);
+    }
     if (mediaRec.current && mediaRec.current.state !== "inactive") {
       mediaRec.current.stop();
       mediaRec.current.stream.getTracks().forEach(t => t.stop());
