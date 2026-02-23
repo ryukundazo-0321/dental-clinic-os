@@ -35,13 +35,13 @@ export default function KarteAgentUnit() {
     (async () => {
       const { data: apt } = await supabase
         .from("appointments")
-        .select("patient_id, patients(name, date_of_birth, sex, allergies)")
+        .select("patient_id, patients(name_kanji, date_of_birth, allergies)")
         .eq("id", appointmentId)
         .single();
       if (apt?.patients) {
-        const p = apt.patients as unknown as { name: string; date_of_birth: string; sex: string; allergies: string[] | null };
+        const p = apt.patients as unknown as { name_kanji: string; date_of_birth: string; allergies: string[] | null };
         const age = p.date_of_birth ? Math.floor((Date.now() - new Date(p.date_of_birth).getTime()) / 31557600000) : 0;
-        setPatient({ name: p.name, age, sex: p.sex === "male" ? "男" : "女", allergies: p.allergies || [] });
+        setPatient({ name: p.name_kanji, age, sex: "", allergies: p.allergies || [] });
       }
     })();
   }, [appointmentId]);
