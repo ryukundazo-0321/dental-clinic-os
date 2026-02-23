@@ -39,26 +39,27 @@ export default function KarteAgentReception() {
 
   // Load active appointments (units in consultation)
   const loadUnits = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("appointments")
-      .select("id, patient_id, patients(name, date_of_birth, sex, allergies), visit_type, staff(name), unit_id, units(name)")
+      .select("id, patient_id, patient_type, unit_id, patients(id, name_kanji, name_kana, date_of_birth, allergies)")
       .eq("status", "in_consultation")
       .order("scheduled_at", { ascending: true });
 
+    if (error) { console.error("loadUnits error:", error); return; }
     if (data) {
       const mapped: ActiveUnit[] = data.map((a: Record<string, unknown>) => {
         const p = a.patients as Record<string, unknown> | null;
         const age = p?.date_of_birth ? Math.floor((Date.now() - new Date(p.date_of_birth as string).getTime()) / 31557600000) : 0;
         return {
           appointment_id: a.id as string,
-          patient_name: (p?.name as string) || "不明",
+          patient_name: (p?.name_kanji as string) || "不明",
           patient_age: age,
-          patient_sex: (p?.sex as string) === "male" ? "男" : "女",
+          patient_sex: "",
           allergies: (p?.allergies as string[]) || [],
-          type: (a.visit_type as string) === "first_visit" ? "初診" : "再診",
-          dr: ((a.staff as Record<string, unknown>)?.name as string) || "",
+          type: (a.patient_type as string) === "new" ? "初診" : "再診",
+          dr: "",
           dh: "",
-          unit_name: ((a.units as Record<string, unknown>)?.name as string) || `U${a.unit_id}`,
+          unit_name: a.unit_id ? `U${a.unit_id}` : "未割当",
         };
       });
       setUnits(mapped);
