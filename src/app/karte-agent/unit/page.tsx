@@ -57,7 +57,8 @@ export default function KarteAgentUnit() {
       const d: Record<string, { draft_text: string; status: string }> = {};
       data.forEach((r: { field_key: string; draft_text: string; status: string }) => { d[r.field_key] = r; });
       setDrafts(d);
-      if (Object.values(d).every(v => v.status === "confirmed")) setConfirmed(true);
+      if (Object.keys(d).length >= 5 && Object.values(d).every(v => v.status === "confirmed")) setConfirmed(true);
+      else setConfirmed(false);
     }
   }, [appointmentId]);
 
