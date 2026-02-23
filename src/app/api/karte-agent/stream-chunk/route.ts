@@ -73,9 +73,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Filter hallucinations
-    const hallucinations = ["ご視聴ありがとうございました", "チャンネル登録", "お願いします。", "ありがとうございました。"];
-    if (hallucinations.some(h => rawText.trim() === h)) {
+    const hallucinations = [
+      "ご視聴ありがとうございました", "チャンネル登録", "お願いします。",
+      "ありがとうございました。", "ご視聴ありがとうございます",
+      "チャンネル登録お願いします", "高評価お願いします",
+      "おやすみなさい", "それではまた",
+    ];
+    const trimmed = rawText.trim();
+    if (hallucinations.some(h => trimmed === h || trimmed === h.replace("。", ""))) {
       return NextResponse.json({ success: true, skipped: true, reason: "hallucination" });
+    }
+    // Also skip very short/meaningless text
+    if (trimmed.length < 4) {
+      return NextResponse.json({ success: true, skipped: true, reason: "too short" });
     }
 
     // Step 2: AI classification with GPT-4o-mini
