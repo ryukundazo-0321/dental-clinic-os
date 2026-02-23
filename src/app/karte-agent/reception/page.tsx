@@ -148,7 +148,7 @@ export default function KarteAgentReception() {
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>稼働: {units.length} ユニット</span>
       </header>
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
         {/* Unit list */}
         <div style={{ width: 220, background: "#FFF", borderRight: "1px solid #E5E7EB", overflow: "auto", flexShrink: 0 }}>
           <div style={{ padding: "12px 12px 6px", fontSize: 10, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.06em" }}>ユニット一覧</div>
@@ -210,7 +210,7 @@ export default function KarteAgentReception() {
         </div>
 
         {/* Approval cards */}
-        <div style={{ flex: 1, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ flex: 1, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
           <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
             {STEPS.map(st => {
               const d = getDraft(st.key); const done = d?.status === "approved" || d?.status === "confirmed"; const has = !!d;
@@ -226,7 +226,7 @@ export default function KarteAgentReception() {
             const isMsgOpen = fieldMsgOpen === st.key;
             const fieldChunks = chunks.filter(c => c.classified_field === st.key);
             return (
-              <div key={st.key} style={{ background: "#FFF", borderRadius: 12, border: "1px solid " + (done ? "#D1FAE5" : d ? "#FDE68A" : "#E5E7EB"), overflow: "hidden", transition: "all 0.3s" }}>
+              <div key={st.key} style={{ background: "#FFF", borderRadius: 12, border: "1px solid " + (done ? "#D1FAE5" : d ? "#FDE68A" : "#E5E7EB"), transition: "all 0.3s", flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px" }}>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{st.label}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
