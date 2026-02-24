@@ -62,6 +62,7 @@ export default function KarteAgentReception() {
   const [fieldMsgOpen, setFieldMsgOpen] = useState<string|null>(null);
   const [fieldMsgInput, setFieldMsgInput] = useState<Record<string,string>>({});
   const [confirmed, setConfirmed] = useState(false);
+  const [actionModal, setActionModal] = useState<string|null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadUnits = useCallback(async () => {
@@ -79,7 +80,16 @@ export default function KarteAgentReception() {
     }
   },[selApt]);
 
-  useEffect(()=>{loadUnits();},[loadUnits]);
+  useEffect(()=>{
+    loadUnits();
+    // Realtime: listen for appointment status changes (new patients arriving, etc.)
+    const ch=supabase.channel("rec-appointments")
+      .on("postgres_changes",{event:"*",schema:"public",table:"appointments"},()=>loadUnits())
+      .subscribe();
+    // Polling fallback: 3s
+    const t=setInterval(loadUnits,3000);
+    return ()=>{supabase.removeChannel(ch);clearInterval(t);};
+  },[loadUnits]);
 
   const loadData = useCallback(async () => {
     if(!selApt) return;
@@ -102,7 +112,9 @@ export default function KarteAgentReception() {
       .on("postgres_changes",{event:"*",schema:"public",table:"karte_ai_drafts",filter:`appointment_id=eq.${selApt}`},()=>loadData())
       .on("postgres_changes",{event:"INSERT",schema:"public",table:"karte_messages",filter:`appointment_id=eq.${selApt}`},()=>loadData())
       .subscribe();
-    return ()=>{supabase.removeChannel(ch);};
+    // Polling fallback: refresh every 3s for realtime transcript visibility
+    const poll=setInterval(()=>loadData(),3000);
+    return ()=>{supabase.removeChannel(ch);clearInterval(poll);};
   },[selApt,loadData]);
 
   useEffect(()=>{if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[chunks]);
@@ -159,6 +171,7 @@ export default function KarteAgentReception() {
 
   return (
     <div style={{fontFamily:"-apple-system,'Helvetica Neue','Noto Sans JP',sans-serif",height:"100vh",display:"flex",flexDirection:"column",background:"#F8FAFC",color:"#1E293B"}}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
       <header style={{background:"#FFF",padding:"8px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #E5E7EB",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 8px rgba(34,197,94,0.4)"}} />
@@ -195,7 +208,10 @@ export default function KarteAgentReception() {
                 <div><span style={{fontSize:16,fontWeight:700}}>{u.patient_name}</span><span style={{fontSize:12,color:"#9CA3AF",marginLeft:8}}>{u.patient_age}歳</span></div>
                 {u.allergies.map(a=><span key={a} style={{background:"#FEF2F2",color:"#DC2626",fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:6}}>⚠ {a}</span>)}
               </div>
-              {chunks.length>0&&<div style={{fontSize:11,fontWeight:600,color:"#3B82F6",marginTop:4}}>● 文字起こし受信中 ({chunks.length}件)</div>}
+              {chunks.length>0&&<div style={{fontSize:11,fontWeight:600,color:"#3B82F6",marginTop:4}}>
+                <span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:"#3B82F6",marginRight:5,animation:"pulse 1.5s infinite"}} />
+                文字起こし受信中 ({chunks.length}件)
+              </div>}
             </div>
           )}
           <div ref={scrollRef} style={{flex:1,overflow:"auto",padding:"8px 12px",minHeight:0}}>
@@ -333,10 +349,77 @@ export default function KarteAgentReception() {
                 </div>
               </div>
               <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                <button style={{background:"#F5F3FF",color:"#7C3AED",border:"1.5px solid #DDD6FE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📋 治療計画書</button>
-                <button style={{background:"#EFF6FF",color:"#2563EB",border:"1.5px solid #BFDBFE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📅 次回予約</button>
-                <button style={{background:"#FFF7ED",color:"#C2410C",border:"1.5px solid #FDBA74",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 領収書発行</button>
-                <button style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 会計へ →</button>
+                <button onClick={()=>setActionModal("plan")} style={{background:"#F5F3FF",color:"#7C3AED",border:"1.5px solid #DDD6FE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📋 治療計画書</button>
+                <button onClick={()=>setActionModal("nextAppt")} style={{background:"#EFF6FF",color:"#2563EB",border:"1.5px solid #BFDBFE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📅 次回予約</button>
+                <button onClick={()=>setActionModal("receipt")} style={{background:"#FFF7ED",color:"#C2410C",border:"1.5px solid #FDBA74",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 領収書発行</button>
+                <button onClick={async()=>{
+                  await supabase.from("appointments").update({status:"completed"}).eq("id",selApt);
+                  setActionModal("accounting");
+                }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 会計へ →</button>
+              </div>
+            </div>
+          )}
+
+          {/* Action Modals */}
+          {actionModal&&(
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999}} onClick={()=>setActionModal(null)}>
+              <div style={{background:"#FFF",borderRadius:16,padding:24,maxWidth:480,width:"90%",maxHeight:"80vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
+                {actionModal==="plan"&&(
+                  <div>
+                    <div style={{fontSize:18,fontWeight:800,marginBottom:12}}>📋 治療計画書</div>
+                    <div style={{background:"#F9FAFB",borderRadius:10,padding:16,fontSize:13,lineHeight:1.8}}>
+                      <div style={{fontWeight:700,marginBottom:8}}>患者: {u?.patient_name} ({u?.patient_age}歳)</div>
+                      {STEPS.map(st=>{const d=getDraft(st.key);return d?<div key={st.key} style={{marginBottom:8}}><span style={{fontWeight:700,color:st.color}}>{st.label}:</span> {d.draft_text}</div>:null;})}
+                    </div>
+                    <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
+                      <button onClick={()=>{window.print();}} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>🖨 印刷</button>
+                      <button onClick={()=>setActionModal(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>閉じる</button>
+                    </div>
+                  </div>
+                )}
+                {actionModal==="nextAppt"&&(
+                  <div>
+                    <div style={{fontSize:18,fontWeight:800,marginBottom:12}}>📅 次回予約</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      <div><label style={{fontSize:12,fontWeight:600,color:"#6B7280"}}>日付</label><input type="date" style={{display:"block",width:"100%",padding:"8px 12px",borderRadius:8,border:"1px solid #E5E7EB",fontSize:14,marginTop:4}} /></div>
+                      <div><label style={{fontSize:12,fontWeight:600,color:"#6B7280"}}>時間</label><input type="time" style={{display:"block",width:"100%",padding:"8px 12px",borderRadius:8,border:"1px solid #E5E7EB",fontSize:14,marginTop:4}} /></div>
+                      <div><label style={{fontSize:12,fontWeight:600,color:"#6B7280"}}>内容</label><input defaultValue={getDraft("dr")?.draft_text?.match(/次回[:：]\s*(.+)/)?.[1]||""} placeholder="根充、補綴..." style={{display:"block",width:"100%",padding:"8px 12px",borderRadius:8,border:"1px solid #E5E7EB",fontSize:14,marginTop:4}} /></div>
+                    </div>
+                    <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
+                      <button onClick={()=>{alert("予約を登録しました");setActionModal(null);}} style={{background:"#2563EB",color:"#FFF",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>予約登録</button>
+                      <button onClick={()=>setActionModal(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>閉じる</button>
+                    </div>
+                  </div>
+                )}
+                {actionModal==="receipt"&&(
+                  <div>
+                    <div style={{fontSize:18,fontWeight:800,marginBottom:12}}>📄 領収書</div>
+                    <div style={{background:"#F9FAFB",borderRadius:10,padding:16,fontSize:13,lineHeight:2}}>
+                      <div style={{textAlign:"center",fontWeight:700,fontSize:16,marginBottom:8}}>領 収 書</div>
+                      <div>患者名: {u?.patient_name} 様</div>
+                      <div>日付: {new Date().toLocaleDateString("ja-JP")}</div>
+                      <div style={{borderTop:"1px solid #E5E7EB",marginTop:8,paddingTop:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between"}}><span>保険点数</span><span>765点</span></div>
+                        <div style={{display:"flex",justifyContent:"space-between"}}><span>負担割合</span><span>3割</span></div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,marginTop:8,borderTop:"2px solid #111827",paddingTop:8}}><span>お支払い金額</span><span>¥2,300</span></div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
+                      <button onClick={()=>{window.print();}} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>🖨 印刷</button>
+                      <button onClick={()=>setActionModal(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>閉じる</button>
+                    </div>
+                  </div>
+                )}
+                {actionModal==="accounting"&&(
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:48,marginBottom:10}}>✅</div>
+                    <div style={{fontSize:20,fontWeight:800,color:"#16A34A",marginBottom:8}}>会計処理完了</div>
+                    <div style={{fontSize:14,color:"#6B7280",marginBottom:4}}>患者: {u?.patient_name} 様</div>
+                    <div style={{fontSize:24,fontWeight:900,marginBottom:12}}>¥2,300</div>
+                    <div style={{fontSize:13,color:"#9CA3AF",marginBottom:16}}>ステータスを「完了」に更新しました</div>
+                    <button onClick={()=>{setActionModal(null);loadUnits();loadData();}} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer"}}>閉じる</button>
+                  </div>
+                )}
               </div>
             </div>
           )}
