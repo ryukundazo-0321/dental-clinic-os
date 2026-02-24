@@ -18,7 +18,7 @@ export async function POST() {
           input_audio_transcription: {
             model: "gpt-4o-transcribe",
             language: "ja",
-            prompt: "歯科診療所での医師・衛生士と患者の会話。う蝕 C1 C2 C3 C4 FMC CR充填 インレー 抜髄 根管治療 感根治 根充 TEK SC SRP PMTC TBI P検 BOP PPD 浸麻 印象 咬合採得 形成 装着 ロキソニン フロモックス カロナール クラビット 右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番",
+            prompt: "歯科診療の会話です。",
           },
           turn_detection: {
             type: "server_vad",
