@@ -11,8 +11,6 @@ const STEPS = [
   { key: "dr", label: "Dr診察" },
 ];
 
-const WHISPER_PROMPT = "歯科診療の会話です。";
-
 function UnitContent() {
   const params = useSearchParams();
   const appointmentId = params.get("appointment_id") || "";
@@ -126,17 +124,13 @@ function UnitContent() {
       if(!tokenData.key){setStatus("❌ APIキー取得失敗");setTranscribing(false);return;}
       const fd=new FormData();
       fd.append("file",blob,"recording.webm"); fd.append("model","gpt-4o-transcribe");
-      fd.append("language","ja"); fd.append("prompt",WHISPER_PROMPT);
+      fd.append("language","ja");
       const whisperRes=await fetch("https://api.openai.com/v1/audio/transcriptions",{
         method:"POST",headers:{Authorization:`Bearer ${tokenData.key}`},body:fd});
       if(!whisperRes.ok){setStatus(`❌ 音声認識エラー（${whisperRes.status}）`);setTranscribing(false);return;}
       const wr=await whisperRes.json(); let raw=wr.text||"";
       if(!raw||raw.trim().length<5){setStatus("⚠️ 音声を認識できませんでした");setTranscribing(false);return;}
-      try{
-        const corrRes=await fetch("/api/voice-analyze",{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({whisper_only:true,raw_transcript:raw})});
-        if(corrRes.ok){const cd=await corrRes.json();if(cd.success&&cd.transcript&&!cd.transcript.includes("申し訳ありません")&&!cd.transcript.includes("補正を行うことができません")) raw=cd.transcript;}
-      }catch(e){console.log("Correction skipped:",e);}
+      // 文字起こし完了 → そのままAI振り分けへ（補正ステップ不要、gpt-4o-transcribeは十分高精度）
       setTranscript(raw); setStatus("🤖 AI振り分け中...");
       const classifyRes=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({appointment_id:appointmentId,transcript:raw})});
@@ -196,7 +190,6 @@ function UnitContent() {
                 transcription: {
                   model: "gpt-4o-transcribe",
                   language: "ja",
-                  prompt: "歯科診療の会話です。",
                 },
                 noise_reduction: { type: "near_field" },
                 turn_detection: {
