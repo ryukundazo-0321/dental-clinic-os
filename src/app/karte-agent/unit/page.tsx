@@ -171,10 +171,22 @@ function UnitContent() {
     try{
       setStatus("🔑 リアルタイムトークン取得中...");
       const tokenRes=await fetch("/api/karte-agent/realtime-token",{method:"POST"});
-      if(!tokenRes.ok){setStatus("❌ トークン取得失敗");return;}
+      if(!tokenRes.ok){
+        const errData=await tokenRes.json().catch(()=>({}));
+        console.error("Token error:",errData);
+        setStatus("❌ トークン取得失敗: "+(errData.detail||errData.error||tokenRes.status));
+        return;
+      }
       const tokenData=await tokenRes.json();
-      const ephemeralKey=tokenData?.client_secret?.value;
-      if(!ephemeralKey){setStatus("❌ トークンが空です");return;}
+      // GA API response: { value: "ek_xxx" } or { client_secret: { value: "ek_xxx" } }
+      const ephemeralKey=tokenData?.value||tokenData?.client_secret?.value;
+      if(!ephemeralKey){
+        console.error("Token data:",tokenData);
+        setStatus("❌ トークンが空です");
+        return;
+      }
+
+      setStatus("🔗 WebRTC接続中...");
 
       // Get microphone
       const stream=await navigator.mediaDevices.getUserMedia({audio:true});
@@ -191,11 +203,16 @@ function UnitContent() {
       const dc=pc.createDataChannel("oai-events");
       dcRef.current=dc;
 
+      dc.addEventListener("open",()=>{
+        console.log("Realtime data channel open");
+      });
+
       dc.addEventListener("message",(e)=>{
         try{
           const event=JSON.parse(e.data);
+
+          // Transcription delta (partial)
           if(event.type==="conversation.item.input_audio_transcription.delta"){
-            // Partial transcript
             const delta=event.delta||"";
             if(delta.trim()){
               setRealtimeLines(prev=>{
@@ -207,8 +224,9 @@ function UnitContent() {
                 return [...prev,{text:delta,time:new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"}),isFinal:false}];
               });
             }
-          } else if(event.type==="conversation.item.input_audio_transcription.completed"){
-            // Final transcript for this utterance
+          }
+          // Transcription completed (final for this utterance)
+          else if(event.type==="conversation.item.input_audio_transcription.completed"){
             const text=event.transcript||"";
             if(text.trim()){
               setRealtimeLines(prev=>{
@@ -229,6 +247,14 @@ function UnitContent() {
               }).then(()=>{});
             }
           }
+          // Also handle transcription session specific events
+          else if(event.type==="transcription_session.created"||event.type==="session.created"){
+            console.log("Realtime session created:",event);
+          }
+          else if(event.type==="error"){
+            console.error("Realtime API error:",event);
+            setStatus("⚠️ リアルタイムエラー: "+(event.error?.message||"不明"));
+          }
         }catch(err){/* ignore non-JSON */}
       });
 
@@ -236,18 +262,22 @@ function UnitContent() {
       const offer=await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Send to OpenAI Realtime API
+      // GA API: POST /v1/realtime/calls with ephemeral key
       const sdpRes=await fetch("https://api.openai.com/v1/realtime/calls",{
         method:"POST",
-        headers:{Authorization:`Bearer ${ephemeralKey}`,"Content-Type":"application/sdp"},
+        headers:{
+          Authorization:`Bearer ${ephemeralKey}`,
+          "Content-Type":"application/sdp",
+        },
         body:offer.sdp,
       });
 
       if(!sdpRes.ok){
         const errText=await sdpRes.text();
         console.error("SDP error:",sdpRes.status,errText);
-        setStatus(`❌ WebRTC接続失敗 (${sdpRes.status})`);
+        setStatus(`❌ WebRTC接続失敗 (${sdpRes.status}): ${errText.slice(0,100)}`);
         stream.getTracks().forEach(t=>t.stop());
+        pc.close();
         return;
       }
 
