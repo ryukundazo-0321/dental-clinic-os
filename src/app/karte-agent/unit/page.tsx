@@ -13,25 +13,6 @@ const STEPS = [
 
 const WHISPER_PROMPT = "歯科診療の会話です。";
 
-function detectHallucination(text: string): boolean {
-  if (!text || text.trim().length < 3) return true;
-  const patterns = [
-    /ご視聴ありがとう/i, /チャンネル登録/i, /お疲れ様でした/i,
-    /ありがとうございました。$/i, /よろしくお願いします。$/i,
-    /おやすみなさい/i, /字幕/i, /翻訳/i, /MBS/i, /毎日放送/i,
-  ];
-  if (patterns.some(p => p.test(text))) return true;
-  // Detect repetitive gibberish: if same 2-4 char pattern repeats 5+ times
-  const cleaned = text.replace(/\s/g, "");
-  for (let len = 2; len <= 4; len++) {
-    if (cleaned.length < len * 5) continue;
-    const chunk = cleaned.slice(0, len);
-    const repeats = cleaned.split(chunk).length - 1;
-    if (repeats >= 5 && (repeats * len) > cleaned.length * 0.5) return true;
-  }
-  return false;
-}
-
 function UnitContent() {
   const params = useSearchParams();
   const appointmentId = params.get("appointment_id") || "";
@@ -138,19 +119,19 @@ function UnitContent() {
       mediaRec.current!.stop();
       mediaRec.current!.stream.getTracks().forEach(t=>t.stop());
     });
-    setRecording(false); setTranscribing(true); setStatus("📝 Whisperで文字起こし中...");
+    setRecording(false); setTranscribing(true); setStatus("📝 文字起こし中...");
+    if(recTime<3){setStatus("⚠️ 録音が短すぎます（3秒以上録音してください）");setTranscribing(false);return;}
     try{
       const tokenRes=await fetch("/api/whisper-token"); const tokenData=await tokenRes.json();
       if(!tokenData.key){setStatus("❌ APIキー取得失敗");setTranscribing(false);return;}
       const fd=new FormData();
-      fd.append("file",blob,"recording.webm"); fd.append("model","whisper-1");
-      fd.append("language","ja"); fd.append("prompt",WHISPER_PROMPT); fd.append("temperature","0");
+      fd.append("file",blob,"recording.webm"); fd.append("model","gpt-4o-transcribe");
+      fd.append("language","ja"); fd.append("prompt",WHISPER_PROMPT);
       const whisperRes=await fetch("https://api.openai.com/v1/audio/transcriptions",{
         method:"POST",headers:{Authorization:`Bearer ${tokenData.key}`},body:fd});
       if(!whisperRes.ok){setStatus(`❌ 音声認識エラー（${whisperRes.status}）`);setTranscribing(false);return;}
       const wr=await whisperRes.json(); let raw=wr.text||"";
       if(!raw||raw.trim().length<5){setStatus("⚠️ 音声を認識できませんでした");setTranscribing(false);return;}
-      if(detectHallucination(raw)){setStatus("⚠️ 音声認識がうまくいきませんでした。もう少しはっきり話してください。");setTranscribing(false);return;}
       try{
         const corrRes=await fetch("/api/voice-analyze",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({whisper_only:true,raw_transcript:raw})});
@@ -205,6 +186,25 @@ function UnitContent() {
 
       dc.addEventListener("open",()=>{
         console.log("Realtime data channel open");
+        // Enable input audio transcription via session.update
+        dc.send(JSON.stringify({
+          type: "session.update",
+          session: {
+            type: "realtime",
+            input_audio_transcription: {
+              model: "gpt-4o-transcribe",
+              language: "ja",
+              prompt: "歯科診療の会話です。",
+            },
+            input_audio_noise_reduction: { type: "near_field" },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 800,
+            },
+          },
+        }));
       });
 
       dc.addEventListener("message",(e)=>{
