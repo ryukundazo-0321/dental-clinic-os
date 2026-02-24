@@ -11,7 +11,26 @@ const STEPS = [
   { key: "dr", label: "Dr診察" },
 ];
 
-const WHISPER_PROMPT = "歯科診療所での医師・衛生士と患者の会話。う蝕 C1 C2 C3 C4 FMC CR充填 インレー 抜髄 根管治療 感根治 根充 TEK SC SRP PMTC TBI P検 BOP PPD 浸麻 印象 咬合採得 形成 装着 ロキソニン フロモックス カロナール クラビット 右上 左上 右下 左下 1番 2番 3番 4番 5番 6番 7番 8番";
+const WHISPER_PROMPT = "歯科診療の会話です。";
+
+function detectHallucination(text: string): boolean {
+  if (!text || text.trim().length < 3) return true;
+  const patterns = [
+    /ご視聴ありがとう/i, /チャンネル登録/i, /お疲れ様でした/i,
+    /ありがとうございました。$/i, /よろしくお願いします。$/i,
+    /おやすみなさい/i, /字幕/i, /翻訳/i, /MBS/i, /毎日放送/i,
+  ];
+  if (patterns.some(p => p.test(text))) return true;
+  // Detect repetitive gibberish: if same 2-4 char pattern repeats 5+ times
+  const cleaned = text.replace(/\s/g, "");
+  for (let len = 2; len <= 4; len++) {
+    if (cleaned.length < len * 5) continue;
+    const chunk = cleaned.slice(0, len);
+    const repeats = cleaned.split(chunk).length - 1;
+    if (repeats >= 5 && (repeats * len) > cleaned.length * 0.5) return true;
+  }
+  return false;
+}
 
 function UnitContent() {
   const params = useSearchParams();
@@ -131,6 +150,7 @@ function UnitContent() {
       if(!whisperRes.ok){setStatus(`❌ 音声認識エラー（${whisperRes.status}）`);setTranscribing(false);return;}
       const wr=await whisperRes.json(); let raw=wr.text||"";
       if(!raw||raw.trim().length<5){setStatus("⚠️ 音声を認識できませんでした");setTranscribing(false);return;}
+      if(detectHallucination(raw)){setStatus("⚠️ 音声認識がうまくいきませんでした。もう少しはっきり話してください。");setTranscribing(false);return;}
       try{
         const corrRes=await fetch("/api/voice-analyze",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({whisper_only:true,raw_transcript:raw})});
