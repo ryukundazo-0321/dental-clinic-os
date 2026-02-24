@@ -135,7 +135,7 @@ function UnitContent() {
       try{
         const corrRes=await fetch("/api/voice-analyze",{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({whisper_only:true,raw_transcript:raw})});
-        if(corrRes.ok){const cd=await corrRes.json();if(cd.success&&cd.transcript) raw=cd.transcript;}
+        if(corrRes.ok){const cd=await corrRes.json();if(cd.success&&cd.transcript&&!cd.transcript.includes("申し訳ありません")&&!cd.transcript.includes("補正を行うことができません")) raw=cd.transcript;}
       }catch(e){console.log("Correction skipped:",e);}
       setTranscript(raw); setStatus("🤖 AI振り分け中...");
       const classifyRes=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -186,22 +186,26 @@ function UnitContent() {
 
       dc.addEventListener("open",()=>{
         console.log("Realtime data channel open");
-        // Enable input audio transcription via session.update
+        // Enable input audio transcription via session.update (GA format)
         dc.send(JSON.stringify({
           type: "session.update",
           session: {
             type: "realtime",
-            input_audio_transcription: {
-              model: "gpt-4o-transcribe",
-              language: "ja",
-              prompt: "歯科診療の会話です。",
-            },
-            input_audio_noise_reduction: { type: "near_field" },
-            turn_detection: {
-              type: "server_vad",
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 800,
+            audio: {
+              input: {
+                transcription: {
+                  model: "gpt-4o-transcribe",
+                  language: "ja",
+                  prompt: "歯科診療の会話です。",
+                },
+                noise_reduction: { type: "near_field" },
+                turn_detection: {
+                  type: "server_vad",
+                  threshold: 0.5,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 800,
+                },
+              },
             },
           },
         }));
