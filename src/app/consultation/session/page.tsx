@@ -1248,7 +1248,7 @@ function SessionContent() {
                     const lr = LOWER_RIGHT.filter(t => !excluded.includes(t));
                     const ll = LOWER_LEFT.filter(t => !excluded.includes(t));
                     let order: string[] = [];
-                    if (perioOrderType === "U") order = [...ur, ...ul, ...ll, ...lr];
+                    if (perioOrderType === "U") order = [...ur, ...ul, ...[...ll].reverse(), ...[...lr].reverse()];
                     else if (perioOrderType === "Z") order = [...ur, ...ul, ...lr, ...ll];
                     else if (perioOrderType === "S") order = [...ur, ...ul, ...[...ll].reverse(), ...[...lr].reverse()];
                     else order = [...ur, ...ul, ...lr, ...ll];
@@ -1378,6 +1378,8 @@ function SessionContent() {
                                     "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
                                     "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
                                   };
+                                  // Patterns to IGNORE (tooth references, not PPD values)
+                                  const ignorePatterns = /右上|左上|右下|左下|番|ばん|歯|しか|ミリ|mm/;
 
                                   let buffer: number[] = [];
 
@@ -1385,13 +1387,31 @@ function SessionContent() {
                                     for (let i = event.resultIndex; i < event.results.length; i++) {
                                       if (!event.results[i].isFinal) continue;
                                       const text = event.results[i][0].transcript.trim();
+                                      
+                                      // BOP voice detection: 出血/BOP/プラス/bleeding → set BOP on current tooth & advance
+                                      if (/出血|びーおーぴー|BOP|ビーオーピー|プラス|ブリーディング|bleeding/i.test(text)) {
+                                        setPerioData(prev => {
+                                          const pd = prev[curT] || { buccal: [2,2,2] as [number,number,number], lingual: [2,2,2] as [number,number,number], bop: false, mobility: 0 };
+                                          return { ...prev, [curT]: { ...pd, bop: true } };
+                                        });
+                                        showMsg(`#${curT}: BOP(+) 出血あり`);
+                                        setPerioCurrentIdx(prev => { const next = prev + 1; return next < order.length ? next : prev; });
+                                        setPerioSide("buccal");
+                                        continue;
+                                      }
+                                      
+                                      // Skip if it sounds like a tooth reference (右上7番 etc)
+                                      if (ignorePatterns.test(text)) continue;
                                       // テキストから数字を抽出
                                       const words = text.split(/[\s,、。．.]+/);
                                       for (const w of words) {
                                         const cleaned = w.trim();
                                         if (!cleaned) continue;
-                                        const num = numMap[cleaned] || parseInt(cleaned);
-                                        if (num >= 1 && num <= 15) {
+                                        // Skip 2-digit numbers (likely tooth numbers like 17, 46)
+                                        const parsed = parseInt(cleaned);
+                                        if (parsed >= 11 && parsed <= 48) continue;
+                                        const num = numMap[cleaned] || (parsed >= 1 && parsed <= 10 ? parsed : 0);
+                                        if (num >= 1 && num <= 10) {
                                           buffer.push(num);
                                           setPerioInputBuffer([...buffer]);
 
@@ -1469,27 +1489,45 @@ function SessionContent() {
                         </div>
 
                         <p className="text-xs text-gray-400 text-center mb-2">タップで数値入力（手動 / 音声の補助用）</p>
-                        <div className="flex justify-center gap-1 mb-3">
+                        <div className="flex justify-center gap-1 mb-2">
                           {[1,2,3,4,5,6,7,8,9,10].map(v => (
                             <button key={v} onClick={() => {
                               const pd = perioData[curT] || { buccal: [2,2,2] as [number,number,number], lingual: [2,2,2] as [number,number,number], bop: false, mobility: 0 };
                               if (perioProbePoints === 1) {
                                 setPerioData({ ...perioData, [curT]: { ...pd, buccal: [v,v,v] as [number,number,number], lingual: [v,v,v] as [number,number,number] } });
-                                if (perioCurrentIdx < order.length - 1) setPerioCurrentIdx(perioCurrentIdx + 1);
                                 showMsg(`#${curT}: ${v}mm`);
                               } else if (perioSide === "buccal") {
-                                const arr = [...pd.buccal] as [number,number,number];
-                                arr[0] = v; // 簡易: 頬側を一括v
                                 setPerioData({ ...perioData, [curT]: { ...pd, buccal: [v,v,v] as [number,number,number] } });
                                 setPerioSide("lingual");
+                                showMsg(`#${curT} 頬側: ${v}mm → 舌側へ`);
                               } else {
                                 setPerioData({ ...perioData, [curT]: { ...pd, lingual: [v,v,v] as [number,number,number] } });
-                                if (perioCurrentIdx < order.length - 1) { setPerioCurrentIdx(perioCurrentIdx + 1); setPerioSide("buccal"); }
+                                showMsg(`#${curT} 舌側: ${v}mm`);
                               }
                             }} className={`w-8 h-8 rounded-lg text-xs font-bold border-2 hover:scale-110 ${
                               v >= 6 ? "border-red-400 bg-red-50 text-red-700" : v >= 4 ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 bg-white text-gray-600"
                             }`}>{v}</button>
                           ))}
+                        </div>
+                        {/* BOP + 次の歯ボタン */}
+                        <div className="flex justify-center gap-2 mb-3">
+                          <button onClick={() => {
+                            const pd = perioData[curT] || { buccal: [2,2,2] as [number,number,number], lingual: [2,2,2] as [number,number,number], bop: false, mobility: 0 };
+                            setPerioData({ ...perioData, [curT]: { ...pd, bop: !pd.bop } });
+                            if (!pd.bop) {
+                              // BOP ON → 自動で次の歯へ
+                              showMsg(`#${curT}: BOP(+) 出血あり`);
+                              if (perioCurrentIdx < order.length - 1) { setPerioCurrentIdx(perioCurrentIdx + 1); setPerioSide("buccal"); }
+                            } else {
+                              showMsg(`#${curT}: BOP(-) 出血なし`);
+                            }
+                          }} className={`px-4 py-2 rounded-lg text-xs font-bold border-2 ${
+                            (perioData[curT]?.bop) ? "bg-red-500 text-white border-red-500" : "bg-white border-red-300 text-red-400"
+                          }`}>🩸 {(perioData[curT]?.bop) ? "BOP(+)" : "BOP(-)"}</button>
+                          <button onClick={() => {
+                            if (perioCurrentIdx < order.length - 1) { setPerioCurrentIdx(perioCurrentIdx + 1); setPerioSide("buccal"); }
+                          }} disabled={perioCurrentIdx >= order.length - 1}
+                            className="px-4 py-2 rounded-lg text-xs font-bold bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-30">次の歯 →</button>
                         </div>
                         <div className="flex justify-between items-center">
                           <button onClick={() => { if (perioCurrentIdx > 0) { setPerioCurrentIdx(perioCurrentIdx - 1); setPerioSide("buccal"); } }}
