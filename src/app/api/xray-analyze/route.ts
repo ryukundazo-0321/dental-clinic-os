@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "OPENAI_API_KEY が Vercel の環境変数に設定されていません。Settings → Environment Variables で追加してください。" },
+        { success: false, error: "APIキー未設定" },
         { status: 500 }
       );
     }
@@ -113,10 +113,32 @@ FDI歯番号（11-18, 21-28, 31-38, 41-48）を使用して、以下の状態を
     const content = data.choices?.[0]?.message?.content || "{}";
     const result = JSON.parse(content);
 
+    // AI出力のステータスをフロントエンドのTOOTH_STATUSキーにマッピング
+    const statusMap: Record<string, string> = {
+      caries: "c2", cavity: "c2", decay: "c2",
+      treated: "cr", filled: "cr", filling: "cr", restoration: "cr",
+      crown: "crown", cap: "crown",
+      bridge: "br_abutment",
+      missing: "missing", absent: "missing",
+      implant: "implant",
+      root_remain: "root_remain", residual_root: "root_remain",
+      in_treatment: "in_treatment",
+      watch: "watch",
+      // c0〜c4はそのまま通す
+      c0: "c0", c1: "c1", c2: "c2", c3: "c3", c4: "c4",
+      cr: "cr", inlay: "inlay", br_abutment: "br_abutment", br_pontic: "br_pontic",
+    };
+    const rawChart = result.tooth_chart || {};
+    const mappedChart: Record<string, string> = {};
+    for (const [tooth, status] of Object.entries(rawChart)) {
+      const s = String(status).toLowerCase().trim();
+      mappedChart[tooth] = statusMap[s] || s;
+    }
+
     return NextResponse.json({
       success: true,
       analysis: result,
-      tooth_chart: result.tooth_chart || {},
+      tooth_chart: mappedChart,
       findings: result.tooth_findings || [],
       summary: result.summary || "",
     });
