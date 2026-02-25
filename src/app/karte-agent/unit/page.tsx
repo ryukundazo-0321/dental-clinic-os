@@ -39,6 +39,24 @@ function UnitContent() {
   const dcRef = useRef<RTCDataChannel|null>(null);
   const streamRef = useRef<MediaStream|null>(null);
   const realtimeTranscript = useRef("");
+  // Delta throttling: upsert partial text to Supabase every 1s so reception sees it live
+  const deltaChunkId = useRef<number|null>(null);
+  const pendingDeltaText = useRef("");
+  const deltaFlushTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+
+  const flushDeltaToSupabase = useCallback(()=>{
+    if(!pendingDeltaText.current||!deltaChunkId.current||!appointmentId) return;
+    const text=pendingDeltaText.current;
+    const cid=deltaChunkId.current;
+    supabase.from("karte_transcript_chunks").upsert({
+      appointment_id:appointmentId,
+      chunk_index:cid,
+      raw_text:text,
+      corrected_text:text,
+      speaker_role:"mixed",
+      classified_field:null,
+    },{onConflict:"appointment_id,chunk_index"}).then(()=>{});
+  },[appointmentId]);
 
   // Load patient
   useEffect(()=>{
@@ -212,6 +230,10 @@ function UnitContent() {
           if(event.type==="conversation.item.input_audio_transcription.delta"){
             const delta=event.delta||"";
             if(delta.trim()){
+              // Start new chunk if needed
+              if(!deltaChunkId.current) deltaChunkId.current=Date.now();
+              pendingDeltaText.current+=delta;
+
               setRealtimeLines(prev=>{
                 const last=prev[prev.length-1];
                 if(last&&!last.isFinal){
@@ -220,6 +242,14 @@ function UnitContent() {
                 }
                 return [...prev,{text:delta,time:new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"}),isFinal:false}];
               });
+
+              // Throttled flush to Supabase (every 1s)
+              if(!deltaFlushTimer.current){
+                deltaFlushTimer.current=setTimeout(()=>{
+                  flushDeltaToSupabase();
+                  deltaFlushTimer.current=null;
+                },1000);
+              }
             }
           }
           // Transcription completed (final for this utterance)
@@ -233,15 +263,20 @@ function UnitContent() {
               });
               realtimeTranscript.current+=(realtimeTranscript.current?" ":"")+text.trim();
 
-              // Save to Supabase
-              supabase.from("karte_transcript_chunks").insert({
+              // Final save to Supabase (upsert with final text)
+              const cid=deltaChunkId.current||Date.now();
+              if(deltaFlushTimer.current){clearTimeout(deltaFlushTimer.current);deltaFlushTimer.current=null;}
+              supabase.from("karte_transcript_chunks").upsert({
                 appointment_id:appointmentId,
-                chunk_index:Date.now(),
+                chunk_index:cid,
                 raw_text:text.trim(),
                 corrected_text:text.trim(),
                 speaker_role:"mixed",
                 classified_field:null,
-              }).then(()=>{});
+              },{onConflict:"appointment_id,chunk_index"}).then(()=>{});
+              // Reset for next utterance
+              deltaChunkId.current=null;
+              pendingDeltaText.current="";
             }
           }
           // Also handle transcription session specific events
