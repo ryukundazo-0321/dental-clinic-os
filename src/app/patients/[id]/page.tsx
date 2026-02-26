@@ -286,7 +286,7 @@ export default function PatientDetailPage() {
   const pid = params.id as string;
   const [patient, setPatient] = useState<Patient | null>(null);
   const [records, setRecords] = useState<MedicalRecord[]>([]);
-  const [billingMap, setBillingMap] = useState<Record<string, {total_points:number;patient_burden:number;procedures_detail:unknown[];payment_status:string}>>({});
+  const [billingMap, setBillingMap] = useState<Record<string, {total_points:number;patient_burden:number;insurance_claim:number;burden_ratio:number;procedures_detail:unknown[];payment_status:string;created_at:string}>>({});
   const [th, setTH] = useState<ToothHistoryEntry[]>([]);
   const [ps, setPS2] = useState<PerioSnapshot[]>([]);
   const [images, setImages] = useState<PatientImage[]>([]);
@@ -332,11 +332,11 @@ export default function PatientDetailPage() {
       if (recordIds.length > 0) {
         const { data: billings } = await supabase
           .from("billing")
-          .select("record_id, total_points, patient_burden, procedures_detail, payment_status")
+          .select("record_id, total_points, patient_burden, insurance_claim, burden_ratio, procedures_detail, payment_status, created_at")
           .in("record_id", recordIds);
         if (billings) {
-          const bMap: Record<string, {total_points:number;patient_burden:number;procedures_detail:unknown[];payment_status:string}> = {};
-          billings.forEach((b: {record_id:string;total_points:number;patient_burden:number;procedures_detail:unknown[];payment_status:string}) => { bMap[b.record_id] = b; });
+          const bMap: Record<string, {total_points:number;patient_burden:number;insurance_claim:number;burden_ratio:number;procedures_detail:unknown[];payment_status:string;created_at:string}> = {};
+          billings.forEach((b: {record_id:string;total_points:number;patient_burden:number;insurance_claim:number;burden_ratio:number;procedures_detail:unknown[];payment_status:string;created_at:string}) => { bMap[b.record_id] = b; });
           setBillingMap(bMap);
         }
       }
@@ -356,6 +356,52 @@ export default function PatientDetailPage() {
     await supabase.from("patients").update({ patient_status: s }).eq("id", patient.id);
     setPatient({ ...patient, patient_status: s });
     setES(false);
+  }
+
+  function printReceiptFromMap(recordId: string) {
+    const bill = billingMap[recordId];
+    if (!bill || !patient) return;
+    const name = patient.name_kanji || "不明";
+    const insType = (patient as Record<string,unknown>).insurance_type as string || "社保";
+    const burdenPct = Math.round(bill.burden_ratio * 10);
+    const procs = (bill.procedures_detail || []) as {category:string;code:string;name:string;points:number;count:number}[];
+    const dateYMD = new Date(bill.created_at);
+    const diagDate = `${dateYMD.getFullYear()}年${String(dateYMD.getMonth()+1).padStart(2,"0")}月${String(dateYMD.getDate()).padStart(2,"0")}日`;
+    const patientId = (patient.id || "").slice(-4);
+
+    function mapCat(item:{category:string;code:string}):string{
+      const cat=(item.category||"").toLowerCase(),code=(item.code||"").toUpperCase();
+      if(code.startsWith("A0")||code==="A001-A"||code==="A001-B"||code==="A002")return"初・再診料";
+      if(code.startsWith("B-")||cat.includes("医学管理"))return"医学管理等";
+      if(code.startsWith("M-")||code.startsWith("BR-")||code.startsWith("DEN-")||cat.includes("歯冠")||cat.includes("補綴"))return"歯冠修復及び欠損補綴";
+      if((code.startsWith("D")&&!code.startsWith("DE"))||cat.includes("検査"))return"検査";
+      if(code.startsWith("E")||cat.includes("画像"))return"画像診断";
+      if((code.startsWith("F-")&&code!=="F-COAT")||cat.includes("投薬"))return"投薬";
+      if(cat.includes("注射"))return"注射";
+      if(code.startsWith("J0")||cat.includes("口腔外科"))return"手術";
+      if(code.startsWith("K0")||cat.includes("麻酔"))return"麻酔";
+      if(cat.includes("在宅"))return"在宅医療";
+      return"処置";
+    }
+    const catPts:Record<string,number>={};
+    procs.forEach(p=>{const c=mapCat(p);catPts[c]=(catPts[c]||0)+p.points*p.count;});
+    const row1=["初・再診料","医学管理等","在宅医療","検査","画像診断","投薬","注射","リハビリテーション"];
+    const row2=["処置","手術","麻酔","歯冠修復及び欠損補綴","歯科矯正","病理診断","その他","介護"];
+    const mkC=(cats:string[])=>cats.map(c=>`<td class="lb">${c}</td>`).join("");
+    const mkV=(cats:string[])=>cats.map(c=>`<td class="vl">${catPts[c]?`<b>${catPts[c]}</b><span class="u">点</span>`:`<span class="u">点</span>`}</td>`).join("");
+    const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>領収書</title>
+<style>@media print{.no-print{display:none!important;}@page{size:A4;margin:8mm;}}*{margin:0;padding:0;box-sizing:border-box;}body{font-family:"Yu Gothic","Hiragino Kaku Gothic ProN",sans-serif;max-width:700px;margin:0 auto;color:#111;font-size:11px;padding:10px;}h1{font-size:20px;text-align:center;letter-spacing:10px;margin:10px 0 14px;font-weight:800;}table{border-collapse:collapse;width:100%;}.bx td,.bx th{border:1.5px solid #111;padding:4px 6px;font-size:11px;}.bx .hd{background:#f5f5f5;font-size:10px;text-align:center;font-weight:600;}.bx .vb{font-size:16px;font-weight:800;text-align:center;}.pt td{padding:0;}.pt .lb{border:1px solid #111;border-top:none;font-size:9px;text-align:center;padding:2px 3px;font-weight:600;color:#333;}.pt .vl{border:1px solid #111;text-align:right;padding:4px 6px;min-width:60px;font-size:14px;}.pt .vl b{font-size:17px;}.pt .vl .u{font-size:8px;margin-left:2px;}.tot td{border:1.5px solid #111;padding:5px 8px;font-size:12px;}.tot .bg{font-size:20px;font-weight:900;}.tot .bk{background:#111;color:#fff;font-weight:700;font-size:12px;}.stamp{width:55px;height:55px;border:1.5px solid #111;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#999;}</style></head><body>
+<div class="no-print" style="text-align:center;margin-bottom:14px;"><button onclick="window.print()" style="padding:10px 28px;font-size:14px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨️ 印刷する</button><button onclick="window.close()" style="padding:10px 18px;font-size:12px;background:#eee;border:none;border-radius:6px;cursor:pointer;margin-left:8px;">閉じる</button></div>
+<h1>領 収 書</h1>
+<table class="bx" style="margin-bottom:8px;"><tr><td class="hd" style="width:15%;">患者ID</td><td style="width:20%;text-align:center;">${patientId}</td><td class="hd" style="width:10%;">氏名</td><td style="width:25%;text-align:center;font-size:14px;font-weight:700;">${name} 様</td><td class="hd" style="width:12%;">領収書番号</td><td style="width:18%;text-align:center;font-size:12px;font-weight:700;">${new Date().toLocaleDateString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit"})}</td></tr></table>
+<table class="bx" style="margin-bottom:8px;"><tr><td class="hd" style="width:14%;">費用区分</td><td class="hd" style="width:12%;">負担率</td><td class="hd" style="width:10%;">本・家</td><td class="hd" style="width:10%;">区分</td><td class="hd">介護負担率</td><td class="hd" style="width:30%;">診療日（期間）</td></tr><tr><td class="vb">${insType}</td><td class="vb">${burdenPct}割</td><td class="vb">本人</td><td></td><td></td><td class="vb" style="font-size:14px;">${diagDate}</td></tr></table>
+<div style="font-size:11px;font-weight:700;margin-bottom:2px;">保険・介護</div>
+<table class="pt"><tr>${mkC(row1)}</tr><tr>${mkV(row1)}</tr><tr>${mkC(row2)}</tr><tr>${mkV(row2)}</tr></table>
+<div style="display:flex;gap:10px;margin-top:10px;"><div style="flex:1;"><div style="font-size:11px;font-weight:700;margin-bottom:2px;">保険外負担</div><table class="bx"><tr><td class="hd">自費療養</td><td class="hd">その他</td></tr><tr><td class="vb">0<span style="font-size:9px;">円</span></td><td class="vb">0<span style="font-size:9px;">円</span></td></tr><tr><td class="hd">(内訳)</td><td class="hd">(内訳)</td></tr><tr><td style="height:30px;"></td><td></td></tr></table></div>
+<div style="flex:1.2;"><table class="tot"><tr><td class="hd" style="width:25%;"></td><td class="hd">保険</td><td class="hd">介護</td><td class="hd">保険外負担</td></tr><tr><td class="hd">合計</td><td style="text-align:right;font-weight:800;font-size:16px;">${bill.total_points.toLocaleString()}<span style="font-size:9px;">点</span></td><td style="text-align:right;">0<span style="font-size:9px;">単位</span></td><td></td></tr><tr><td class="hd">負担額</td><td style="text-align:right;font-weight:800;font-size:16px;">${bill.patient_burden.toLocaleString()}<span style="font-size:9px;">円</span></td><td style="text-align:right;">0<span style="font-size:9px;">円</span></td><td style="text-align:right;">0<span style="font-size:9px;">円</span></td></tr></table><table class="tot" style="margin-top:4px;"><tr><td class="bk">領収金額</td><td style="text-align:right;"><span class="bg">${bill.patient_burden.toLocaleString()}</span><span style="font-size:10px;margin-left:4px;">円</span></td></tr></table></div></div>
+<div style="display:flex;justify-content:space-between;margin-top:16px;font-size:9px;color:#555;"><div><p>※厚生労働省が定める診療報酬や薬価等には、医療機関が</p><p>　仕入れ時に負担する消費税が反映されています。</p><p style="margin-top:4px;">この領収書の再発行はできませんので大切に保管してください。</p><p>印紙税法第5条の規定により収入印紙不要</p></div><div style="text-align:right;"><p style="font-size:12px;font-weight:700;">Forever Dental Clinic</p><p>疋田　久登</p><p>愛知県安城市篠目町竜田108-1</p><p>TEL:0566-95-5000</p><div class="stamp" style="margin-top:4px;">領収印</div></div></div>
+<div style="border:1px solid #111;border-radius:4px;padding:8px;margin-top:8px;font-size:10px;"><span style="font-size:9px;color:#999;">（備考）</span></div></body></html>`;
+    const pw=window.open("","_blank");if(pw){pw.document.write(html);pw.document.close();}
   }
 
   if (loading)
@@ -820,13 +866,15 @@ export default function PatientDetailPage() {
             {records.length === 0 ? (
               <E t="カルテ履歴はまだありません" />
             ) : (
-              records.map((r) => (
+              records.map((r) => {
+                const isExpanded = expandedVisitDate === r.id;
+                return (
                 <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-gray-900">
+                      <button onClick={() => setExpandedVisitDate(isExpanded ? null : r.id)} className="text-sm font-bold text-gray-900 hover:text-sky-600 hover:underline cursor-pointer bg-transparent border-none p-0">
                         {fd(r.appointments?.scheduled_at || r.created_at)}
-                      </span>
+                      </button>
                       <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold">
                         {r.appointments?.patient_type === "new" ? "初診" : "再診"}
                       </span>
@@ -855,29 +903,29 @@ export default function PatientDetailPage() {
                         </div>
                       )}
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  <div className={isExpanded ? "space-y-3" : "grid grid-cols-1 md:grid-cols-2 gap-2 text-xs"}>
                     {r.soap_s && (
                       <div>
-                        <span className="font-bold text-pink-600">S:</span>{" "}
-                        <span className="text-gray-600">{r.soap_s}</span>
+                        <span className={`font-bold text-pink-600 ${isExpanded ? "text-sm" : ""}`}>S:</span>{" "}
+                        <span className={isExpanded ? "text-sm text-gray-700" : "text-gray-600"}>{r.soap_s}</span>
                       </div>
                     )}
                     {r.soap_o && (
                       <div>
-                        <span className="font-bold text-green-600">O:</span>{" "}
-                        <span className="text-gray-600">{r.soap_o}</span>
+                        <span className={`font-bold text-green-600 ${isExpanded ? "text-sm" : ""}`}>O:</span>{" "}
+                        <span className={isExpanded ? "text-sm text-gray-700 whitespace-pre-wrap" : "text-gray-600"}>{r.soap_o}</span>
                       </div>
                     )}
                     {r.soap_a && (
                       <div>
-                        <span className="font-bold text-blue-600">A:</span>{" "}
-                        <span className="text-gray-600">{r.soap_a}</span>
+                        <span className={`font-bold text-blue-600 ${isExpanded ? "text-sm" : ""}`}>A:</span>{" "}
+                        <span className={isExpanded ? "text-sm text-gray-700" : "text-gray-600"}>{r.soap_a}</span>
                       </div>
                     )}
                     {r.soap_p && (
                       <div>
-                        <span className="font-bold text-purple-600">P:</span>{" "}
-                        <span className="text-gray-600">{r.soap_p}</span>
+                        <span className={`font-bold text-purple-600 ${isExpanded ? "text-sm" : ""}`}>P:</span>{" "}
+                        <span className={isExpanded ? "text-sm text-gray-700" : "text-gray-600"}>{r.soap_p}</span>
                       </div>
                     )}
                   </div>
@@ -896,7 +944,7 @@ export default function PatientDetailPage() {
                             {billingMap[r.id].payment_status === "paid" ? "精算済" : "未精算"}
                           </span>
                         </div>
-                        <button onClick={() => window.open(`/billing?highlight=${r.id}`, "_blank")} className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded font-bold">
+                        <button onClick={() => printReceiptFromMap(r.id)} className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded font-bold">
                           📄 領収書
                         </button>
                       </div>
@@ -912,7 +960,7 @@ export default function PatientDetailPage() {
                     </div>
                   )}
                 </div>
-              ))
+              );})
             )}
           </div>
         )}
