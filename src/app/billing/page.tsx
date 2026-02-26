@@ -71,6 +71,8 @@ export default function BillingPage() {
     if (rec?.appointment_id) await supabase.from("appointments").update({ status: "billing_done" }).eq("id", rec.appointment_id);
     setPaidPatientInfo({ patientId: billing.patient_id, name });
     await loadBillings(); await loadAllUnpaid(); setSelected(null); setProcessing(false);
+    // 精算完了後に自動で領収書印刷
+    printReceipt(billing);
   }
 
   async function toggleDocumentProvided(billing: BillingRow) {
