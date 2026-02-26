@@ -65,6 +65,9 @@ export default function KarteAgentReception() {
   const [actionModal, setActionModal] = useState<string|null>(null);
   const [billingData, setBillingData] = useState<{items:{code:string;name:string;points:number;count:number;category:string}[];total:number;burden:number}|null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [addItemSearch, setAddItemSearch] = useState("");
+  const [addItemResults, setAddItemResults] = useState<{code:string;name:string;points:number;category:string}[]>([]);
+  const [showAddItem, setShowAddItem] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadUnits = useCallback(async () => {
@@ -146,6 +149,12 @@ export default function KarteAgentReception() {
   },[confirmed,selApt,billingData,units]);
 
   const getDraft=(key:string)=>drafts.find(d=>d.field_key===key);
+  const searchFee = useCallback(async(q:string)=>{
+    if(q.length<1){setAddItemResults([]);return;}
+    const {data} = await supabase.from("fee_master").select("code,name,points,category").or(`name.ilike.%${q}%,code.ilike.%${q}%`).limit(10);
+    if(data) setAddItemResults(data as {code:string;name:string;points:number;category:string}[]);
+  },[]);
+
   const approve=async(key:string,editedText?:string)=>{
     await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"approve",appointment_id:selApt,field_key:key,edited_text:editedText})});
@@ -382,13 +391,60 @@ export default function KarteAgentReception() {
                         <div style={{textAlign:"center",borderLeft:"2px solid #E5E7EB",paddingLeft:16}}><div style={{fontSize:10,color:"#6B7280"}}>合計</div><div style={{fontSize:24,fontWeight:900,color:"#2563EB"}}>{billingData.total.toLocaleString()}<span style={{fontSize:12}}>点</span></div></div>
                         <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>3割負担</div><div style={{fontSize:24,fontWeight:900}}>¥{billingData.burden.toLocaleString()}</div></div>
                       </div>
-                      <div style={{marginTop:10,maxHeight:150,overflowY:"auto",textAlign:"left"}}>
+                      <div style={{marginTop:10,maxHeight:200,overflowY:"auto",textAlign:"left"}}>
                         {items.map((it,i)=>(
-                          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#6B7280",padding:"2px 8px",borderBottom:"1px solid #F3F4F6"}}>
-                            <span>{it.name}{it.count>1?` ×${it.count}`:""}</span>
-                            <span style={{fontWeight:600}}>{(it.points*it.count).toLocaleString()}点</span>
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#374151",padding:"3px 8px",borderBottom:"1px solid #F3F4F6"}}>
+                            <span style={{flex:1}}>{it.name}</span>
+                            <span style={{fontSize:10,color:"#9CA3AF"}}>{it.points}×</span>
+                            <input type="number" value={it.count} min={1} max={99}
+                              style={{width:36,textAlign:"center",border:"1px solid #D1D5DB",borderRadius:4,fontSize:11,padding:"1px 2px"}}
+                              onChange={e=>{
+                                const newItems = [...items];
+                                newItems[i] = {...newItems[i], count: Math.max(1, parseInt(e.target.value)||1)};
+                                const newTotal = newItems.reduce((s,x)=>s+x.points*x.count,0);
+                                setBillingData({...billingData!, items:newItems, total:newTotal, burden:Math.round(newTotal*10*0.3)});
+                              }}
+                            />
+                            <span style={{fontWeight:600,minWidth:48,textAlign:"right"}}>{(it.points*it.count).toLocaleString()}点</span>
+                            <button onClick={()=>{
+                              const newItems = items.filter((_,j)=>j!==i);
+                              const newTotal = newItems.reduce((s,x)=>s+x.points*x.count,0);
+                              setBillingData({...billingData!, items:newItems, total:newTotal, burden:Math.round(newTotal*10*0.3)});
+                            }} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}} title="削除">×</button>
                           </div>
                         ))}
+                      </div>
+                      {/* 項目追加 */}
+                      <div style={{marginTop:6,padding:"0 8px"}}>
+                        {!showAddItem ? (
+                          <button onClick={()=>setShowAddItem(true)} style={{background:"none",border:"1px dashed #D1D5DB",borderRadius:6,padding:"4px 12px",fontSize:11,color:"#6B7280",cursor:"pointer",width:"100%"}}>＋ 項目を追加</button>
+                        ) : (
+                          <div style={{border:"1px solid #D1D5DB",borderRadius:6,padding:6}}>
+                            <div style={{display:"flex",gap:4}}>
+                              <input placeholder="項目名 or コードで検索..." value={addItemSearch}
+                                onChange={e=>{setAddItemSearch(e.target.value);searchFee(e.target.value);}}
+                                style={{flex:1,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 8px",fontSize:11}} />
+                              <button onClick={()=>{setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);}} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:13}}>✕</button>
+                            </div>
+                            {addItemResults.length>0&&(
+                              <div style={{maxHeight:120,overflowY:"auto",marginTop:4}}>
+                                {addItemResults.map((r,i)=>(
+                                  <div key={i} onClick={()=>{
+                                    const newItem = {code:r.code,name:r.name,points:r.points,count:1,category:r.category};
+                                    const newItems = [...(billingData?.items||[]),newItem];
+                                    const newTotal = newItems.reduce((s,x)=>s+x.points*x.count,0);
+                                    setBillingData({items:newItems,total:newTotal,burden:Math.round(newTotal*10*0.3)});
+                                    setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);
+                                  }} style={{display:"flex",justifyContent:"space-between",padding:"3px 6px",fontSize:10,cursor:"pointer",borderBottom:"1px solid #F3F4F6",borderRadius:2}}
+                                    onMouseOver={e=>(e.currentTarget.style.background="#EFF6FF")} onMouseOut={e=>(e.currentTarget.style.background="transparent")}>
+                                    <span>{r.name} <span style={{color:"#9CA3AF"}}>({r.code})</span></span>
+                                    <span style={{fontWeight:600}}>{r.points}点</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
