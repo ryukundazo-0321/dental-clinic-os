@@ -323,10 +323,42 @@ export async function POST(request: NextRequest) {
     const addedCodes = new Set<string>();
 
     // addItem関数（重複防止付き）
+    // ──────────────────────────────────────────────────
+    // billing_patternsの一部fee_codesがfee_master VIEWに存在しない。
+    // fee_master_v2 → VIEW変換で別コードにマッピングされているため、
+    // VIEW上の正しいコードへフォールバックする。
+    // ※ フォールバックは fee が見つからない場合のみ発動。
+    //   既に fee_master に存在するコードには一切影響しない。
+    // ──────────────────────────────────────────────────
+    const CODE_FALLBACK: Record<string, string> = {
+      "I005-1": "I001-1",        // 抜髄単根 → VIEW上のコード
+      "I005-2": "I001-2",        // 抜髄2根
+      "I005-3": "I001-3",        // 抜髄3根
+      "I007-1": "I007--1",       // 根管貼薬単根
+      "I008-1": "I008--1",       // 加圧根充単根
+      "J000-2": "J001-1",        // 抜歯前歯
+      "J000-3": "J001-2",        // 抜歯臼歯
+      "D002-3": "D002-mix",      // 歯周混合検査
+      "J003":   "I010-",         // 消炎切開 → 膿瘍切開
+      "M-KEISEI-cr": "M-KEISEI--cr", // 窩洞形成CR
+      "M009-1": "M009-CR",       // 充填材料（単純）
+      "M009-2": "M009-CR-fuku",  // 充填材料（複雑）
+      "M001-1": "M001-sho",      // 窩洞形成（単純）
+    };
+
     const addItem = (code: string, count = 1, teeth: string[] = []) => {
       if (addedCodes.has(code)) return;
-      const fee = feeMap.get(code);
+      const originalCode = code;
+      let fee = feeMap.get(code);
+      // fee_masterにない場合、フォールバックコードを試す
+      if (!fee && CODE_FALLBACK[code]) {
+        const fallbackCode = CODE_FALLBACK[code];
+        if (addedCodes.has(fallbackCode)) return;
+        fee = feeMap.get(fallbackCode);
+        if (fee) code = fallbackCode;
+      }
       if (fee) {
+        addedCodes.add(originalCode);
         addedCodes.add(code);
         selectedItems.push({
           code: fee.code,
@@ -480,7 +512,12 @@ export async function POST(request: NextRequest) {
         // === マッチ成功 ===
         const teeth = pattern.use_tooth_numbers ? extractedTeeth : [];
         for (const code of pattern.fee_codes) {
-          addItem(code, 1, teeth);
+          // 歯管: 初診月は80点(B-SHIDO-init)に差し替え
+          if (code === "B-SHIDO" && isNew) {
+            addItem("B-SHIDO-init", 1, teeth);
+          } else {
+            addItem(code, 1, teeth);
+          }
         }
         if (exclusiveCategories.has(pattern.category)) {
           matchedExclusive.add(pattern.category);
@@ -491,7 +528,45 @@ export async function POST(request: NextRequest) {
       if (soapAll.includes("パノラマ")) { addItem("E100-pan"); addItem("E-diag"); }
       if (soapAll.includes("デンタル")) { addItem("E100-1"); addItem("E100-1-diag"); }
       if (soapAll.includes("麻酔") || soapAll.includes("浸潤")) { addItem("K001-1", 1, extractedTeeth); }
-      // 投薬の技術料はprescribedDrugs検出時に F100/F200 で自動追加（後段ロジック）
+      // 投薬の技術料はprescribedDrugs検出時に F-shoho/F-chozai で自動追加（後段ロジック）
+    }
+
+    // ──────────────────────────────────────────────────
+    // パノラマ補完: 初診でSOAPにレントゲン関連記載があれば追加
+    // ※ billing_patternsで既に算定済みなら何もしない（addedCodes判定）
+    // ──────────────────────────────────────────────────
+    if (isNew && !addedCodes.has("E100-pan")) {
+      const xrayKw = ["パノラマ", "レントゲン", "x線", "x-ray", "画像診断", "全顎撮影", "pan"];
+      if (xrayKw.some(kw => soapAll.includes(kw))) {
+        addItem("E100-pan");
+        addItem("E-diag");
+      }
+    }
+
+    // ──────────────────────────────────────────────────
+    // SC全顎ブロック計算
+    // billing_patternsはSCを count=1(72点) で返すが、
+    // SOAPに「全顎」「上下」等の記載があればブロック数を更新。
+    // ※ I011-1が算定されていなければ何もしない
+    // ──────────────────────────────────────────────────
+    if (addedCodes.has("I011-1")) {
+      let scBlocks = 1;
+      if (soapAll.includes("全顎") || soapAll.includes("全額") || soapAll.includes("フルマウス") ||
+          (soapAll.includes("上下") && (soapAll.includes("sc") || soapAll.includes("スケーリング")))) {
+        scBlocks = 6;
+      } else if (soapAll.includes("上顎") || soapAll.includes("下顎") || soapAll.includes("片顎")) {
+        scBlocks = 3;
+      } else {
+        const blockMatch = soapAll.match(/([1-6])\s*ブロック/);
+        if (blockMatch) scBlocks = parseInt(blockMatch[1]);
+      }
+      if (scBlocks > 1) {
+        const scItem = selectedItems.find(item => item.code === "I011-1");
+        if (scItem) {
+          scItem.count = scBlocks;
+          scItem.note = `${scBlocks}ブロック（${scBlocks === 6 ? "全顎" : scBlocks === 3 ? "片顎" : scBlocks + "ブロック"}）`;
+        }
+      }
     }
 
     // ============================================================
@@ -593,10 +668,10 @@ export async function POST(request: NextRequest) {
 
     // 処方薬がある場合、投薬の技術料を追加
     if (prescribedDrugs.length > 0) {
-      // 処方料（F100: 院内処方の場合）
-      addItem("F100");
-      // 調剤料（F200: 院内調剤の場合）
-      addItem("F200");
+      // 処方料（F-shoho: 院内処方 42点）
+      addItem("F-shoho");
+      // 調剤料（F-chozai: 院内調剤 11点）
+      addItem("F-chozai");
 
       // 各薬剤の薬剤料を計算してselectedItemsに追加
       // 薬剤料 = 薬価 × 数量 × 日数 を 10 で割って五捨五超入で点数化
@@ -821,7 +896,7 @@ export async function POST(request: NextRequest) {
     if (allergyWarnings.length > 0) {
       warnings.push(...allergyWarnings);
     }
-    if (isNew) warnings.push("📄 歯科疾患管理料の算定には管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
+    if (isNew) warnings.push("📄 初診月の歯科疾患管理料は80点で算定されています。管理計画書の印刷・患者への文書提供が必要です。カルテ画面の「管理計画書」ボタンから印刷できます。");
     if (selectedItems.length <= 2) warnings.push("算定項目が少ない可能性があります。処置内容をご確認ください。");
     if (prescribedDrugs.length > 0) warnings.push(`💊 投薬 ${prescribedDrugs.length}品目を自動算定しました。処方内容をご確認ください。`);
     if (hasProsthMain) warnings.push("🦷 補綴（冠・ブリッジ）: 印象・咬合・装着・補綴時診断を自動追加しました。工程をご確認ください。");
