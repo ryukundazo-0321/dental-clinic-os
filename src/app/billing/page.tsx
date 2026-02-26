@@ -120,31 +120,109 @@ export default function BillingPage() {
       catItems[catName].push(item);
     }
 
-    const receiptOrder = ["初・再診料","医学管理等","在宅医療","検査","画像診断","投薬","注射","リハビリテーション","処置","手術","麻酔","放射線治療","歯冠修復及び欠損補綴","歯科矯正","病理診断"];
-    const receiptRows = receiptOrder.map(c =>
-      `<tr><td style="padding:3px 6px;font-size:11px;border:1px solid #999;">${c}</td><td style="text-align:right;padding:3px 8px;font-size:11px;border:1px solid #999;">${catPoints[c] ? catPoints[c].toLocaleString() : ""}</td><td style="text-align:center;font-size:11px;border:1px solid #999;">点</td></tr>`
-    ).join("");
-
-    const detailRows = Object.entries(catItems).map(([c, items]) =>
-      `<tr><td colspan="4" style="background:#f0f0f0;font-weight:bold;padding:4px 6px;font-size:10px;border:1px solid #999;">${c}</td></tr>` +
-      items.map(item =>
-        `<tr><td style="padding:2px 6px;font-size:10px;border:1px solid #ddd;">${item.name}${item.tooth_numbers && item.tooth_numbers.length > 0 ? " ("+item.tooth_numbers.map((t: string) => "#"+t).join(",")+")" : ""}</td><td style="text-align:center;font-size:10px;border:1px solid #ddd;">${item.count}</td><td style="text-align:right;font-size:10px;border:1px solid #ddd;">${item.points}</td><td style="text-align:right;font-size:10px;border:1px solid #ddd;">${(item.points * item.count).toLocaleString()}</td></tr>`
-      ).join("")
-    ).join("");
-
     const totalMedical = billing.total_points * 10;
+    const patientId = billing.patients?.id?.slice(-4) || "";
+    const todayStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    const dateYMD = new Date(billing.created_at);
+    const diagDate = `${dateYMD.getFullYear()}年${String(dateYMD.getMonth()+1).padStart(2,"0")}月${String(dateYMD.getDate()).padStart(2,"0")}日`;
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>領収証 兼 診療明細書</title>
-<style>@media print{body{margin:0;padding:10px;}.no-print{display:none!important;}@page{size:A4;margin:10mm;}}body{font-family:"Yu Gothic","Hiragino Kaku Gothic ProN",sans-serif;max-width:700px;margin:10px auto;color:#333;font-size:11px;}h2{font-size:16px;text-align:center;margin:0 0 8px 0;padding:6px;border:2px solid #333;}table.receipt{width:100%;border-collapse:collapse;}.total-box{border:2px solid #333;padding:8px;margin-top:8px;}.total-box td{padding:3px 6px;font-size:12px;}.total-box .big{font-size:18px;font-weight:bold;}.footer{font-size:9px;color:#666;text-align:center;margin-top:12px;border-top:1px solid #ccc;padding-top:6px;}.stamp{display:inline-block;width:50px;height:50px;border:1.5px solid #aaa;border-radius:50%;text-align:center;line-height:50px;font-size:9px;color:#aaa;float:right;margin-top:-40px;}.page-break{page-break-before:always;}</style></head><body>
-<div class="no-print" style="text-align:center;margin-bottom:12px;"><button onclick="window.print()" style="padding:8px 24px;font-size:14px;background:#333;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨️ 印刷する</button><button onclick="window.close()" style="padding:8px 16px;font-size:12px;background:#eee;border:none;border-radius:6px;cursor:pointer;margin-left:8px;">閉じる</button></div>
-<h2>領 収 証</h2>
-<table style="width:100%;margin-bottom:8px;"><tr><td style="font-size:14px;"><b>${name}</b> 様</td><td style="text-align:right;font-size:11px;">診療日: ${dateStr}</td></tr><tr><td style="font-size:10px;color:#666;">${kana}</td><td style="text-align:right;font-size:10px;">保険: ${insType||"社保"} ／ ${burdenPct}割</td></tr></table>
-<table class="receipt"><thead><tr><th style="text-align:left;padding:4px 6px;border:1px solid #999;background:#eee;width:60%;">区 分</th><th style="text-align:right;padding:4px 6px;border:1px solid #999;background:#eee;width:30%;">点 数</th><th style="text-align:center;padding:4px 6px;border:1px solid #999;background:#eee;width:10%;"></th></tr></thead><tbody>${receiptRows}</tbody></table>
-<table class="total-box" style="width:100%;border-collapse:collapse;"><tr><td>合計点数</td><td style="text-align:right;">${billing.total_points.toLocaleString()} 点</td></tr><tr><td>保険医療費</td><td style="text-align:right;">¥${totalMedical.toLocaleString()}</td></tr><tr><td>保険者負担</td><td style="text-align:right;">¥${billing.insurance_claim.toLocaleString()}</td></tr><tr style="border-top:2px solid #333;"><td class="big">患者負担額（${burdenPct}割）</td><td style="text-align:right;" class="big">¥${billing.patient_burden.toLocaleString()}</td></tr></table><div class="stamp">収納印</div>
-<div class="page-break"></div><h2>診 療 明 細 書</h2><table style="width:100%;margin-bottom:6px;"><tr><td><b>${name}</b> 様</td><td style="text-align:right;">診療日: ${dateStr}</td></tr></table>
-<table class="receipt"><thead><tr><th style="text-align:left;padding:3px 6px;border:1px solid #999;background:#eee;">項 目</th><th style="text-align:center;padding:3px 6px;border:1px solid #999;background:#eee;width:40px;">回数</th><th style="text-align:right;padding:3px 6px;border:1px solid #999;background:#eee;width:50px;">点数</th><th style="text-align:right;padding:3px 6px;border:1px solid #999;background:#eee;width:60px;">小計</th></tr></thead><tbody>${detailRows}</tbody></table>
-<table class="total-box" style="width:100%;border-collapse:collapse;"><tr><td class="big">合計</td><td style="text-align:right;" class="big">${billing.total_points.toLocaleString()} 点</td></tr></table>
-<div class="footer"><p>この領収証は医療費控除の申告にご使用いただけます。再発行はいたしかねますので大切に保管してください。</p><p>発行日: ${new Date().toLocaleDateString("ja-JP")}</p></div></body></html>`;
+    const row1 = ["初・再診料","医学管理等","在宅医療","検査","画像診断","投薬","注射","リハビリテーション"];
+    const row2 = ["処置","手術","麻酔","歯冠修復及び欠損補綴","歯科矯正","病理診断","その他","介護"];
+
+    const mkCells = (cats: string[]) => cats.map(c => `<td class="lb">${c}</td>`).join("");
+    const mkVals = (cats: string[]) => cats.map(c =>
+      `<td class="vl">${catPoints[c] ? `<b>${catPoints[c]}</b><span class="u">点</span>` : `<span class="u">点</span>`}</td>`
+    ).join("");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>領収書</title>
+<style>
+@media print{.no-print{display:none!important;}@page{size:A4;margin:8mm;}}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:"Yu Gothic","Hiragino Kaku Gothic ProN",sans-serif;max-width:700px;margin:0 auto;color:#111;font-size:11px;padding:10px;}
+h1{font-size:20px;text-align:center;letter-spacing:10px;margin:10px 0 14px;font-weight:800;}
+table{border-collapse:collapse;width:100%;}
+.bx td,.bx th{border:1.5px solid #111;padding:4px 6px;font-size:11px;}
+.bx .hd{background:#f5f5f5;font-size:10px;text-align:center;font-weight:600;}
+.bx .vb{font-size:16px;font-weight:800;text-align:center;}
+.pt td{padding:0;}
+.pt .lb{border:1px solid #111;border-top:none;font-size:9px;text-align:center;padding:2px 3px;font-weight:600;color:#333;}
+.pt .vl{border:1px solid #111;text-align:right;padding:4px 6px;min-width:60px;font-size:14px;}
+.pt .vl b{font-size:17px;}
+.pt .vl .u{font-size:8px;margin-left:2px;}
+.sm{font-size:9px;color:#555;}
+.tot td{border:1.5px solid #111;padding:5px 8px;font-size:12px;}
+.tot .bg{font-size:20px;font-weight:900;}
+.tot .bk{background:#111;color:#fff;font-weight:700;font-size:12px;}
+.stamp{width:55px;height:55px;border:1.5px solid #111;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#999;}
+</style></head><body>
+<div class="no-print" style="text-align:center;margin-bottom:14px;">
+<button onclick="window.print()" style="padding:10px 28px;font-size:14px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;">🖨️ 印刷する</button>
+<button onclick="window.close()" style="padding:10px 18px;font-size:12px;background:#eee;border:none;border-radius:6px;cursor:pointer;margin-left:8px;">閉じる</button>
+</div>
+
+<h1>領 収 書</h1>
+
+<!-- 患者情報 -->
+<table class="bx" style="margin-bottom:8px;">
+<tr><td class="hd" style="width:15%;">患者ID</td><td style="width:20%;text-align:center;">${patientId}</td><td class="hd" style="width:10%;">氏名</td><td style="width:25%;text-align:center;font-size:14px;font-weight:700;">${name} 様</td><td class="hd" style="width:12%;">領収書番号</td><td style="width:18%;text-align:center;font-size:12px;font-weight:700;">${todayStr}</td></tr>
+</table>
+
+<!-- 費用区分 -->
+<table class="bx" style="margin-bottom:8px;">
+<tr><td class="hd" style="width:14%;">費用区分</td><td class="hd" style="width:12%;">負担率</td><td class="hd" style="width:10%;">本・家</td><td class="hd" style="width:10%;">区分</td><td class="hd">介護負担率</td><td class="hd" style="width:30%;">診療日（期間）</td></tr>
+<tr><td class="vb">${insType||"社保"}</td><td class="vb">${burdenPct}割</td><td class="vb">本人</td><td></td><td></td><td class="vb" style="font-size:14px;">${diagDate}</td></tr>
+</table>
+
+<!-- 保険点数 -->
+<div style="font-size:11px;font-weight:700;margin-bottom:2px;">保険・介護</div>
+<table class="pt">
+<tr>${mkCells(row1)}</tr>
+<tr>${mkVals(row1)}</tr>
+<tr>${mkCells(row2)}</tr>
+<tr>${mkVals(row2)}</tr>
+</table>
+
+<!-- 合計 -->
+<div style="display:flex;gap:10px;margin-top:10px;">
+<div style="flex:1;">
+<div style="font-size:11px;font-weight:700;margin-bottom:2px;">保険外負担</div>
+<table class="bx"><tr><td class="hd">自費療養</td><td class="hd">その他</td></tr><tr><td class="vb">0<span style="font-size:9px;">円</span></td><td class="vb">0<span style="font-size:9px;">円</span></td></tr><tr><td class="hd">(内訳)</td><td class="hd">(内訳)</td></tr><tr><td style="height:30px;"></td><td></td></tr></table>
+</div>
+<div style="flex:1.2;">
+<table class="tot">
+<tr><td class="hd" style="width:25%;"></td><td class="hd">保険</td><td class="hd">介護</td><td class="hd">保険外負担</td></tr>
+<tr><td class="hd">合計</td><td style="text-align:right;font-weight:800;font-size:16px;">${billing.total_points.toLocaleString()}<span style="font-size:9px;">点</span></td><td style="text-align:right;">0<span style="font-size:9px;">単位</span></td><td></td></tr>
+<tr><td class="hd">負担額</td><td style="text-align:right;font-weight:800;font-size:16px;">${billing.patient_burden.toLocaleString()}<span style="font-size:9px;">円</span></td><td style="text-align:right;">0<span style="font-size:9px;">円</span></td><td style="text-align:right;">0<span style="font-size:9px;">円</span></td></tr>
+</table>
+<table class="tot" style="margin-top:4px;">
+<tr><td class="bk">領収金額</td><td style="text-align:right;"><span class="bg">${billing.patient_burden.toLocaleString()}</span><span style="font-size:10px;margin-left:4px;">円</span></td></tr>
+</table>
+</div>
+</div>
+
+<!-- フッター -->
+<div style="display:flex;justify-content:space-between;margin-top:16px;font-size:9px;color:#555;">
+<div>
+<p>※厚生労働省が定める診療報酬や薬価等には、医療機関が</p>
+<p>　仕入れ時に負担する消費税が反映されています。</p>
+<p style="margin-top:4px;">この領収書の再発行はできませんので大切に保管してください。</p>
+<p>印紙税法第5条の規定により収入印紙不要</p>
+</div>
+<div style="text-align:right;">
+<p style="font-size:12px;font-weight:700;">Forever Dental Clinic</p>
+<p>疋田　久登</p>
+<p>愛知県安城市篠目町竜田108-1</p>
+<p>TEL:0566-95-5000</p>
+<div class="stamp" style="margin-top:4px;">領収印</div>
+</div>
+</div>
+
+<!-- 備考欄 -->
+<div style="border:1px solid #111;border-radius:4px;padding:8px;margin-top:8px;font-size:10px;">
+<span style="font-size:9px;color:#999;">（備考）</span>
+</div>
+
+</body></html>`;
     const pw = window.open("", "_blank"); if (pw) { pw.document.write(html); pw.document.close(); }
   }
 
