@@ -344,6 +344,7 @@ export async function POST(request: NextRequest) {
       "M009-1": "M009-CR",       // 充填材料（単純）
       "M009-2": "M009-CR-fuku",  // 充填材料（複雑）
       "M001-1": "M001-sho",      // 窩洞形成（単純）
+      "I030":   "PCEM",          // PMTC → fee_master上のPCEMコード(72点)
     };
 
     const addItem = (code: string, count = 1, teeth: string[] = []) => {
