@@ -286,6 +286,7 @@ export default function PatientDetailPage() {
   const pid = params.id as string;
   const [patient, setPatient] = useState<Patient | null>(null);
   const [records, setRecords] = useState<MedicalRecord[]>([]);
+  const [billingMap, setBillingMap] = useState<Record<string, {total_points:number;patient_burden:number;procedures_detail:unknown[];payment_status:string}>>({});
   const [th, setTH] = useState<ToothHistoryEntry[]>([]);
   const [ps, setPS2] = useState<PerioSnapshot[]>([]);
   const [images, setImages] = useState<PatientImage[]>([]);
@@ -324,7 +325,22 @@ export default function PatientDetailPage() {
         .order("created_at", { ascending: false }),
     ]);
     if (p.data) setPatient(p.data);
-    if (r.data) setRecords(r.data);
+    if (r.data) {
+      setRecords(r.data);
+      // Fetch billing data for all records
+      const recordIds = r.data.map((rec: MedicalRecord) => rec.id);
+      if (recordIds.length > 0) {
+        const { data: billings } = await supabase
+          .from("billing")
+          .select("record_id, total_points, patient_burden, procedures_detail, payment_status")
+          .in("record_id", recordIds);
+        if (billings) {
+          const bMap: Record<string, {total_points:number;patient_burden:number;procedures_detail:unknown[];payment_status:string}> = {};
+          billings.forEach((b: {record_id:string;total_points:number;patient_burden:number;procedures_detail:unknown[];payment_status:string}) => { bMap[b.record_id] = b; });
+          setBillingMap(bMap);
+        }
+      }
+    }
     if (t.data) setTH(t.data);
     if (s.data) setPS2(s.data);
     if (img.data) setImages(img.data);
@@ -865,6 +881,36 @@ export default function PatientDetailPage() {
                       </div>
                     )}
                   </div>
+                  {/* 処置内容・点数・領収書 */}
+                  {billingMap[r.id] && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded">
+                            {billingMap[r.id].total_points.toLocaleString()}点
+                          </span>
+                          <span className="text-xs font-bold text-orange-600">
+                            ¥{billingMap[r.id].patient_burden.toLocaleString()}
+                          </span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${billingMap[r.id].payment_status === "paid" ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"}`}>
+                            {billingMap[r.id].payment_status === "paid" ? "精算済" : "未精算"}
+                          </span>
+                        </div>
+                        <button onClick={() => window.open(`/billing?highlight=${r.id}`, "_blank")} className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded font-bold">
+                          📄 領収書
+                        </button>
+                      </div>
+                      {billingMap[r.id].procedures_detail && Array.isArray(billingMap[r.id].procedures_detail) && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(billingMap[r.id].procedures_detail as {name:string;points:number;count:number}[]).filter(p => p.points > 0).map((p, i) => (
+                            <span key={i} className="text-[9px] bg-gray-50 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200">
+                              {p.name}{p.count > 1 ? `×${p.count}` : ""} {p.points * p.count}点
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))
             )}
