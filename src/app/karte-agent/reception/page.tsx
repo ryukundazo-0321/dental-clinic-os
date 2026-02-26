@@ -63,6 +63,8 @@ export default function KarteAgentReception() {
   const [fieldMsgInput, setFieldMsgInput] = useState<Record<string,string>>({});
   const [confirmed, setConfirmed] = useState(false);
   const [actionModal, setActionModal] = useState<string|null>(null);
+  const [billingData, setBillingData] = useState<{items:{code:string;name:string;points:number;count:number;category:string}[];total:number;burden:number}|null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadUnits = useCallback(async () => {
@@ -118,6 +120,30 @@ export default function KarteAgentReception() {
   },[selApt,loadData]);
 
   useEffect(()=>{if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[chunks]);
+
+  // confirmed時にauto-billingを呼ぶ
+  useEffect(()=>{
+    if(!confirmed||!selApt||billingData) return;
+    (async()=>{
+      setBillingLoading(true);
+      try {
+        // appointment_idからmedical_recordのidを取得
+        const {data:rec} = await supabase.from("medical_records").select("id").eq("appointment_id",selApt).order("created_at",{ascending:false}).limit(1).single();
+        if(rec?.id){
+          const res = await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:rec.id})});
+          const d = await res.json();
+          if(d.success){
+            const items = (d.items||[]) as {code:string;name:string;points:number;count:number;category:string}[];
+            const total = d.total_points||0;
+            const unit = units.find(u=>u.appointment_id===selApt);
+            const burden = d.patient_burden || Math.round(total*10*0.3);
+            setBillingData({items,total,burden});
+          }
+        }
+      } catch(e){console.error("auto-billing error",e);}
+      setBillingLoading(false);
+    })();
+  },[confirmed,selApt,billingData,units]);
 
   const getDraft=(key:string)=>drafts.find(d=>d.field_key===key);
   const approve=async(key:string,editedText?:string)=>{
@@ -188,7 +214,7 @@ export default function KarteAgentReception() {
           {units.map(uu=>{
             const isSel=uu.appointment_id===selApt;
             return(
-              <div key={uu.appointment_id} onClick={()=>setSelApt(uu.appointment_id)}
+              <div key={uu.appointment_id} onClick={()=>{setSelApt(uu.appointment_id);setBillingData(null);}}
                 style={{padding:"8px 10px",margin:"2px 6px",borderRadius:10,cursor:"pointer",background:isSel?"#EFF6FF":"transparent",border:isSel?"1.5px solid #BFDBFE":"1.5px solid transparent"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                   <span style={{fontSize:12,fontWeight:600}}>{uu.unit_name}</span>
@@ -340,13 +366,35 @@ export default function KarteAgentReception() {
               <div style={{fontSize:18,fontWeight:800,color:"#16A34A",marginBottom:10}}>✅ カルテ確定済み</div>
               <div style={{background:"#FFF",borderRadius:10,padding:14,marginBottom:12,border:"1px solid #E5E7EB"}}>
                 <div style={{fontSize:12,fontWeight:600,color:"#9CA3AF",marginBottom:6}}>保険点数（自動算定）</div>
-                <div style={{display:"flex",justifyContent:"center",gap:16,flexWrap:"wrap"}}>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>初再診料</div><div style={{fontSize:18,fontWeight:800}}>53</div></div>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処置</div><div style={{fontSize:18,fontWeight:800}}>670</div></div>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処方</div><div style={{fontSize:18,fontWeight:800}}>42</div></div>
-                  <div style={{textAlign:"center",borderLeft:"2px solid #E5E7EB",paddingLeft:16}}><div style={{fontSize:10,color:"#6B7280"}}>合計</div><div style={{fontSize:24,fontWeight:900,color:"#2563EB"}}>765<span style={{fontSize:12}}>点</span></div></div>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>3割負担</div><div style={{fontSize:24,fontWeight:900}}>¥2,300</div></div>
-                </div>
+                {billingLoading ? (
+                  <div style={{padding:12,color:"#6B7280",fontSize:13}}>⏳ 算定中...</div>
+                ) : billingData ? (()=>{
+                  const items = billingData.items;
+                  const basicPts = items.filter(i=>i.category==="basic"||i.code.startsWith("A0")).reduce((s,i)=>s+i.points*i.count,0);
+                  const rxPts = items.filter(i=>i.category==="prescription"||i.code.startsWith("F-")).reduce((s,i)=>s+i.points*i.count,0);
+                  const procPts = billingData.total - basicPts - rxPts;
+                  return (
+                    <div>
+                      <div style={{display:"flex",justifyContent:"center",gap:16,flexWrap:"wrap"}}>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>初再診料</div><div style={{fontSize:18,fontWeight:800}}>{basicPts}</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処置</div><div style={{fontSize:18,fontWeight:800}}>{procPts}</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処方</div><div style={{fontSize:18,fontWeight:800}}>{rxPts}</div></div>
+                        <div style={{textAlign:"center",borderLeft:"2px solid #E5E7EB",paddingLeft:16}}><div style={{fontSize:10,color:"#6B7280"}}>合計</div><div style={{fontSize:24,fontWeight:900,color:"#2563EB"}}>{billingData.total.toLocaleString()}<span style={{fontSize:12}}>点</span></div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>3割負担</div><div style={{fontSize:24,fontWeight:900}}>¥{billingData.burden.toLocaleString()}</div></div>
+                      </div>
+                      <div style={{marginTop:10,maxHeight:150,overflowY:"auto",textAlign:"left"}}>
+                        {items.map((it,i)=>(
+                          <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#6B7280",padding:"2px 8px",borderBottom:"1px solid #F3F4F6"}}>
+                            <span>{it.name}{it.count>1?` ×${it.count}`:""}</span>
+                            <span style={{fontWeight:600}}>{(it.points*it.count).toLocaleString()}点</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })() : (
+                  <div style={{padding:12,color:"#EF4444",fontSize:13}}>⚠️ 算定データを取得できませんでした</div>
+                )}
               </div>
               <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
                 <button onClick={()=>setActionModal("plan")} style={{background:"#F5F3FF",color:"#7C3AED",border:"1.5px solid #DDD6FE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📋 治療計画書</button>
@@ -363,7 +411,7 @@ export default function KarteAgentReception() {
           {/* Action Modals */}
           {actionModal&&(
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999}} onClick={()=>setActionModal(null)}>
-              <div style={{background:"#FFF",borderRadius:16,padding:24,maxWidth:480,width:"90%",maxHeight:"80vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
+              <div style={{background:"#FFF",borderRadius:actionModal==="receipt"?0:16,padding:actionModal==="receipt"?0:24,maxWidth:actionModal==="receipt"?720:480,width:actionModal==="receipt"?"100%":"90%",maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
                 {actionModal==="plan"&&(
                   <div>
                     <div style={{fontSize:18,fontWeight:800,marginBottom:12}}>📋 治療計画書</div>
@@ -391,31 +439,157 @@ export default function KarteAgentReception() {
                     </div>
                   </div>
                 )}
-                {actionModal==="receipt"&&(
-                  <div>
-                    <div style={{fontSize:18,fontWeight:800,marginBottom:12}}>📄 領収書</div>
-                    <div style={{background:"#F9FAFB",borderRadius:10,padding:16,fontSize:13,lineHeight:2}}>
-                      <div style={{textAlign:"center",fontWeight:700,fontSize:16,marginBottom:8}}>領 収 書</div>
-                      <div>患者名: {u?.patient_name} 様</div>
-                      <div>日付: {new Date().toLocaleDateString("ja-JP")}</div>
-                      <div style={{borderTop:"1px solid #E5E7EB",marginTop:8,paddingTop:8}}>
-                        <div style={{display:"flex",justifyContent:"space-between"}}><span>保険点数</span><span>765点</span></div>
-                        <div style={{display:"flex",justifyContent:"space-between"}}><span>負担割合</span><span>3割</span></div>
-                        <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,marginTop:8,borderTop:"2px solid #111827",paddingTop:8}}><span>お支払い金額</span><span>¥2,300</span></div>
+                {actionModal==="receipt"&&(()=>{
+                  const today = new Date().toLocaleDateString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit"}).replace(/\//g,"年").replace(/年/,"年").replace(/$/,"").replace(/(\d{2})$/,"$1");
+                  const todayFmt = new Date().toLocaleDateString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit"});
+                  const items = billingData?.items||[];
+                  // カテゴリ分類
+                  const catPts = (codes:string[],cats:string[])=>items.filter(i=>codes.some(c=>i.code.startsWith(c))||cats.some(c=>i.category===c)).reduce((s,i)=>s+i.points*i.count,0);
+                  const shoshin = catPts(["A0","A00"],["初・再診料"]);
+                  const igaku = catPts(["B-"],["医学管理"]);
+                  const kensaFinal = items.filter(i=>i.code.startsWith("D")&&!i.code.startsWith("DRUG")).reduce((s,i)=>s+i.points*i.count,0);
+                  const gazo = items.filter(i=>i.code.startsWith("E")).reduce((s,i)=>s+i.points*i.count,0);
+                  const touyaku = items.filter(i=>i.code.startsWith("F-")||i.code.startsWith("DRUG")||i.code.startsWith("MED")||i.category==="投薬"||i.category==="prescription").reduce((s,i)=>s+i.points*i.count,0);
+                  const masui = items.filter(i=>i.code.startsWith("K")||i.category==="anesthesia").reduce((s,i)=>s+i.points*i.count,0);
+                  const shujutsu = items.filter(i=>i.code.startsWith("J")||i.category==="surgery").reduce((s,i)=>s+i.points*i.count,0);
+                  const shochi = items.filter(i=>["endo","restoration","処置"].includes(i.category)||i.code.startsWith("I")||i.code.startsWith("M")).reduce((s,i)=>s+i.points*i.count,0);
+                  const total = billingData?.total||0;
+                  const burden = billingData?.burden||0;
+                  const bdr = {border:"1.5px solid #111",padding:"4px 8px",fontSize:12,textAlign:"center" as const};
+                  const bdrR = {...bdr,textAlign:"right" as const};
+                  const bdrL = {...bdr,textAlign:"left" as const,fontSize:11};
+                  const lbl = {fontSize:9,color:"#555",textAlign:"center" as const,padding:"2px 4px",borderBottom:"1px solid #111",borderLeft:"1.5px solid #111",borderRight:"1.5px solid #111"};
+                  const val = {fontSize:18,fontWeight:800 as const,textAlign:"right" as const,padding:"4px 8px 4px 4px",borderBottom:"1.5px solid #111",borderLeft:"1.5px solid #111",borderRight:"1.5px solid #111",minWidth:60};
+                  return(
+                  <div style={{padding:32,fontFamily:"'Yu Gothic','Hiragino Sans',sans-serif",maxWidth:680,margin:"0 auto",background:"#FFF"}}>
+                    <style>{`@media print{body>*{display:none!important}[data-receipt]{display:block!important;position:fixed;inset:0;background:#FFF;z-index:99999}}`}</style>
+                    <div data-receipt="">
+                    <div style={{textAlign:"center",fontSize:22,fontWeight:800,letterSpacing:8,marginBottom:16}}>領 収 書</div>
+
+                    {/* 患者情報 */}
+                    <table style={{width:"100%",borderCollapse:"collapse",marginBottom:10}}>
+                      <tbody>
+                        <tr>
+                          <td style={{...bdr,width:"15%",fontSize:10,background:"#F5F5F5"}}>患者ID</td>
+                          <td style={{...bdr,width:"35%"}}>&nbsp;</td>
+                          <td style={{...bdr,width:"15%",fontSize:10,background:"#F5F5F5"}}>領収書番号</td>
+                          <td style={{...bdr,width:"15%",fontSize:10,background:"#F5F5F5"}}>発行日</td>
+                        </tr>
+                        <tr>
+                          <td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>氏名</td>
+                          <td style={{...bdr,fontSize:16,fontWeight:700}}>{u?.patient_name||"---"} 様</td>
+                          <td style={{...bdr,fontSize:11}}>&nbsp;</td>
+                          <td style={{...bdr,fontSize:11}}>{todayFmt}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* 費用区分 */}
+                    <table style={{width:"100%",borderCollapse:"collapse",marginBottom:10}}>
+                      <tbody>
+                        <tr>
+                          <td style={{...bdr,width:"14%",fontSize:10,background:"#F5F5F5"}}>費用区分</td>
+                          <td style={{...bdr,width:"14%",fontSize:10,background:"#F5F5F5"}}>負担率</td>
+                          <td style={{...bdr,width:"14%",fontSize:10,background:"#F5F5F5"}}>本・家</td>
+                          <td style={{...bdr,width:"14%",fontSize:10,background:"#F5F5F5"}}>区分</td>
+                          <td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>診療日（期間）</td>
+                        </tr>
+                        <tr>
+                          <td style={{...bdr,fontWeight:700}}>社保</td>
+                          <td style={{...bdr,fontWeight:700}}>3割</td>
+                          <td style={{...bdr,fontWeight:700}}>本人</td>
+                          <td style={{...bdr}}></td>
+                          <td style={{...bdr,fontWeight:700}}>{todayFmt}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* 保険点数内訳 */}
+                    <div style={{fontSize:11,fontWeight:700,marginBottom:2}}>保険・介護</div>
+                    <table style={{width:"100%",borderCollapse:"collapse",marginBottom:2}}>
+                      <tbody>
+                        <tr>
+                          {["初・再診料","医学管理等","在宅医療","検査","画像診断","投薬","注射","リハビリテーション"].map(h=>(
+                            <td key={h} style={lbl}>{h}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          {[shoshin,igaku,0,kensaFinal,gazo,touyaku,0,0].map((v,i)=>(
+                            <td key={i} style={val}>{v>0?<><span style={{fontSize:18}}>{v}</span><span style={{fontSize:9,marginLeft:2}}>点</span></>:<span style={{color:"#CCC",fontSize:12}}></span>}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          {["処置","手術","麻酔","歯冠修復・欠損補綴","歯科矯正","病理診断","その他","介護"].map(h=>(
+                            <td key={h} style={lbl}>{h}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          {[shochi,shujutsu,masui,0,0,0,0,0].map((v,i)=>(
+                            <td key={i} style={val}>{v>0?<><span style={{fontSize:18}}>{v}</span><span style={{fontSize:9,marginLeft:2}}>点</span></>:<span style={{color:"#CCC",fontSize:12}}></span>}</td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* 合計・負担額 */}
+                    <div style={{display:"flex",gap:12,marginTop:12}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:11,fontWeight:700,marginBottom:2}}>保険外負担</div>
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <tbody>
+                            <tr><td style={lbl}>自費療養</td><td style={lbl}>その他</td></tr>
+                            <tr><td style={{...val,fontSize:14}}>0<span style={{fontSize:9,marginLeft:2}}>円</span></td><td style={{...val,fontSize:14}}>0<span style={{fontSize:9,marginLeft:2}}>円</span></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{flex:1}}>
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <tbody>
+                            <tr><td style={{...bdr,fontSize:10,background:"#F5F5F5"}}></td><td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>保険</td><td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>介護</td><td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>保険外負担</td></tr>
+                            <tr><td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>合計</td><td style={{...bdr,fontWeight:800,fontSize:16}}>{total}<span style={{fontSize:9}}>点</span></td><td style={{...bdr,fontSize:12}}>0<span style={{fontSize:9}}>単位</span></td><td style={{...bdr,fontSize:12}}></td></tr>
+                            <tr><td style={{...bdr,fontSize:10,background:"#F5F5F5"}}>負担額</td><td style={{...bdr,fontWeight:800,fontSize:16}}>{burden.toLocaleString()}<span style={{fontSize:9}}>円</span></td><td style={{...bdr,fontSize:12}}>0<span style={{fontSize:9}}>円</span></td><td style={{...bdr,fontSize:12}}>0<span style={{fontSize:9}}>円</span></td></tr>
+                          </tbody>
+                        </table>
+                        <table style={{width:"100%",borderCollapse:"collapse",marginTop:4}}>
+                          <tbody>
+                            <tr><td style={{...bdr,fontSize:11,background:"#111",color:"#FFF",fontWeight:700}}>領収金額</td><td style={{...bdr,fontSize:22,fontWeight:900}}>{burden.toLocaleString()}<span style={{fontSize:11,marginLeft:4}}>円</span></td></tr>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
+
+                    {/* フッター */}
+                    <div style={{display:"flex",justifyContent:"space-between",marginTop:20,fontSize:10,color:"#666"}}>
+                      <div>
+                        <div>※厚生労働省が定める診療報酬や薬価等には、医療機関が</div>
+                        <div>仕入れ時に負担する消費税が反映されています。</div>
+                        <div style={{marginTop:4}}>この領収書の再発行はできませんので大切に保管してください。</div>
+                        <div>印紙税法第5条の規定により収入印紙不要</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:12,fontWeight:700}}>Forever Dental Clinic</div>
+                        <div>疋田　久登</div>
+                        <div>愛知県安城市篠目町竜田108-1</div>
+                        <div>TEL:0566-95-5000</div>
+                        <div style={{border:"1.5px solid #111",width:60,height:60,display:"inline-flex",alignItems:"center",justifyContent:"center",marginTop:4,fontSize:9,color:"#999"}}>領収印</div>
+                      </div>
+                    </div>
+                    </div>
+
+                    {/* 印刷・閉じるボタン */}
+                    <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}} className="no-print">
                       <button onClick={()=>{window.print();}} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>🖨 印刷</button>
                       <button onClick={()=>setActionModal(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>閉じる</button>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
                 {actionModal==="accounting"&&(
                   <div style={{textAlign:"center"}}>
                     <div style={{fontSize:48,marginBottom:10}}>✅</div>
                     <div style={{fontSize:20,fontWeight:800,color:"#16A34A",marginBottom:8}}>会計処理完了</div>
                     <div style={{fontSize:14,color:"#6B7280",marginBottom:4}}>患者: {u?.patient_name} 様</div>
-                    <div style={{fontSize:24,fontWeight:900,marginBottom:12}}>¥2,300</div>
+                    <div style={{fontSize:24,fontWeight:900,marginBottom:12}}>¥{billingData?billingData.burden.toLocaleString():"---"}</div>
                     <div style={{fontSize:13,color:"#9CA3AF",marginBottom:16}}>ステータスを「完了」に更新しました</div>
                     <button onClick={()=>{setActionModal(null);loadUnits();loadData();}} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer"}}>閉じる</button>
                   </div>
