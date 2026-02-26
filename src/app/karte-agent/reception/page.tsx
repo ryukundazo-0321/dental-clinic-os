@@ -458,7 +458,7 @@ export default function KarteAgentReception() {
                 <button onClick={()=>setActionModal("receipt")} style={{background:"#FFF7ED",color:"#C2410C",border:"1.5px solid #FDBA74",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 領収書発行</button>
                 <button onClick={async()=>{
                   await supabase.from("appointments").update({status:"completed"}).eq("id",selApt);
-                  setActionModal("accounting");
+                  window.location.href="/billing";
                 }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 会計へ →</button>
               </div>
             </div>
