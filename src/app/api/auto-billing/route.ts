@@ -304,13 +304,28 @@ export async function POST(request: NextRequest) {
     );
 
     // 8. SOAPテキスト準備
-    const soapAll = [record.soap_s, record.soap_o, record.soap_a, record.soap_p]
+    // カルテエージェント経由の場合、SOAPにはAI要約が入るため
+    // 画像検査などの記載が省略されることがある。
+    // karte_transcript_chunksの生テキストも結合してキーワードマッチの精度を上げる。
+    let transcriptText = "";
+    if (record.appointment_id) {
+      const { data: chunks } = await supabase
+        .from("karte_transcript_chunks")
+        .select("corrected_text")
+        .eq("appointment_id", record.appointment_id)
+        .order("chunk_index");
+      if (chunks && chunks.length > 0) {
+        transcriptText = chunks.map((c: { corrected_text: string }) => c.corrected_text || "").join(" ");
+      }
+    }
+
+    const soapAll = [record.soap_s, record.soap_o, record.soap_a, record.soap_p, transcriptText]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
 
     // 歯番抽出（永久歯11-48 + 乳歯51-85）
-    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, record.soap_p].filter(Boolean).join(" ");
+    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, record.soap_p, transcriptText].filter(Boolean).join(" ");
     const toothPattern = /[#＃]?\s*([1-4][1-8]|[5-8][1-5])\s*(?:番)?/g;
     const extractedTeeth: string[] = [];
     let toothMatch;
