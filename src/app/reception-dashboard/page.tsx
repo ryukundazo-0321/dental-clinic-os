@@ -90,9 +90,9 @@ export default function ReceptionDashboard() {
   const gridColCount = units.length <= 4 ? 2 : units.length <= 6 ? 3 : 4;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F3F4F6", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ height: "100vh", background: "#F3F4F6", fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Header */}
-      <header style={{ background: "#FFF", borderBottom: "1px solid #E5E7EB", padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
+      <header style={{ background: "#FFF", borderBottom: "1px solid #E5E7EB", padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontSize: 22, fontWeight: 800 }}>🏥 受付ダッシュボード</span>
           <span style={{ fontSize: 13, color: "#9CA3AF" }}>
@@ -116,8 +116,8 @@ export default function ReceptionDashboard() {
       </header>
 
       {/* Chair Grid */}
-      <div style={{ padding: "16px 24px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${gridColCount}, 1fr)`, gap: 16 }}>
+      <div style={{ padding: "8px 12px", height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${gridColCount}, 1fr)`, gap: 10, flex: 1, minHeight: 0 }}>
           {units.map(unit => {
             const apts = unitApts(unit.id);
             const cur = currentApt(unit.id);
@@ -145,8 +145,7 @@ export default function ReceptionDashboard() {
 
                 {/* Current Patient (highlighted) */}
                 {cur && cur.patients && (
-                  <a href={`/consultation/session?appointment_id=${cur.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                    <div style={{ padding: "12px 16px", background: "#FFF7ED", borderBottom: "1px solid #FED7AA", cursor: "pointer" }}>
+                    <div style={{ padding: "12px 16px", background: "#FFF7ED", borderBottom: "1px solid #FED7AA" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#EA580C", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800 }}>
@@ -160,16 +159,23 @@ export default function ReceptionDashboard() {
                             </div>
                           </div>
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#EA580C" }}>
-                          {timeStr(cur.scheduled_at)} →
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#EA580C", marginRight: 4 }}>{timeStr(cur.scheduled_at)}</span>
+                          <a href={`/consultation/session?appointment_id=${cur.id}`} style={{
+                            fontSize: 10, fontWeight: 700, color: "#FFF", background: "#0EA5E9",
+                            padding: "4px 10px", borderRadius: 6, textDecoration: "none",
+                          }}>📋 診察</a>
+                          <a href={`/karte-agent/unit?appointment_id=${cur.id}`} style={{
+                            fontSize: 10, fontWeight: 700, color: "#FFF", background: "#111827",
+                            padding: "4px 10px", borderRadius: 6, textDecoration: "none",
+                          }}>🤖 エージェント</a>
                         </div>
                       </div>
                     </div>
-                  </a>
                 )}
 
                 {/* Patient List */}
-                <div style={{ flex: 1, overflow: "auto", maxHeight: 300 }}>
+                <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
                   {apts.filter(a => a.id !== cur?.id).map(apt => {
                     const st = STATUS[apt.status] || STATUS.reserved;
                     const isNext = nxt?.id === apt.id && !cur;
@@ -191,11 +197,17 @@ export default function ReceptionDashboard() {
                             <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, padding: "2px 8px", borderRadius: 6 }}>
                               {st.icon} {st.label}
                             </span>
-                            {(apt.status === "reserved" || apt.status === "checked_in") && (
-                              <a href={`/consultation/session?appointment_id=${apt.id}`} style={{
-                                fontSize: 10, fontWeight: 700, color: "#FFF", background: "#111827",
-                                padding: "3px 10px", borderRadius: 6, textDecoration: "none",
-                              }}>開く</a>
+                            {(apt.status === "reserved" || apt.status === "checked_in" || apt.status === "in_consultation") && (
+                              <div style={{ display: "flex", gap: 3 }}>
+                                <a href={`/consultation/session?appointment_id=${apt.id}`} style={{
+                                  fontSize: 9, fontWeight: 700, color: "#FFF", background: "#0EA5E9",
+                                  padding: "3px 8px", borderRadius: 5, textDecoration: "none",
+                                }}>📋 診察</a>
+                                <a href={`/karte-agent/unit?appointment_id=${apt.id}`} style={{
+                                  fontSize: 9, fontWeight: 700, color: "#FFF", background: "#111827",
+                                  padding: "3px 8px", borderRadius: 5, textDecoration: "none",
+                                }}>🤖 AG</a>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -230,10 +242,16 @@ export default function ReceptionDashboard() {
                     <span style={{ fontSize: 10, color: "#9CA3AF" }}>{age(apt.patients?.date_of_birth || null)}</span>
                     <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, padding: "2px 8px", borderRadius: 6 }}>{st.icon} {st.label}</span>
                   </div>
-                  <a href={`/consultation/session?appointment_id=${apt.id}`} style={{
-                    fontSize: 10, fontWeight: 700, color: "#FFF", background: "#111827",
-                    padding: "3px 10px", borderRadius: 6, textDecoration: "none",
-                  }}>開く</a>
+                  <div style={{ display: "flex", gap: 3 }}>
+                    <a href={`/consultation/session?appointment_id=${apt.id}`} style={{
+                      fontSize: 9, fontWeight: 700, color: "#FFF", background: "#0EA5E9",
+                      padding: "3px 8px", borderRadius: 5, textDecoration: "none",
+                    }}>📋 診察</a>
+                    <a href={`/karte-agent/unit?appointment_id=${apt.id}`} style={{
+                      fontSize: 9, fontWeight: 700, color: "#FFF", background: "#111827",
+                      padding: "3px 8px", borderRadius: 5, textDecoration: "none",
+                    }}>🤖 AG</a>
+                  </div>
                 </div>
               );
             })}
