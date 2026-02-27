@@ -220,6 +220,7 @@ export default function ConsultationPage() {
           <div className="flex items-center gap-3">
             <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← 戻る</Link>
             <h1 className="text-lg font-bold text-gray-900">🩺 診察カレンダー</h1>
+            <Link href="/reception-dashboard" className="bg-gray-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-gray-800">🏥 受付ダッシュボード</Link>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
