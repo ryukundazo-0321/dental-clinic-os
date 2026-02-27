@@ -319,13 +319,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const soapAll = [record.soap_s, record.soap_o, record.soap_a, record.soap_p, transcriptText]
+    // P欄から「次回」以降を除外して算定対象にする（次回予定の処置を今日の点数に含めないため）
+    const soapPToday = record.soap_p ? record.soap_p.split("【次回】")[0].replace("【本日】", "") : "";
+
+    const soapAll = [record.soap_s, record.soap_o, record.soap_a, soapPToday, transcriptText]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
 
-    // 歯番抽出（永久歯11-48 + 乳歯51-85）
-    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, record.soap_p, transcriptText].filter(Boolean).join(" ");
+    // 歯番抽出（永久歯11-48 + 乳歯51-85）— 同様にP欄は本日分のみ
+    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, soapPToday, transcriptText].filter(Boolean).join(" ");
     const toothPattern = /[#＃]?\s*([1-4][1-8]|[5-8][1-5])\s*(?:番)?/g;
     const extractedTeeth: string[] = [];
     let toothMatch;
