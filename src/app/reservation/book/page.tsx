@@ -245,10 +245,25 @@ export default function PatientBookingPage() {
         patientId = newPatient.id;
       }
       const scheduledAt = `${selectedDate}T${selectedTime}:00`;
+      const slotDur = config?.slotDurationMin || 30;
+
+      // ダブルブッキング最終チェック（同一時間帯の予約数）
+      const { data: existingApts } = await supabase.from("appointments")
+        .select("id")
+        .gte("scheduled_at", `${selectedDate}T00:00:00`)
+        .lte("scheduled_at", `${selectedDate}T23:59:59`)
+        .eq("scheduled_at", scheduledAt)
+        .neq("status", "cancelled");
+      if (existingApts && config && existingApts.length >= config.maxPatientsPerSlot) {
+        setError("申し訳ございません。この時間帯は満枠になりました。別の時間をお選びください。");
+        setLoading(false);
+        return;
+      }
+
       const { data: appointment, error: aptErr } = await supabase.from("appointments").insert({
         patient_id: patientId, clinic_id: config?.clinicId, doctor_id: selectedDoctor || null,
         scheduled_at: scheduledAt, patient_type: patientType === "new" ? "new" : "returning",
-        status: "reserved", duration_min: config?.slotDurationMin || 30,
+        status: "reserved", duration_min: slotDur,
         // 通院中の場合、来院目的をメモとして保存
         ...(patientType === "returning" && visitReason === "new_complaint" && newComplaint
           ? { notes: `【新しい主訴】${newComplaint}` }
