@@ -11,13 +11,38 @@ const STEPS = [
   { key: "dr", label: "Dr診察" },
 ];
 
+const UR=["18","17","16","15","14","13","12","11"];
+const UL=["21","22","23","24","25","26","27","28"];
+const LR=["48","47","46","45","44","43","42","41"];
+const LL=["31","32","33","34","35","36","37","38"];
+
+const TS: Record<string,{bg:string;tx:string;lb:string;bd:string}> = {
+  normal:{bg:"#F1F5F9",tx:"#94A3B8",lb:"",bd:"#E2E8F0"},
+  c0:{bg:"#FEF9C3",tx:"#854D0E",lb:"CO",bd:"#FDE68A"},c1:{bg:"#FEF9C3",tx:"#854D0E",lb:"C1",bd:"#FDE68A"},
+  c2:{bg:"#FDE68A",tx:"#78350F",lb:"C2",bd:"#F59E0B"},c3:{bg:"#FB923C",tx:"#FFF",lb:"C3",bd:"#EA580C"},
+  c4:{bg:"#DC2626",tx:"#FFF",lb:"C4",bd:"#B91C1C"},
+  in_treatment:{bg:"#A78BFA",tx:"#FFF",lb:"治",bd:"#7C3AED"},treated:{bg:"#86EFAC",tx:"#166534",lb:"済",bd:"#22C55E"},
+  cr:{bg:"#60A5FA",tx:"#FFF",lb:"CR",bd:"#3B82F6"},inlay:{bg:"#38BDF8",tx:"#FFF",lb:"In",bd:"#0EA5E9"},
+  crown:{bg:"#2DD4BF",tx:"#FFF",lb:"冠",bd:"#14B8A6"},
+  missing:{bg:"#E2E8F0",tx:"#CBD5E1",lb:"✕",bd:"#CBD5E1"},root_remain:{bg:"#FECACA",tx:"#991B1B",lb:"残",bd:"#F87171"},
+  br_abutment:{bg:"#C4B5FD",tx:"#5B21B6",lb:"Br",bd:"#8B5CF6"},br_pontic:{bg:"#DDD6FE",tx:"#7C3AED",lb:"Po",bd:"#A78BFA"},
+  implant:{bg:"#818CF8",tx:"#FFF",lb:"Imp",bd:"#6366F1"},watch:{bg:"#FEF3C7",tx:"#92400E",lb:"経",bd:"#FBBF24"},
+};
+
+function getPrimary(chart:Record<string,string|string[]>,t:string):string{
+  const v=chart[t]; if(!v) return "normal";
+  const arr=Array.isArray(v)?v:[v]; if(arr.length===0) return "normal";
+  const pri=["c4","c3","c2","c1","c0","in_treatment","missing","root_remain","br_pontic","br_abutment","implant","crown","inlay","cr","treated","watch"];
+  for(const p of pri){if(arr.includes(p))return p;} return arr[0]||"normal";
+}
+
 function UnitContent() {
   const params = useSearchParams();
   const appointmentId = params.get("appointment_id") || "";
 
   // Mode: "batch" = Option B, "realtime" = Option A
   const [mode, setMode] = useState<"batch"|"realtime">("batch");
-  const [patient, setPatient] = useState<{name:string;age:number;allergies:string[]}|null>(null);
+  const [patient, setPatient] = useState<{name:string;age:number;allergies:string[];id:string}|null>(null);
   const [recording, setRecording] = useState(false);
   const [recTime, setRecTime] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
@@ -28,6 +53,12 @@ function UnitContent() {
   const [confirmed, setConfirmed] = useState(false);
   const [confirmId, setConfirmId] = useState<string|null>(null);
   const [status, setStatus] = useState("");
+
+  // Dental chart & perio
+  const [toothChart, setToothChart] = useState<Record<string,string|string[]>>({});
+  const [perioData, setPerioData] = useState<Record<string,{buccal:[number,number,number];lingual:[number,number,number];bop:boolean;mobility:number}>>({});
+  const [recordId, setRecordId] = useState<string|null>(null);
+  const [xrayUploading, setXrayUploading] = useState(false);
 
   // Refs for batch mode
   const mediaRec = useRef<MediaRecorder|null>(null);
@@ -58,17 +89,35 @@ function UnitContent() {
     },{onConflict:"appointment_id,chunk_index"}).then(()=>{});
   },[appointmentId]);
 
-  // Load patient
+  // Load patient + dental chart + perio
   useEffect(()=>{
     if(!appointmentId) return;
     (async()=>{
       const {data:apt}=await supabase.from("appointments")
-        .select("patient_id, patients(name_kanji, date_of_birth, allergies)")
+        .select("patient_id, patients(id, name_kanji, date_of_birth, allergies, current_tooth_chart, current_perio_chart)")
         .eq("id",appointmentId).single();
       if(apt?.patients){
-        const p=apt.patients as unknown as {name_kanji:string;date_of_birth:string;allergies:string[]|null};
+        const p=apt.patients as unknown as {id:string;name_kanji:string;date_of_birth:string;allergies:string[]|null;current_tooth_chart:Record<string,unknown>|null;current_perio_chart:Record<string,unknown>|null};
         const age=p.date_of_birth?Math.floor((Date.now()-new Date(p.date_of_birth).getTime())/31557600000):0;
-        setPatient({name:p.name_kanji,age,allergies:p.allergies||[]});
+        setPatient({name:p.name_kanji,age,allergies:p.allergies||[],id:p.id});
+        // Load tooth chart from current medical_record or patient's baseline
+        const {data:rec}=await supabase.from("medical_records").select("id, tooth_chart").eq("appointment_id",appointmentId).order("created_at",{ascending:false}).limit(1).single();
+        if(rec){
+          setRecordId(rec.id);
+          if(rec.tooth_chart&&Object.keys(rec.tooth_chart as object).length>0) setToothChart(rec.tooth_chart as Record<string,string|string[]>);
+          else if(p.current_tooth_chart){
+            const tc:Record<string,string|string[]>={};
+            Object.entries(p.current_tooth_chart).forEach(([k,v])=>{
+              if(typeof v==="string") tc[k]=v;
+              else if(typeof v==="object"&&v&&"status" in (v as Record<string,string>)) tc[k]=(v as Record<string,string>).status;
+            });
+            setToothChart(tc);
+          }
+        }
+        // Load perio
+        if(p.current_perio_chart&&typeof p.current_perio_chart==="object"){
+          setPerioData(p.current_perio_chart as Record<string,{buccal:[number,number,number];lingual:[number,number,number];bop:boolean;mobility:number}>);
+        }
       }
     })();
   },[appointmentId]);
@@ -506,6 +555,108 @@ function UnitContent() {
 
         {/* Right: karte content */}
         <div style={{flex:1,overflow:"auto",padding:16,display:"flex",flexDirection:"column",gap:8}}>
+
+          {/* ===== 歯式チャート（常時表示） ===== */}
+          <div style={{background:"#FFF",borderRadius:12,padding:14,border:"1px solid #E5E7EB"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <span style={{fontSize:14,fontWeight:700}}>🦷 歯式チャート</span>
+              <span style={{fontSize:10,color:"#9CA3AF"}}>{Object.keys(toothChart).filter(k=>{const p=getPrimary(toothChart,k);return p!=="normal";}).length}歯に所見</span>
+            </div>
+            {/* 上顎 */}
+            <div style={{display:"flex",justifyContent:"center",gap:2,marginBottom:2}}>
+              {[...UR,...UL].map(t=>{const p=getPrimary(toothChart,t);const c=TS[p]||TS.normal;
+                return <div key={t} title={`#${t} ${c.lb||"健全"}`} style={{width:18,height:18,borderRadius:3,fontSize:7,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",background:c.bg,color:c.tx,border:`1px solid ${c.bd}`}}>{c.lb||t}</div>;})}
+            </div>
+            <div style={{display:"flex",justifyContent:"center"}}><div style={{width:290,borderTop:"1px solid #CBD5E1",margin:"1px 0"}} /></div>
+            {/* 下顎 */}
+            <div style={{display:"flex",justifyContent:"center",gap:2,marginTop:2}}>
+              {[...LR,...LL].map(t=>{const p=getPrimary(toothChart,t);const c=TS[p]||TS.normal;
+                return <div key={t} title={`#${t} ${c.lb||"健全"}`} style={{width:18,height:18,borderRadius:3,fontSize:7,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",background:c.bg,color:c.tx,border:`1px solid ${c.bd}`}}>{c.lb||t}</div>;})}
+            </div>
+            {/* ステータスサマリ */}
+            {Object.keys(toothChart).length>0&&(
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:8,paddingTop:8,borderTop:"1px solid #F1F5F9"}}>
+                {Object.entries(Object.keys(toothChart).reduce((acc,t)=>{const p=getPrimary(toothChart,t);if(p!=="normal"){acc[p]=(acc[p]||0)+1;}return acc;},{} as Record<string,number>)).map(([s,c])=>{const cfg=TS[s]||TS.normal;
+                  return <span key={s} style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:cfg.bg,color:cfg.tx}}>{cfg.lb} {c}</span>;})}
+              </div>
+            )}
+
+            {/* レントゲンアップロード */}
+            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #F1F5F9"}}>
+              <div style={{display:"flex",gap:6}}>
+                <label style={{cursor:"pointer",flex:1}}>
+                  <div style={{background:"#F5F3FF",border:"1px dashed #C4B5FD",borderRadius:8,padding:"8px 0",textAlign:"center",fontSize:11,fontWeight:600,color:"#7C3AED"}}>
+                    {xrayUploading?"🤖 AI分析中...":"📷 レントゲン → AI歯式分析"}
+                  </div>
+                  <input type="file" accept="image/*" style={{display:"none"}} disabled={xrayUploading} onChange={async(e)=>{
+                    const file=e.target.files?.[0]; if(!file||!patient||!recordId) return;
+                    setXrayUploading(true); setStatus("📤 レントゲンアップロード中...");
+                    try{
+                      const fd=new FormData(); fd.append("file",file); fd.append("patient_id",patient.id); fd.append("record_id",recordId); fd.append("image_type","panorama");
+                      const upRes=await fetch("/api/image-upload",{method:"POST",body:fd}); const upData=await upRes.json();
+                      if(!upData.success){setStatus("❌ アップロード失敗");setXrayUploading(false);return;}
+                      setStatus("🤖 AI歯式分析中...");
+                      const aiRes=await fetch("/api/xray-analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image_base64:upData.image.base64,patient_id:patient.id})});
+                      const aiData=await aiRes.json();
+                      if(aiData.success&&aiData.tooth_chart){
+                        const nc={...toothChart}; Object.entries(aiData.tooth_chart).forEach(([t,s])=>{if(TS[s as string]) nc[t]=[s as string];});
+                        setToothChart(nc);
+                        await supabase.from("medical_records").update({tooth_chart:nc}).eq("id",recordId);
+                        setStatus(`✅ ${Object.keys(aiData.tooth_chart).length}歯を分析・反映`);
+                      } else setStatus("❌ AI分析失敗");
+                    }catch{setStatus("❌ レントゲン処理エラー");}
+                    setXrayUploading(false); e.target.value="";
+                  }} />
+                </label>
+                <label style={{cursor:"pointer",flex:1}}>
+                  <div style={{background:"#F5F3FF",border:"1px dashed #C4B5FD",borderRadius:8,padding:"8px 0",textAlign:"center",fontSize:11,fontWeight:600,color:"#7C3AED"}}>
+                    📸 カメラ撮影
+                  </div>
+                  <input type="file" accept="image/*" capture="environment" style={{display:"none"}} disabled={xrayUploading} onChange={async(e)=>{
+                    const file=e.target.files?.[0]; if(!file||!patient||!recordId) return;
+                    setXrayUploading(true); setStatus("📤 アップロード中...");
+                    try{
+                      const fd=new FormData(); fd.append("file",file); fd.append("patient_id",patient.id); fd.append("record_id",recordId); fd.append("image_type","panorama");
+                      const upRes=await fetch("/api/image-upload",{method:"POST",body:fd}); const upData=await upRes.json();
+                      if(!upData.success){setStatus("❌ アップロード失敗");setXrayUploading(false);return;}
+                      setStatus("🤖 AI歯式分析中...");
+                      const aiRes=await fetch("/api/xray-analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image_base64:upData.image.base64,patient_id:patient.id})});
+                      const aiData=await aiRes.json();
+                      if(aiData.success&&aiData.tooth_chart){
+                        const nc={...toothChart}; Object.entries(aiData.tooth_chart).forEach(([t,s])=>{if(TS[s as string]) nc[t]=[s as string];});
+                        setToothChart(nc);
+                        await supabase.from("medical_records").update({tooth_chart:nc}).eq("id",recordId);
+                        setStatus(`✅ ${Object.keys(aiData.tooth_chart).length}歯を分析・反映`);
+                      } else setStatus("❌ AI分析失敗");
+                    }catch{setStatus("❌ レントゲン処理エラー");}
+                    setXrayUploading(false); e.target.value="";
+                  }} />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* ===== P検サマリ（常時表示） ===== */}
+          {Object.keys(perioData).length>0&&(
+            <div style={{background:"#FFF",borderRadius:12,padding:14,border:"1px solid #E5E7EB"}}>
+              <span style={{fontSize:14,fontWeight:700}}>📊 P検サマリ</span>
+              {(()=>{
+                let bopP=0,bopT=0,d4=0,d6=0;
+                Object.values(perioData).forEach(pd=>{if(pd.bop)bopP++;bopT++;[...pd.buccal,...pd.lingual].forEach(v=>{if(v>=4)d4++;if(v>=6)d6++;});});
+                const bopR=bopT>0?Math.round(bopP/bopT*1000)/10:0;
+                return(
+                  <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                    <div style={{background:bopR>30?"#FEF2F2":"#F0FDF4",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:bopR>30?"#DC2626":"#16A34A"}}>BOP {bopR}%</div>
+                    <div style={{background:"#F9FAFB",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:"#374151"}}>PPD≧4: {d4}</div>
+                    {d6>0&&<div style={{background:"#FEF2F2",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:"#DC2626"}}>PPD≧6: {d6}</div>}
+                    <div style={{background:"#F9FAFB",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:"#6B7280"}}>{Object.keys(perioData).length}歯</div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ===== カルテ内容（AI drafts） ===== */}
           <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>カルテ内容</div>
           {STEPS.map(st=>{
             const d=drafts[st.key];const done=d?.status==="approved"||d?.status==="confirmed";const has=!!d;
