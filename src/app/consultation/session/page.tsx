@@ -155,7 +155,7 @@ function SessionContent() {
   const [editingTranscriptId, setEditingTranscriptId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [generatingSOAP, setGeneratingSOAP] = useState(false);
-  const [aiResult, setAiResult] = useState<{ soap: { s: string; o: string; a: string; p: string }; tooth_updates: Record<string, string>; procedures: string[]; diagnoses: { name: string; tooth: string; code: string }[] } | null>(null);
+  const [aiResult, setAiResult] = useState<{ soap: { s: string; o: string; a: string; p: string }; tooth_updates: Record<string, string>; procedures: string[]; diagnoses: { name: string; tooth: string; code: string }[]; soap_s_undetected?: boolean } | null>(null);
   const [showAiPreview, setShowAiPreview] = useState(false);
 
   // Tooth chart
@@ -457,7 +457,12 @@ function SessionContent() {
     try {
       const res = await fetch("/api/voice-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ full_transcript: fullText, existing_soap_s: record?.soap_s || "" }) });
       const data = await res.json();
-      if (data.success) { setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates || {}, procedures: data.procedures || [], diagnoses: data.diagnoses || [] }); setShowAiPreview(true); showMsg("✅ SOAP生成完了"); }
+      if (data.success) {
+        setAiResult({ soap: data.soap, tooth_updates: data.tooth_updates || {}, procedures: data.procedures || [], diagnoses: data.diagnoses || [], soap_s_undetected: data.soap_s_undetected === true });
+        setShowAiPreview(true);
+        if (data.soap_s_undetected) showMsg("⚠️ 音声から主訴を十分に読み取れませんでした。内容を確認してください");
+        else showMsg("✅ SOAP生成完了");
+      }
       else showMsg(`❌ ${data.error || "SOAP生成失敗"}`);
     } catch { showMsg("❌ SOAP生成に失敗"); }
     setGeneratingSOAP(false);
@@ -465,13 +470,16 @@ function SessionContent() {
 
   async function applyAiResult() {
     if (!record || !aiResult) return;
+    if (aiResult.soap_s_undetected) {
+      if (!confirm("⚠️ 音声から主訴を十分に読み取れませんでした。\n\n反映後、S欄の内容を必ず確認・修正してください。\n\nこのまま反映しますか？")) return;
+    }
     const chart = { ...(record.tooth_chart || {}) };
     if (aiResult.tooth_updates) Object.entries(aiResult.tooth_updates).forEach(([t, s]) => { const num = t.replace("#", ""); if (TOOTH_STATUS[s]) chart[num] = [s]; });
     setRecord({ ...record, soap_s: aiResult.soap.s || record.soap_s, soap_o: aiResult.soap.o || record.soap_o, soap_a: aiResult.soap.a || record.soap_a, soap_p: aiResult.soap.p || record.soap_p, tooth_chart: chart });
     if (aiResult.diagnoses && aiResult.diagnoses.length > 0 && record.patient_id) {
       try { for (const d of aiResult.diagnoses) { const { data: dup } = await supabase.from("patient_diagnoses").select("id").eq("patient_id", record.patient_id).eq("diagnosis_code", d.code || "").eq("tooth_number", d.tooth || "").eq("outcome", "continuing").limit(1); if (dup && dup.length > 0) continue; await supabase.from("patient_diagnoses").insert({ patient_id: record.patient_id, diagnosis_code: d.code || "", diagnosis_name: d.name || "", tooth_number: d.tooth || "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing" }); } } catch (e) { console.error("傷病名エラー:", e); }
     }
-    setShowAiPreview(false); showMsg("✅ SOAPに反映しました");
+    setShowAiPreview(false); showMsg(aiResult.soap_s_undetected ? "⚠️ SOAPに反映しました — S欄を確認してください" : "✅ SOAPに反映しました");
   }
 
   function showMsg(msg: string) { setSaveMsg(msg); setTimeout(() => setSaveMsg(""), 5000); }
@@ -2440,6 +2448,12 @@ ${drugItems.map((d, i) => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-2xl">
             <div className="text-center mb-5"><span className="text-4xl">🤖</span><h3 className="text-xl font-bold text-gray-900 mt-2">SOAP生成結果</h3></div>
+            {aiResult.soap_s_undetected && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 flex items-start gap-2">
+                <span className="text-lg">⚠️</span>
+                <div><p className="text-sm font-bold text-amber-800">音声から主訴を十分に読み取れませんでした</p><p className="text-xs text-amber-600 mt-0.5">反映後、S欄の内容を必ず確認・修正してください</p></div>
+              </div>
+            )}
             <div className="space-y-3 mb-6">
               {[{ label: "S 主観", value: aiResult.soap.s, color: "border-red-400", bg: "bg-red-50" }, { label: "O 客観", value: aiResult.soap.o, color: "border-blue-400", bg: "bg-blue-50" }, { label: "A 評価", value: aiResult.soap.a, color: "border-yellow-400", bg: "bg-yellow-50" }, { label: "P 計画", value: aiResult.soap.p, color: "border-green-400", bg: "bg-green-50" }].map(item => (
                 <div key={item.label} className={`border-l-4 ${item.color} ${item.bg} rounded-r-xl p-3`}><p className="text-xs text-gray-500 font-bold mb-1">{item.label}</p><p className="text-sm text-gray-800 whitespace-pre-wrap">{item.value || "（該当なし）"}</p></div>
