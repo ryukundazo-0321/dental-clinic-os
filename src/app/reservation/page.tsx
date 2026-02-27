@@ -321,6 +321,31 @@ export default function ReservationManagePage() {
       const bookDate = addForm.appointment_date || selectedDate;
       const scheduledAt = `${bookDate}T${addForm.time}:00`;
 
+      // ダブルブッキングチェック（同一時間帯の予約数）
+      const { data: existingApts } = await supabase.from("appointments")
+        .select("id")
+        .eq("scheduled_at", scheduledAt)
+        .neq("status", "cancelled");
+      if (existingApts && config && existingApts.length >= config.maxPatientsPerSlot) {
+        setAddError(`この時間帯（${addForm.time}）は既に満枠です。別の時間を選択してください。`);
+        setAddLoading(false);
+        return;
+      }
+      // 同一担当医の重複チェック
+      if (addForm.doctor_id) {
+        const { data: doctorApts } = await supabase.from("appointments")
+          .select("id")
+          .eq("scheduled_at", scheduledAt)
+          .eq("doctor_id", addForm.doctor_id)
+          .neq("status", "cancelled");
+        if (doctorApts && doctorApts.length > 0) {
+          const docName = doctors.find(d => d.id === addForm.doctor_id)?.name || "選択した担当医";
+          setAddError(`${docName}はこの時間帯に既に予約があります。`);
+          setAddLoading(false);
+          return;
+        }
+      }
+
       // 来院目的をnotes に保存
       let notes = "";
       if (addForm.patient_type === "returning" && visitReason === "continuing" && treatmentSummary?.nextPlan) {
