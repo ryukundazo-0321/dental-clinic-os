@@ -121,7 +121,7 @@ export default function BillingPage() {
     }
 
     const totalMedical = billing.total_points * 10;
-    const patientId = billing.patients?.id?.slice(-4) || "";
+    const patientId = billing.patient_id?.slice(-4) || "";
     const todayStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
     const dateYMD = new Date(billing.created_at);
     const diagDate = `${dateYMD.getFullYear()}年${String(dateYMD.getMonth()+1).padStart(2,"0")}月${String(dateYMD.getDate()).padStart(2,"0")}日`;
