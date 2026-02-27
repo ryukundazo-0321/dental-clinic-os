@@ -112,6 +112,7 @@ export default function Home() {
   const menuItems = [
     { href: "/reservation", icon: "📅", iconBg: "bg-blue-50 text-blue-600 group-hover:bg-blue-100", title: "予約管理", desc: "予約の確認・新規受付", ready: true },
     { href: "/consultation", icon: "🩺", iconBg: "bg-orange-50 text-orange-600 group-hover:bg-orange-100", title: "診察カレンダー", desc: "タイムテーブル・アポ帳", ready: true },
+    { href: "/reception-dashboard", icon: "🏥", iconBg: "bg-rose-50 text-rose-600 group-hover:bg-rose-100", title: "受付ダッシュボード", desc: "チェア別・本日の患者一覧", ready: true },
     { href: "/patients", icon: "👤", iconBg: "bg-sky-50 text-sky-600 group-hover:bg-sky-100", title: "患者管理", desc: "患者一覧・検索・歯式・カルテ", ready: true },
     { href: "/checkin", icon: "📱", iconBg: "bg-green-50 text-green-600 group-hover:bg-green-100", title: "受付", desc: "チェックイン・受付番号発行", ready: true },
     { href: "/billing", icon: "💰", iconBg: "bg-purple-50 text-purple-600 group-hover:bg-purple-100", title: "会計", desc: "精算・レセプト管理", ready: true },
