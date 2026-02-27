@@ -49,6 +49,7 @@ export default function ConsultationPage() {
   const [selectedApt, setSelectedApt] = useState<Appointment | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("doctor");
   const [editTime, setEditTime] = useState("");
+  const [editDate, setEditDate] = useState("");
   const [editDuration, setEditDuration] = useState(30);
   const resizeRef = useRef<{ aptId: string; startY: number; origDur: number } | null>(null);
 
@@ -137,11 +138,11 @@ export default function ConsultationPage() {
     if (selectedApt?.id===aptId) setSelectedApt(p=>p?{...p,doctor_id:doctorId||null}:null);
   }
 
-  async function updateAptTime(aptId: string, h: number, m: number) {
-    const s=`${selectedDate}T${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:00+09:00`;
+  async function updateAptTime(aptId: string, date: string, h: number, m: number) {
+    const s=`${date}T${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:00`;
     await supabase.from("appointments").update({ scheduled_at:s }).eq("id", aptId);
     await fetchAppointments();
-    if (selectedApt?.id===aptId) { setSelectedApt(p=>p?{...p,scheduled_at:s}:null); setEditTime(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`); }
+    if (selectedApt?.id===aptId) { setSelectedApt(p=>p?{...p,scheduled_at:s}:null); setEditTime(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`); setEditDate(date); }
   }
 
   async function updateDur(aptId: string, dur: number) {
@@ -159,7 +160,7 @@ export default function ConsultationPage() {
   }
 
   // selectedApt同期
-  useEffect(() => { if(selectedApt){ setEditTime(fmtTime(selectedApt)); setEditDuration(selectedApt.duration_min||30); } }, [selectedApt?.id]); // eslint-disable-line
+  useEffect(() => { if(selectedApt){ setEditTime(fmtTime(selectedApt)); setEditDuration(selectedApt.duration_min||30); setEditDate(selectedApt.scheduled_at.split("T")[0]); } }, [selectedApt?.id]); // eslint-disable-line
 
   // === リサイズ ===
   useEffect(() => {
@@ -283,7 +284,7 @@ export default function ConsultationPage() {
                             await supabase.from("appointments").update({unit_id:col.id}).eq("id",aptId);
                           } else { await supabase.from("appointments").update({doctor_id:col.id}).eq("id",aptId); }
                         }
-                        await updateAptTime(aptId,hour,dropMin);
+                        await updateAptTime(aptId,selectedDate,hour,dropMin);
                       }}
                       className={`flex-1 min-w-[160px] border-r border-gray-50 relative px-1 py-0.5 transition-colors ${col.id==="__unassigned__"?"bg-amber-50/30":""}`}>
                       {colApts.map(apt=>{
@@ -393,18 +394,20 @@ export default function ConsultationPage() {
               {/* 日時編集 */}
               <div className="border border-gray-200 rounded-lg p-2.5 space-y-2">
                 <p className="text-[10px] text-gray-400 font-bold">📅 日時変更</p>
+                <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-400" />
                 <div className="flex items-center gap-2">
                   <input type="time" value={editTime} onChange={e=>setEditTime(e.target.value)} className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-400" />
                   <select value={editDuration} onChange={e=>setEditDuration(Number(e.target.value))} className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-400">
                     {[15,30,45,60,90,120].map(d=><option key={d} value={d}>{d}分</option>)}
                   </select>
                 </div>
-                {(editTime!==fmtTime(selectedApt)||editDuration!==(selectedApt.duration_min||30))&&(
+                {(editDate!==selectedApt.scheduled_at.split("T")[0]||editTime!==fmtTime(selectedApt)||editDuration!==(selectedApt.duration_min||30))&&(
                   <button onClick={async()=>{
                     const [h,m]=editTime.split(":").map(Number);
                     if(selectedApt.unit_id&&hasConflict(selectedApt.id,selectedApt.unit_id,h*60+m,editDuration)){alert("⚠️ この時間帯は既に別の予約が入っています");return;}
-                    await updateAptTime(selectedApt.id,h,m);
+                    await updateAptTime(selectedApt.id,editDate,h,m);
                     if(editDuration!==(selectedApt.duration_min||30)) await updateDur(selectedApt.id,editDuration);
+                    if(editDate!==selectedDate) setSelectedDate(editDate);
                   }} className="w-full py-1.5 rounded-lg text-xs font-bold bg-sky-500 text-white hover:bg-sky-600">✓ 変更を保存</button>
                 )}
               </div>
