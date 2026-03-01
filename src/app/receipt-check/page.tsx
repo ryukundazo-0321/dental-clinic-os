@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -14,11 +14,6 @@ type BillingRow = {
   patients: { name_kanji: string; name_kana: string; insurance_type: string } | null;
 };
 
-type DiagRow = {
-  id: string; patient_id: string; diagnosis_code: string; diagnosis_name: string;
-  tooth_number: string; start_date: string; end_date: string | null; outcome: string;
-};
-
 type CheckResult = {
   billing_id: string;
   patient_id: string;
@@ -28,193 +23,7 @@ type CheckResult = {
   warnings: string[];
 };
 
-type CalcRule = {
-  id: string;
-  rule_type: string;
-  source_code: string;
-  target_code: string | null;
-  condition: Record<string, unknown>;
-  error_level: string;
-  message: string;
-  legal_basis: string;
-};
-
-type DiagReq = {
-  id: string;
-  procedure_code_pattern: string;
-  required_diagnosis_keywords: string[];
-  required_icd_prefixes: string[];
-  error_level: string;
-  message: string;
-  legal_basis: string;
-};
-
 type FilterTab = "all" | "error" | "warn" | "ok";
-
-// ============================
-// DB駆動チェックエンジン
-// ============================
-function runChecks(
-  billing: BillingRow,
-  diagnoses: DiagRow[],
-  allBillings: BillingRow[],
-  calcRules: CalcRule[],
-  diagReqs: DiagReq[]
-): { errors: string[]; warnings: string[] } {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  const procs = billing.procedures_detail || [];
-  const codes = procs.map(p => p.code);
-
-  const addIssue = (level: string, msg: string, basis: string) => {
-    const fullMsg = basis ? `${msg}【${basis}】` : msg;
-    if (level === "error") errors.push(fullMsg);
-    else warnings.push(fullMsg);
-  };
-
-  for (const rule of calcRules) {
-    switch (rule.rule_type) {
-      case "zero_points":
-        if (billing.total_points <= 0) addIssue(rule.error_level, rule.message, rule.legal_basis);
-        break;
-
-      case "no_diagnosis":
-        if (diagnoses.length === 0) addIssue(rule.error_level, rule.message, rule.legal_basis);
-        break;
-
-      case "no_procedure": {
-        const hasOnlyConsult = procs.every(p =>
-          p.code.startsWith("A0") || p.code.startsWith("A001") || p.code.startsWith("A002")
-        );
-        if (hasOnlyConsult && procs.length > 0) addIssue(rule.error_level, rule.message, rule.legal_basis);
-        break;
-      }
-
-      case "all_cured": {
-        const curedDiags = diagnoses.filter(d => d.outcome === "cured");
-        if (curedDiags.length > 0 && curedDiags.length === diagnoses.length && procs.length > 0) {
-          addIssue(rule.error_level, rule.message, rule.legal_basis);
-        }
-        break;
-      }
-
-      case "burden_mismatch": {
-        const expectedBurden = Math.round(billing.total_points * 10 * billing.burden_ratio);
-        const roundedExpected = Math.round(expectedBurden / 10) * 10;
-        if (Math.abs(billing.patient_burden - roundedExpected) > 10) {
-          addIssue(rule.error_level,
-            `${rule.message}（期待:¥${roundedExpected} / 実際:¥${billing.patient_burden}）`,
-            rule.legal_basis);
-        }
-        break;
-      }
-
-      case "insurance_missing":
-        if (!billing.patients?.insurance_type) addIssue(rule.error_level, rule.message, rule.legal_basis);
-        break;
-
-      case "cannot_combine": {
-        const hasSource = codes.some(c => c === rule.source_code || c.startsWith(rule.source_code));
-        const hasTarget = rule.target_code
-          ? codes.some(c => c === rule.target_code || c.startsWith(rule.target_code!))
-          : false;
-        if (hasSource && hasTarget) addIssue(rule.error_level, rule.message, rule.legal_basis);
-        break;
-      }
-
-      case "frequency_month": {
-        const maxPerMonth = (rule.condition as { max_per_month?: number }).max_per_month || 1;
-        const billingMonth = billing.created_at.substring(0, 7);
-        const sameMonthBillings = allBillings.filter(b =>
-          b.patient_id === billing.patient_id && b.created_at.substring(0, 7) === billingMonth
-        );
-        let totalCount = 0;
-        sameMonthBillings.forEach(b => {
-          (b.procedures_detail || []).forEach(p => {
-            if (p.code === rule.source_code || p.code.startsWith(rule.source_code)) {
-              totalCount += p.count;
-            }
-          });
-        });
-        if (totalCount > maxPerMonth) {
-          addIssue(rule.error_level,
-            `${rule.message}（${billingMonth}月: ${totalCount}回）`,
-            rule.legal_basis);
-        }
-        break;
-      }
-
-      case "tooth_conflict": {
-        const sourceProcs = procs.filter(p =>
-          p.code === rule.source_code || p.code.startsWith(rule.source_code)
-        );
-        const extractedTeeth: string[] = [];
-        sourceProcs.forEach(p => {
-          if (p.tooth_numbers) extractedTeeth.push(...p.tooth_numbers);
-        });
-        if (extractedTeeth.length > 0 && rule.target_code === "*") {
-          procs.forEach(p => {
-            if (p.code === rule.source_code || p.code.startsWith(rule.source_code)) return;
-            if (p.tooth_numbers) {
-              const overlap = p.tooth_numbers.filter(t => extractedTeeth.includes(t));
-              if (overlap.length > 0) {
-                addIssue(rule.error_level,
-                  `${rule.message}（${overlap.map(t => "#" + t).join(",")} に ${p.name}）`,
-                  rule.legal_basis);
-              }
-            }
-          });
-        }
-        break;
-      }
-
-      case "requires_other": {
-        const hasSource = codes.some(c => c === rule.source_code || c.startsWith(rule.source_code));
-        if (hasSource && rule.target_code) {
-          const hasTarget = codes.some(c => c === rule.target_code || c.startsWith(rule.target_code!));
-          const orCode = (rule.condition as { or_code?: string }).or_code;
-          const hasOr = orCode ? codes.some(c => c === orCode || c.startsWith(orCode)) : false;
-          if (!hasTarget && !hasOr) {
-            addIssue(rule.error_level, rule.message, rule.legal_basis);
-          }
-        }
-        break;
-      }
-    }
-  }
-
-  for (const req of diagReqs) {
-    const matchingProcs = procs.filter(p =>
-      p.code === req.procedure_code_pattern ||
-      p.code.startsWith(req.procedure_code_pattern)
-    );
-    if (matchingProcs.length === 0) continue;
-
-    const hasDiag = diagnoses.some(d => {
-      const nameMatch = req.required_diagnosis_keywords.some(kw =>
-        d.diagnosis_name.includes(kw)
-      );
-      const icdMatch = req.required_icd_prefixes.length > 0
-        ? req.required_icd_prefixes.some(prefix => d.diagnosis_code.startsWith(prefix))
-        : false;
-      return nameMatch || icdMatch;
-    });
-
-    if (!hasDiag) {
-      addIssue(req.error_level, req.message, req.legal_basis);
-    }
-  }
-
-  if (billing.ai_check_warnings && billing.ai_check_warnings.length > 0) {
-    billing.ai_check_warnings.forEach(w => {
-      // 管理計画書警告は、文書提供済みならスキップ
-      if (w.includes("管理計画書") && billing.document_provided) return;
-      warnings.push(w);
-    });
-  }
-
-  return { errors, warnings };
-}
 
 export default function ReceiptCheckPage() {
   const [checkMonth, setCheckMonth] = useState(() => {
@@ -226,18 +35,240 @@ export default function ReceiptCheckPage() {
   const [checking, setChecking] = useState(false);
   const [checkDone, setCheckDone] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [calcRules, setCalcRules] = useState<CalcRule[]>([]);
-  const [diagReqs, setDiagReqs] = useState<DiagReq[]>([]);
-  const [rulesLoaded, setRulesLoaded] = useState(false);
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
   const [recheckingId, setRecheckingId] = useState<string | null>(null);
   const [henreiItems, setHenreiItems] = useState<{ patient_name: string; ym: string; reason: string; points: string }[]>([]);
   const [aiChecking, setAiChecking] = useState(false);
+  const [rulesCount, setRulesCount] = useState<number | null>(null);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
+  // ============================================================
+  // APIからルール件数を取得（初回のみ）
+  // ============================================================
+  useState(() => {
+    fetch("/api/receipt-check")
+      .then(res => res.json())
+      .then(data => {
+        setRulesCount(data.rules?.total || 0);
+        setRulesLoaded(true);
+      })
+      .catch(() => setRulesLoaded(true));
+  });
+
+  // ============================================================
+  // 月データ読み込み（billing一覧取得）
+  // ============================================================
+  async function loadMonthData() {
+    setLoading(true);
+    setResults([]);
+    setCheckDone(false);
+    setFilterTab("all");
+    const ym = checkMonth;
+    const startDate = `${ym}-01T00:00:00`;
+    const endDay = new Date(parseInt(ym.split("-")[0]), parseInt(ym.split("-")[1]), 0).getDate();
+    const endDate = `${ym}-${String(endDay).padStart(2, "0")}T23:59:59`;
+
+    const { data } = await supabase
+      .from("billing")
+      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .eq("payment_status", "paid")
+      .gte("created_at", startDate)
+      .lte("created_at", endDate)
+      .order("created_at");
+
+    if (data) {
+      const bills = data as unknown as BillingRow[];
+      setBillings(bills);
+      setResults(bills.map(b => ({
+        billing_id: b.id,
+        patient_id: b.patient_id,
+        patient_name: b.patients?.name_kanji || "不明",
+        status: "pending",
+        errors: [],
+        warnings: [],
+      })));
+    }
+    setLoading(false);
+  }
+
+  // ============================================================
+  // チェック開始 — サーバーサイドAPIを呼び出し
+  // ============================================================
+  async function startCheck() {
+    if (billings.length === 0) return;
+    setChecking(true);
+    setCheckDone(false);
+    setExpandedId(null);
+    setFilterTab("all");
+
+    // 全件を「チェック中」に
+    setResults(prev => prev.map(r => ({ ...r, status: "checking" as const })));
+
+    try {
+      const res = await fetch("/api/receipt-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          yearMonth: checkMonth,
+          billing_ids: billings.map(b => b.id),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`チェックエラー: ${err.error || "不明なエラー"}`);
+        setResults(prev => prev.map(r => ({ ...r, status: "pending" as const })));
+        setChecking(false);
+        return;
+      }
+
+      const data = await res.json();
+      const apiResults = data.results || [];
+
+      // API結果をUIのresults配列にマージ
+      setResults(prev => prev.map(r => {
+        const apiResult = apiResults.find((ar: CheckResult) => ar.billing_id === r.billing_id);
+        if (apiResult) {
+          return {
+            ...r,
+            status: apiResult.status,
+            errors: apiResult.errors,
+            warnings: apiResult.warnings,
+            patient_name: apiResult.patient_name || r.patient_name,
+          };
+        }
+        return { ...r, status: "ok" as const, errors: [], warnings: [] };
+      }));
+
+      // ルール件数を更新
+      if (data.rules_loaded) {
+        const total = Object.values(data.rules_loaded as Record<string, number>).reduce((s: number, v: number) => s + v, 0);
+        setRulesCount(total);
+      }
+    } catch (e) {
+      console.error("Check API error:", e);
+      alert("チェックAPIの呼び出しに失敗しました");
+      setResults(prev => prev.map(r => ({ ...r, status: "pending" as const })));
+    }
+
+    setChecking(false);
+    setCheckDone(true);
+  }
+
+  // ============================================================
+  // 1件だけ再チェック
+  // ============================================================
+  async function recheckOne(billingId: string) {
+    setRecheckingId(billingId);
+    const idx = results.findIndex(r => r.billing_id === billingId);
+    if (idx < 0) { setRecheckingId(null); return; }
+
+    // billingデータを再取得
+    const { data: freshBilling } = await supabase
+      .from("billing")
+      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .eq("id", billingId)
+      .single();
+
+    if (!freshBilling) { setRecheckingId(null); return; }
+    const bill = freshBilling as unknown as BillingRow;
+    setBillings(prev => prev.map((b, i) => i === idx ? bill : b));
+
+    setResults(prev => prev.map((r, i) => i === idx ? { ...r, status: "checking" as const } : r));
+
+    try {
+      const res = await fetch("/api/receipt-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          yearMonth: checkMonth,
+          billing_ids: [billingId],
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const apiResult = data.results?.[0];
+        if (apiResult) {
+          setResults(prev => prev.map((r, i) => i === idx ? {
+            ...r,
+            patient_name: apiResult.patient_name || r.patient_name,
+            status: apiResult.status,
+            errors: apiResult.errors,
+            warnings: apiResult.warnings,
+          } : r));
+        }
+      }
+    } catch (e) {
+      console.error("Recheck error:", e);
+    }
+
+    setRecheckingId(null);
+  }
+
+  // ============================================================
+  // 全件再チェック
+  // ============================================================
+  async function recheckAll() {
+    setChecking(true);
+    setExpandedId(null);
+
+    const ym = checkMonth;
+    const startDate = `${ym}-01T00:00:00`;
+    const endDay = new Date(parseInt(ym.split("-")[0]), parseInt(ym.split("-")[1]), 0).getDate();
+    const endDate = `${ym}-${String(endDay).padStart(2, "0")}T23:59:59`;
+
+    const { data } = await supabase
+      .from("billing")
+      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .eq("payment_status", "paid")
+      .gte("created_at", startDate)
+      .lte("created_at", endDate)
+      .order("created_at");
+
+    if (!data) { setChecking(false); return; }
+    const freshBillings = data as unknown as BillingRow[];
+    setBillings(freshBillings);
+
+    setResults(freshBillings.map(b => ({
+      billing_id: b.id,
+      patient_id: b.patient_id,
+      patient_name: b.patients?.name_kanji || "不明",
+      status: "checking" as const,
+      errors: [],
+      warnings: [],
+    })));
+
+    try {
+      const res = await fetch("/api/receipt-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yearMonth: checkMonth }),
+      });
+
+      if (res.ok) {
+        const apiData = await res.json();
+        const apiResults = apiData.results || [];
+        setResults(apiResults.map((ar: CheckResult) => ({
+          ...ar,
+          status: ar.status || "ok",
+        })));
+      }
+    } catch (e) {
+      console.error("Recheck all error:", e);
+    }
+
+    setChecking(false);
+    setCheckDone(true);
+  }
+
+  // ============================================================
+  // AI深層チェック（既存ロジック維持）
+  // ============================================================
   async function runAICheck() {
-    // ルールチェックで問題があった件 + OKの件からサンプリングしてAIに判定させる
     const targets = results.filter(r => r.status === "error" || r.status === "warn");
-    const okSamples = results.filter(r => r.status === "ok").slice(0, 3); // OKからも3件サンプル
+    const okSamples = results.filter(r => r.status === "ok").slice(0, 3);
     const allTargets = [...targets, ...okSamples];
 
     if (allTargets.length === 0) { alert("チェック対象がありません"); return; }
@@ -253,9 +284,12 @@ export default function ReceiptCheckPage() {
         const billing = billings[idx];
         if (!billing) continue;
 
-        const patientDiags = await fetchDiagnoses([billing.patient_id]);
-        const procs = billing.procedures_detail || [];
+        const { data: patientDiags } = await supabase
+          .from("patient_diagnoses")
+          .select("*")
+          .eq("patient_id", billing.patient_id);
 
+        const procs = billing.procedures_detail || [];
         const prompt = `歯科レセプトの査定・返戻リスクを判定してください。
 
 【患者】${billing.patients?.name_kanji || "不明"}
@@ -265,7 +299,7 @@ export default function ReceiptCheckPage() {
 ${procs.map(p => `- ${p.name}(${p.code}) ${p.points}点×${p.count}回${p.tooth_numbers?.length ? " 歯:" + p.tooth_numbers.join(",") : ""}`).join("\n")}
 
 【傷病名】
-${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.tooth_number} 転帰:${d.outcome}`).join("\n") || "なし"}
+${(patientDiags || []).map((d: { diagnosis_name: string; diagnosis_code: string; tooth_number: string; outcome: string }) => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.tooth_number} 転帰:${d.outcome}`).join("\n") || "なし"}
 
 【ルールチェック結果】
 エラー: ${target.errors.join("; ") || "なし"}
@@ -310,11 +344,9 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
                 ...riskAreas.map((r: string) => `🤖 査定リスク: ${r}`),
                 ...suggestions.map((s: string) => `💡 AI提案: ${s}`),
               ];
-              const newErrors = target.errors;
-
               setResults(prev => prev.map((r, i) => i === idx ? {
                 ...r,
-                status: newErrors.length > 0 ? "error" : newWarnings.length > 0 ? "warn" : "ok",
+                status: target.errors.length > 0 ? "error" : newWarnings.length > 0 ? "warn" : "ok",
                 warnings: newWarnings,
               } : r));
             }
@@ -330,177 +362,10 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
 
     setAiChecking(false);
   }
-  const listRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    async function loadRules() {
-      const [{ data: rules }, { data: reqs }] = await Promise.all([
-        supabase.from("calculation_rules").select("*").eq("is_active", true),
-        supabase.from("diagnosis_requirements").select("*").eq("is_active", true),
-      ]);
-      setCalcRules((rules || []) as CalcRule[]);
-      setDiagReqs((reqs || []) as DiagReq[]);
-      setRulesLoaded(true);
-    }
-    loadRules();
-  }, []);
-
-  async function loadMonthData() {
-    setLoading(true);
-    setResults([]);
-    setCheckDone(false);
-    setFilterTab("all");
-    const ym = checkMonth;
-    const startDate = `${ym}-01T00:00:00`;
-    const endDay = new Date(parseInt(ym.split("-")[0]), parseInt(ym.split("-")[1]), 0).getDate();
-    const endDate = `${ym}-${String(endDay).padStart(2, "0")}T23:59:59`;
-
-    const { data } = await supabase
-      .from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type)")
-      .eq("payment_status", "paid")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate)
-      .order("created_at");
-
-    if (data) {
-      const bills = data as unknown as BillingRow[];
-      setBillings(bills);
-      setResults(bills.map(b => ({
-        billing_id: b.id,
-        patient_id: b.patient_id,
-        patient_name: b.patients?.name_kanji || "不明",
-        status: "pending",
-        errors: [],
-        warnings: [],
-      })));
-    }
-    setLoading(false);
-  }
-
-  async function fetchDiagnoses(patientIds: string[]): Promise<DiagRow[]> {
-    const { data } = await supabase
-      .from("patient_diagnoses")
-      .select("id, patient_id, diagnosis_code, diagnosis_name, tooth_number, start_date, end_date, outcome")
-      .in("patient_id", patientIds);
-    return (data || []) as DiagRow[];
-  }
-
-  async function startCheck() {
-    if (billings.length === 0) return;
-    setChecking(true);
-    setCheckDone(false);
-    setExpandedId(null);
-    setFilterTab("all");
-
-    const patientIds = Array.from(new Set(billings.map(b => b.patient_id)));
-    const allDiags = await fetchDiagnoses(patientIds);
-
-    for (let i = 0; i < billings.length; i++) {
-      setResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: "checking" } : r));
-      await new Promise(res => setTimeout(res, 80));
-
-      const billing = billings[i];
-      const patientDiags = allDiags.filter(d => d.patient_id === billing.patient_id);
-      const { errors, warnings } = runChecks(billing, patientDiags, billings, calcRules, diagReqs);
-
-      await new Promise(res => setTimeout(res, 200 + Math.random() * 300));
-
-      setResults(prev => prev.map((r, idx) => idx === i ? {
-        ...r,
-        status: errors.length > 0 ? "error" : warnings.length > 0 ? "warn" : "ok",
-        errors,
-        warnings,
-      } : r));
-    }
-
-    setChecking(false);
-    setCheckDone(true);
-  }
-
-  // 1件だけ再チェック（修正後に使う）
-  async function recheckOne(billingId: string) {
-    setRecheckingId(billingId);
-    const idx = results.findIndex(r => r.billing_id === billingId);
-    if (idx < 0) { setRecheckingId(null); return; }
-
-    // billingデータを再取得（修正が反映されるように）
-    const { data: freshBilling } = await supabase
-      .from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type)")
-      .eq("id", billingId)
-      .single();
-
-    if (!freshBilling) { setRecheckingId(null); return; }
-    const bill = freshBilling as unknown as BillingRow;
-
-    // billings配列も更新
-    setBillings(prev => prev.map((b, i) => i === idx ? bill : b));
-
-    setResults(prev => prev.map((r, i) => i === idx ? { ...r, status: "checking" } : r));
-    await new Promise(res => setTimeout(res, 500));
-
-    const allDiags = await fetchDiagnoses([bill.patient_id]);
-    const patientDiags = allDiags.filter(d => d.patient_id === bill.patient_id);
-
-    // allBillingsも最新にする
-    const updatedBillings = billings.map((b, i) => i === idx ? bill : b);
-    const { errors, warnings } = runChecks(bill, patientDiags, updatedBillings, calcRules, diagReqs);
-
-    setResults(prev => prev.map((r, i) => i === idx ? {
-      ...r,
-      patient_name: bill.patients?.name_kanji || "不明",
-      status: errors.length > 0 ? "error" : warnings.length > 0 ? "warn" : "ok",
-      errors,
-      warnings,
-    } : r));
-    setRecheckingId(null);
-  }
-
-  // 全件再チェック
-  async function recheckAll() {
-    setChecking(true);
-    setExpandedId(null);
-
-    // 全billingデータを再取得
-    const ym = checkMonth;
-    const startDate = `${ym}-01T00:00:00`;
-    const endDay = new Date(parseInt(ym.split("-")[0]), parseInt(ym.split("-")[1]), 0).getDate();
-    const endDate = `${ym}-${String(endDay).padStart(2, "0")}T23:59:59`;
-
-    const { data } = await supabase
-      .from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type)")
-      .eq("payment_status", "paid")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate)
-      .order("created_at");
-
-    if (!data) { setChecking(false); return; }
-    const freshBillings = data as unknown as BillingRow[];
-    setBillings(freshBillings);
-
-    const patientIds = Array.from(new Set(freshBillings.map(b => b.patient_id)));
-    const allDiags = await fetchDiagnoses(patientIds);
-
-    const newResults: CheckResult[] = [];
-    for (const bill of freshBillings) {
-      const patientDiags = allDiags.filter(d => d.patient_id === bill.patient_id);
-      const { errors, warnings } = runChecks(bill, patientDiags, freshBillings, calcRules, diagReqs);
-      newResults.push({
-        billing_id: bill.id,
-        patient_id: bill.patient_id,
-        patient_name: bill.patients?.name_kanji || "不明",
-        status: errors.length > 0 ? "error" : warnings.length > 0 ? "warn" : "ok",
-        errors,
-        warnings,
-      });
-    }
-    setResults(newResults);
-    setChecking(false);
-    setCheckDone(true);
-  }
-
+  // ============================================================
+  // UIヘルパー
+  // ============================================================
   const summary = {
     total: results.length,
     ok: results.filter(r => r.status === "ok").length,
@@ -556,7 +421,7 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
             <h1 className="text-lg font-bold text-gray-900">🔍 レセプトチェック</h1>
             {rulesLoaded && (
               <span className="text-[10px] text-gray-300 bg-gray-50 px-2 py-0.5 rounded-full">
-                ルール{calcRules.length + diagReqs.length}件読込済
+                公式ルール{rulesCount?.toLocaleString() || 0}件読込済
               </span>
             )}
           </div>
@@ -580,9 +445,9 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
                 className="border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
             </div>
             <div className="pt-5">
-              <button onClick={loadMonthData} disabled={loading || !rulesLoaded}
+              <button onClick={loadMonthData} disabled={loading}
                 className="bg-gray-800 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-gray-700 disabled:opacity-50">
-                {loading ? "読み込み中..." : !rulesLoaded ? "ルール読込中..." : "📋 レセプト一覧を取得"}
+                {loading ? "読み込み中..." : "📋 レセプト一覧を取得"}
               </button>
             </div>
             {results.length > 0 && !checking && !checkDone && (
@@ -718,24 +583,23 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
 
                     {/* アクションボタン + 修正ガイド */}
                     <div className="mt-3 pt-3 border-t border-gray-100">
-                      {/* 修正ガイド */}
                       <div className="mb-3 bg-gray-50 rounded-lg p-3">
                         <p className="text-[10px] text-gray-400 font-bold mb-1.5">💡 修正方法</p>
                         {r.errors.concat(r.warnings).map((msg, i) => (
                           <p key={"g" + i} className="text-[11px] text-gray-500 py-0.5">
                             {msg.includes("傷病名") ? "→ カルテの「傷病名」欄で該当する傷病名を追加してください"
-                              : msg.includes("初診料と再診料") ? "→ カルテの会計で初診料または再診料のどちらかを削除してください"
-                              : msg.includes("抜歯した歯") ? "→ 抜歯した歯番に紐づく他の処置を会計から削除してください"
+                              : msg.includes("併算定") ? "→ いずれかの項目を会計から削除してください"
+                              : msg.includes("回数") || msg.includes("回まで") ? "→ 同月の他の会計で重複算定がないか確認してください"
+                              : msg.includes("年齢") ? "→ 患者の年齢に適した算定項目か確認してください"
                               : msg.includes("合計点数が0") ? "→ 処置内容が正しく入力されているか確認してください"
-                              : msg.includes("同月") ? "→ 同月の他の会計で重複算定がないか確認してください"
                               : msg.includes("患者負担額") ? "→ 会計画面で負担額を再計算してください"
                               : msg.includes("保険種別") ? "→ カルテの患者情報で保険種別を設定してください"
                               : msg.includes("治癒") ? "→ 傷病名の転帰を「継続」に変更するか、処置を見直してください"
                               : msg.includes("処置がありません") ? "→ 処置内容の入力漏れがないか確認してください"
-                              : msg.includes("歯周組織検査") ? "→ 歯周検査を先に実施・算定してください"
+                              : msg.includes("材料") ? "→ 必要な材料の算定漏れがないか確認してください"
+                              : msg.includes("加算") || msg.includes("前提") ? "→ 加算の前提となる基本項目が算定されているか確認してください"
+                              : msg.includes("きざみ") ? "→ きざみ計算（時間加算等）を確認してください"
                               : msg.includes("管理計画書") ? "→ カルテ画面の「📄 管理計画書」ボタンから印刷して患者に渡してください"
-                              : msg.includes("フッ化物") ? "→ フッ化物塗布の適応傷病名を確認してください"
-                              : msg.includes("前提") ? "→ 先に必要な検査・処置を実施してから算定してください"
                               : "→ カルテを確認して該当箇所を修正してください"}
                           </p>
                         ))}
@@ -753,11 +617,10 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
                         </button>
                       </div>
 
-                      {/* ★ 直接修正パネル */}
+                      {/* 直接修正パネル */}
                       {billing && (
                         <div className="mt-3 pt-3 border-t border-gray-200">
                           <p className="text-[10px] text-gray-400 font-bold mb-2">🔧 この画面で直接修正</p>
-                          {/* 算定項目の削除 */}
                           <div className="bg-white rounded-lg border border-gray-200 p-2 mb-2">
                             <p className="text-[10px] text-gray-500 font-bold mb-1">算定項目（クリックで削除）</p>
                             <div className="flex flex-wrap gap-1">
@@ -782,7 +645,6 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
                               ))}
                             </div>
                           </div>
-                          {/* 傷病名クイック追加 */}
                           {r.errors.some(e => e.includes("傷病名")) && (
                             <div className="bg-white rounded-lg border border-gray-200 p-2">
                               <p className="text-[10px] text-gray-500 font-bold mb-1">傷病名クイック追加</p>
@@ -826,7 +688,7 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
           })}
         </div>
 
-        {/* レセ電への導線（エラーがある場合） */}
+        {/* レセ電への導線 */}
         {checkDone && (summary.error > 0 || summary.warn > 0) && (
           <div className="mt-6 bg-gray-50 border border-gray-200 rounded-xl p-4">
             <p className="text-xs text-gray-500 mb-2">
@@ -839,7 +701,7 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
           </div>
         )}
 
-        {/* ===== 返戻管理 ===== */}
+        {/* 返戻管理 */}
         <div className="mt-8 bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-bold text-gray-800">📨 返戻管理</h2>
@@ -854,7 +716,6 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
                 const lines = text.split("\n").filter(l => l.trim());
                 const henreiList: { patient_name: string; ym: string; reason: string; points: string }[] = [];
                 for (const line of lines) {
-                  // HRレコードまたは簡易CSV解析
                   if (line.startsWith("HR,") || line.includes("返戻")) {
                     const parts = line.split(",");
                     henreiList.push({
@@ -866,7 +727,6 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
                   }
                 }
                 if (henreiList.length === 0) {
-                  // フリーテキスト解析
                   henreiList.push({ patient_name: "ファイル読込済", ym: "", reason: `${lines.length}行のデータ。手動確認が必要`, points: "" });
                 }
                 setHenreiItems(henreiList);
@@ -894,7 +754,7 @@ ${patientDiags.map(d => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.toot
           )}
         </div>
 
-        {/* ===== オンライン請求ガイド ===== */}
+        {/* オンライン請求ガイド */}
         <div className="mt-6 bg-sky-50 rounded-xl border border-sky-200 p-5 mb-8">
           <h2 className="text-sm font-bold text-sky-800 mb-3">🌐 オンライン請求手順</h2>
           <div className="space-y-2 text-xs text-gray-600">
