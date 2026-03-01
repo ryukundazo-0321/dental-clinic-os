@@ -329,6 +329,59 @@ async function generateSOAP(
   /* eslint-disable @typescript-eslint/no-explicit-any */
   let soapData: any = null;
 
+  // ============================================================
+  // diagnosis_master から傷病名一覧を動的取得
+  // ハードコードの5件ではなく、DB上の1,194件を参照
+  // ============================================================
+  let diagnosisReference = "";
+  try {
+    const supabaseUrl2 = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey2 = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const { createClient: createClient2 } = await import("@supabase/supabase-js");
+    const supabaseForDiag = createClient2(supabaseUrl2, supabaseKey2);
+
+    const { data: diagMaster } = await supabaseForDiag
+      .from("diagnosis_master")
+      .select("code, name, category")
+      .order("code");
+    
+    if (diagMaster && diagMaster.length > 0) {
+      const categories: Record<string, { name: string; code: string }[]> = {};
+      for (const d of diagMaster) {
+        const cat = d.category || "その他";
+        if (!categories[cat]) categories[cat] = [];
+        categories[cat].push({ name: d.name, code: d.code });
+      }
+      
+      const priorityCategories = ["う蝕", "歯髄", "根尖", "歯周", "抜歯", "外傷", "顎関節", "粘膜", "欠損"];
+      const lines: string[] = [];
+      
+      for (const cat of priorityCategories) {
+        const items = categories[cat];
+        if (items && items.length > 0) {
+          const itemStr = items.slice(0, 15).map((i: { name: string; code: string }) => `${i.name}(${i.code})`).join("、");
+          lines.push(`【${cat}】${itemStr}`);
+        }
+      }
+      
+      for (const [cat, items] of Object.entries(categories)) {
+        if (!priorityCategories.includes(cat) && items.length > 0) {
+          const itemStr = (items as { name: string; code: string }[]).slice(0, 10).map((i: { name: string; code: string }) => `${i.name}(${i.code})`).join("、");
+          lines.push(`【${cat}】${itemStr}`);
+        }
+      }
+      
+      diagnosisReference = `
+
+### 傷病名マスター（${diagMaster.length}件 — 必ずこの中から選択）
+${lines.join("\n")}
+
+★重要: 上記マスターに存在するコードのみ使用すること。マスターにない傷病名コードは使わない。`;
+    }
+  } catch (e) {
+    console.error("diagnosis_master取得エラー:", e);
+  }
+
   const systemPrompt = `あなたは日本の歯科診療所で10年以上の経験を持つ電子カルテAIアシスタントです。
 
 ## あなたの仕事
@@ -382,7 +435,9 @@ async function generateSOAP(
   【次回】#46 FMC形成+印象 予約3/5
 
 ### 傷病名（★保険請求のため漏れ厳禁★）
-処置 → 必ず対応する傷病名をつける：
+処置 → 必ず対応する傷病名をつける。傷病名は以下のマスターから選択。
+
+基本マッピング（これ以外もマスターから選択可能）：
 | 処置 | 傷病名 | コード |
 |------|--------|--------|
 | CR充填/インレー/FMC | う蝕(C2)※明示あればそれ | K022 |
@@ -390,7 +445,13 @@ async function generateSOAP(
 | 感根治 | 根尖性歯周炎(Per) | K045 |
 | SC/SRP | 歯周炎(P) | K051 |
 | 親知らず抜歯 | 智歯周囲炎(Perico) | K081 |
+| 欠損補綴 | 部分歯列欠損 | K083 |
+| 咬合調整 | 咬合性外傷 | K067 |
+| 義歯修理 | 義歯不適合 | K083 |
+| 口内炎治療 | 口内炎 | K120 |
+| フッ化物塗布 | う蝕多発傾向者 | K021 |
 複数歯の処置 → 各歯ごとに傷病名を記録
+\${diagnosisReference}
 
 ### 歯式ステータス
 - in_treatment: FMC形成, 抜髄, 感根治, 根充, TEK, 印象, SRP
