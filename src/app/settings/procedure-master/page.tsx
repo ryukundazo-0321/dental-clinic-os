@@ -204,13 +204,13 @@ export default function ProcedureMasterPage() {
           </div>
         </div>
 
-        {/* 展開: 食材一覧 */}
+        {/* 展開: 算定コード一覧 */}
         {isExp && (
           <div className="border-t border-gray-100">
-            {/* 食材リスト */}
+            {/* 算定コードリスト */}
             <div className="px-4 py-3">
               <p className="text-[10px] font-bold text-gray-400 mb-2 flex items-center gap-1">
-                <span>📦</span> 算定コード（食材）
+                <span>📦</span> 算定コード（点数コード）
               </p>
               <div className="space-y-1">
                 {proc.fee_items.map((fi, i) => (
@@ -274,12 +274,12 @@ export default function ProcedureMasterPage() {
           <div className="flex items-center gap-3">
             <Link href="/settings" className="text-gray-400 hover:text-gray-600 text-sm">← 設定</Link>
             <div>
-              <h1 className="text-base font-bold text-gray-900">処置マスタ（レシピ管理）</h1>
-              <p className="text-[10px] text-gray-400">処置パターン → fee_master食材の組み合わせ</p>
+              <h1 className="text-base font-bold text-gray-900">処置マスタ（治療パターン管理）</h1>
+              <p className="text-[10px] text-gray-400">治療パターン → 算定コードの組み合わせ</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] bg-sky-50 text-sky-600 font-bold px-2 py-0.5 rounded-full">🍳 {totalActive}/{procs.length} レシピ</span>
-              <span className="text-[10px] bg-emerald-50 text-emerald-600 font-bold px-2 py-0.5 rounded-full">📦 {feeCount.toLocaleString()} 食材</span>
+              <span className="text-[10px] bg-sky-50 text-sky-600 font-bold px-2 py-0.5 rounded-full">🍳 {totalActive}/{procs.length} 治療パターン</span>
+              <span className="text-[10px] bg-emerald-50 text-emerald-600 font-bold px-2 py-0.5 rounded-full">📦 {feeCount.toLocaleString()} 算定コード</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -295,19 +295,19 @@ export default function ProcedureMasterPage() {
         {editId && (
           <div className="bg-white border-2 border-sky-300 rounded-xl p-5 mb-4 shadow-lg">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-sky-700 text-sm">{editId === "new" ? "➕ 新しいレシピを追加" : "✏️ レシピを編集"}</h3>
+              <h3 className="font-bold text-sky-700 text-sm">{editId === "new" ? "➕ 新しい治療パターンを追加" : "✏️ 治療パターンを編集"}</h3>
               <button onClick={() => setEditId(null)} className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div><label className="block text-[10px] font-bold text-gray-500 mb-1">処置名（レシピ名）*</label><input type="text" value={form.procedure_name} onChange={e => setForm({ ...form, procedure_name: e.target.value })} placeholder="CR充填(単純)" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
+              <div><label className="block text-[10px] font-bold text-gray-500 mb-1">処置名（治療パターン名）*</label><input type="text" value={form.procedure_name} onChange={e => setForm({ ...form, procedure_name: e.target.value })} placeholder="CR充填(単純)" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
               <div><label className="block text-[10px] font-bold text-gray-500 mb-1">カテゴリ *</label><select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400">{Object.entries(CATS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}</select></div>
               <div><label className="block text-[10px] font-bold text-gray-500 mb-1">サブカテゴリ</label><input type="text" value={form.subcategory} onChange={e => setForm({ ...form, subcategory: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
               <div><label className="block text-[10px] font-bold text-gray-500 mb-1">表示順</label><input type="number" value={form.display_order} onChange={e => setForm({ ...form, display_order: parseInt(e.target.value) || 0 })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
             </div>
             <div className="mt-3">
-              <label className="block text-[10px] font-bold text-gray-500 mb-1">📦 算定コード（食材）*</label>
+              <label className="block text-[10px] font-bold text-gray-500 mb-1">📦 算定コード*</label>
               {form.fee_items.map((fi, i) => (<div key={i} className="flex gap-1.5 mb-1"><input type="text" value={fi.code} onChange={e => updateFee(i, "code", e.target.value)} placeholder="M001-sho" className="w-32 border border-gray-300 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-sky-400" /><input type="text" value={fi.name} onChange={e => updateFee(i, "name", e.target.value)} placeholder="窩洞形成(単純)" className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-sky-400" /><input type="number" value={fi.points || 0} onChange={e => updateFee(i, "points", parseInt(e.target.value) || 0)} placeholder="点数" className="w-16 border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:outline-none focus:border-sky-400" /><input type="number" value={fi.count} onChange={e => updateFee(i, "count", parseInt(e.target.value) || 1)} className="w-12 border border-gray-300 rounded px-2 py-1.5 text-xs text-center focus:outline-none focus:border-sky-400" min={1} />{form.fee_items.length > 1 && <button onClick={() => setForm({ ...form, fee_items: form.fee_items.filter((_, j) => j !== i) })} className="text-red-400 text-xs px-1">✕</button>}</div>))}
-              <button onClick={() => setForm({ ...form, fee_items: [...form.fee_items, { code: "", name: "", points: 0, count: 1 }] })} className="text-[10px] text-sky-500 hover:text-sky-700 font-bold mt-1">＋ 食材追加</button>
+              <button onClick={() => setForm({ ...form, fee_items: [...form.fee_items, { code: "", name: "", points: 0, count: 1 }] })} className="text-[10px] text-sky-500 hover:text-sky-700 font-bold mt-1">＋ 算定コード追加</button>
             </div>
             <div className="mt-3"><label className="block text-[10px] font-bold text-gray-500 mb-1">🎯 SOAPキーワード（カンマ区切り）</label><input type="text" value={form.soap_keywords} onChange={e => setForm({ ...form, soap_keywords: e.target.value })} placeholder="cr充填, cr, 白い詰め物, レジン" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
             <div className="mt-3"><label className="block text-[10px] font-bold text-gray-500 mb-1">⚙️ 算定条件（key:value カンマ区切り）</label><input type="text" value={form.conditions} onChange={e => setForm({ ...form, conditions: e.target.value })} placeholder="surfaces:1面" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
@@ -364,7 +364,7 @@ export default function ProcedureMasterPage() {
         {filtered.length === 0 && <div className="text-center py-12"><p className="text-gray-400 text-sm">該当する処置がありません</p></div>}
 
         <div className="text-center py-6">
-          <p className="text-[10px] text-gray-400">🍳 {procs.length}レシピ（{totalActive}有効）/ 📦 {feeCount.toLocaleString()}食材（fee_master_v2）/ R06</p>
+          <p className="text-[10px] text-gray-400">🍳 {procs.length}治療パターン（{totalActive}有効）/ 📦 {feeCount.toLocaleString()}算定コード（fee_master_v2）/ R06</p>
         </div>
       </div>
     </div>
