@@ -563,6 +563,34 @@ export async function POST(request: NextRequest) {
     }
 
     // ──────────────────────────────────────────────────
+    // デンタルX線: 48点/38点の自動判定
+    // - 通常: デンタル撮影 48点（撮影20点 + 診断28点）
+    // - パノラマ同日: デンタル撮影 38点（撮影20点 + 診断18点）
+    // 算定ルール: パノラマと同日にデンタルを撮影した場合、
+    // デンタルの写真診断料が 50/100 に減額される
+    // ──────────────────────────────────────────────────
+    if (addedCodes.has("E100-1") && addedCodes.has("E100-pan")) {
+      const diagIdx = selectedItems.findIndex(item => item.code === "E100-1-diag");
+      if (diagIdx >= 0) {
+        const reducedDiag = feeMap.get("E100-1-diag-pano");
+        if (reducedDiag) {
+          selectedItems[diagIdx] = {
+            code: reducedDiag.code,
+            name: reducedDiag.name,
+            points: reducedDiag.points,
+            category: reducedDiag.category,
+            count: selectedItems[diagIdx].count,
+            note: "パノラマ同日撮影のため減額（28→18点）",
+            tooth_numbers: selectedItems[diagIdx].tooth_numbers,
+          };
+        } else {
+          selectedItems[diagIdx].points = 18;
+          selectedItems[diagIdx].note = "パノラマ同日撮影のため減額（28→18点）";
+        }
+      }
+    }
+
+    // ──────────────────────────────────────────────────
     // SC全顎ブロック計算
     // billing_patternsはSCを count=1(72点) で返すが、
     // SOAPに「全顎」「上下」等の記載があればブロック数を更新。
