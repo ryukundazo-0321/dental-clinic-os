@@ -82,14 +82,20 @@ export default function ProcedureMasterPage() {
   const [form, setForm] = useState<EditForm>(EMPTY_FORM);
   const [formSaving, setFormSaving] = useState(false);
   const [viewMode, setViewMode] = useState<"list"|"grouped">("grouped");
+  const [feeCount, setFeeCount] = useState(0);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadFeeCount(); }, []);
 
   async function load() {
     setLoading(true);
     const { data } = await supabase.from("procedure_master").select("*").order("display_order");
     if (data) setProcs(data as Procedure[]);
     setLoading(false);
+  }
+
+  async function loadFeeCount() {
+    const { count } = await supabase.from("fee_master_v2").select("*", { count: "exact", head: true });
+    if (count) setFeeCount(count);
   }
 
   async function toggleActive(id: string, cur: boolean) {
@@ -271,7 +277,10 @@ export default function ProcedureMasterPage() {
               <h1 className="text-base font-bold text-gray-900">処置マスタ（レシピ管理）</h1>
               <p className="text-[10px] text-gray-400">処置パターン → fee_master食材の組み合わせ</p>
             </div>
-            <span className="text-[10px] bg-sky-50 text-sky-600 font-bold px-2 py-0.5 rounded-full">{totalActive}/{procs.length}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] bg-sky-50 text-sky-600 font-bold px-2 py-0.5 rounded-full">🍳 {totalActive}/{procs.length} レシピ</span>
+              <span className="text-[10px] bg-emerald-50 text-emerald-600 font-bold px-2 py-0.5 rounded-full">📦 {feeCount.toLocaleString()} 食材</span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {msg && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full animate-pulse">{msg}</span>}
@@ -355,7 +364,7 @@ export default function ProcedureMasterPage() {
         {filtered.length === 0 && <div className="text-center py-12"><p className="text-gray-400 text-sm">該当する処置がありません</p></div>}
 
         <div className="text-center py-6">
-          <p className="text-[10px] text-gray-400">procedure_master — {procs.length}レシピ / {totalActive}有効 / fee_master 3,192食材を参照 / R06</p>
+          <p className="text-[10px] text-gray-400">🍳 {procs.length}レシピ（{totalActive}有効）/ 📦 {feeCount.toLocaleString()}食材（fee_master_v2）/ R06</p>
         </div>
       </div>
     </div>
