@@ -522,17 +522,10 @@ export async function POST(request: NextRequest) {
           // F-yaku-1は薬剤料のプレースホルダー（0pt）、IYレコードで出力済みのためスキップ
           if (proc.code === "F-yaku-1") continue;
 
-          // 1) CODE_MAPから検索（最優先・最も確実）
+          // 1) DBから検索（最優先・3,192件の公式データ）
           let receiptCode = "";
           let shikibetsu = "";
-          const mapped = CODE_MAP[proc.code];
-          if (mapped) {
-            receiptCode = mapped.rc;
-            shikibetsu = mapped.sk;
-          }
-
-          // 2) DBから検索（CODE_MAPにないコード用）
-          if (!receiptCode) {
+          {
             const codeParts = proc.code.split("-");
             const kubun = codeParts[0];
             const sub = codeParts.slice(1).join("-") || "";
@@ -541,6 +534,15 @@ export async function POST(request: NextRequest) {
             if (dbFound) {
               receiptCode = dbFound.rc;
               shikibetsu = dbFound.sk;
+            }
+          }
+
+          // 2) CODE_MAPから検索（DBにないコード用のフォールバック）
+          if (!receiptCode) {
+            const mapped = CODE_MAP[proc.code];
+            if (mapped) {
+              receiptCode = mapped.rc;
+              shikibetsu = mapped.sk;
             }
           }
 
