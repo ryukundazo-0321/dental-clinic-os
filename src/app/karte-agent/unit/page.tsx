@@ -197,10 +197,18 @@ function UnitContent() {
       if(!whisperRes.ok){setStatus(`❌ 音声認識エラー（${whisperRes.status}）`);setTranscribing(false);return;}
       const wr=await whisperRes.json(); let raw=wr.text||"";
       if(!raw||raw.trim().length<5){setStatus("⚠️ 音声を認識できませんでした");setTranscribing(false);return;}
-      // 文字起こし完了 → そのままAI振り分けへ（補正ステップ不要、gpt-4o-transcribeは十分高精度）
-      setTranscript(raw); setStatus("🤖 AI振り分け中...");
+      // 文字起こし完了 → 前回分に追記してからAI振り分け
+      const newTranscript = transcript ? transcript + "\n" + raw : raw;
+      setTranscript(newTranscript); setStatus("🤖 AI振り分け中...");
+      // chunkをDBに保存（billing-previewで参照するため）
+      const chunkIndex = Date.now();
+      supabase.from("karte_transcript_chunks").upsert({
+        appointment_id:appointmentId, chunk_index:chunkIndex,
+        raw_text:raw, corrected_text:raw, is_final:true,
+      },{onConflict:"appointment_id,chunk_index"}).then(()=>{});
+      // 全文（前回分+今回分）でclassify
       const classifyRes=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({appointment_id:appointmentId,transcript:raw})});
+        body:JSON.stringify({appointment_id:appointmentId,transcript:newTranscript})});
       if(classifyRes.ok){const r=await classifyRes.json();if(r.success){setStatus(`✅ ${r.fields_generated}フィールド生成完了！`);loadDrafts();}
         else setStatus("⚠️ "+(r.error||"振り分け問題"));}
       else setStatus("❌ AI振り分けエラー");
