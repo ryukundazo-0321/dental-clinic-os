@@ -364,7 +364,7 @@ export default function ProcedureMasterPage() {
         {filtered.length === 0 && <div className="text-center py-12"><p className="text-gray-400 text-sm">該当する処置がありません</p></div>}
 
         <div className="text-center py-6">
-          <p className="text-[10px] text-gray-400">🍳 {procs.length}治療パターン（{totalActive}有効）/ 📦 {feeCount.toLocaleString()}算定コード（fee_master_v2）/ R06</p>
+          <p className="text-[10px] text-gray-400">🍳 {procs.length}治療パターン（{totalActive}有効）/ 📦 {feeCount.toLocaleString()}算定コード / 令和6年度</p>
         </div>
       </div>
     </div>
