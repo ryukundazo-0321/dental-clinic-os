@@ -65,6 +65,8 @@ export default function KarteAgentReception() {
   const [actionModal, setActionModal] = useState<string|null>(null);
   const [billingData, setBillingData] = useState<{items:{code:string;name:string;points:number;count:number;category:string}[];total:number;burden:number}|null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [previewRecordId, setPreviewRecordId] = useState<string|null>(null);
+  const [billingSaved, setBillingSaved] = useState(false);
   const [addItemSearch, setAddItemSearch] = useState("");
   const [addItemResults, setAddItemResults] = useState<{code:string;name:string;points:number;category:string}[]>([]);
   const [showAddItem, setShowAddItem] = useState(false);
@@ -124,26 +126,25 @@ export default function KarteAgentReception() {
 
   useEffect(()=>{if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[chunks]);
 
-  // confirmed時にauto-billingを呼ぶ
+  // confirmed時にbilling-previewを呼ぶ（プレビュー表示用）
   useEffect(()=>{
     if(!confirmed||!selApt||billingData) return;
     (async()=>{
       setBillingLoading(true);
       try {
-        // appointment_idからmedical_recordのidを取得
         const {data:rec} = await supabase.from("medical_records").select("id").eq("appointment_id",selApt).order("created_at",{ascending:false}).limit(1).single();
         if(rec?.id){
-          const res = await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:rec.id})});
+          const res = await fetch("/api/billing-preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:rec.id})});
           const d = await res.json();
           if(d.success){
             const items = (d.items||[]) as {code:string;name:string;points:number;count:number;category:string}[];
             const total = d.total_points||0;
-            const unit = units.find(u=>u.appointment_id===selApt);
             const burden = d.patient_burden || Math.round(total*10*0.3);
             setBillingData({items,total,burden});
+            setPreviewRecordId(rec.id);
           }
         }
-      } catch(e){console.error("auto-billing error",e);}
+      } catch(e){console.error("billing-preview error",e);}
       setBillingLoading(false);
     })();
   },[confirmed,selApt,billingData,units]);
@@ -374,7 +375,7 @@ export default function KarteAgentReception() {
             <div style={{background:"#F0FDF4",borderRadius:14,padding:18,border:"1.5px solid #D1FAE5",textAlign:"center",flexShrink:0}}>
               <div style={{fontSize:18,fontWeight:800,color:"#16A34A",marginBottom:10}}>✅ カルテ確定済み</div>
               <div style={{background:"#FFF",borderRadius:10,padding:14,marginBottom:12,border:"1px solid #E5E7EB"}}>
-                <div style={{fontSize:12,fontWeight:600,color:"#9CA3AF",marginBottom:6}}>保険点数（自動算定）</div>
+                <div style={{fontSize:12,fontWeight:600,color:"#9CA3AF",marginBottom:6}}>📋 算定プレビュー（確認して確定してください）</div>
                 {billingLoading ? (
                   <div style={{padding:12,color:"#6B7280",fontSize:13}}>⏳ 算定中...</div>
                 ) : billingData ? (()=>{
@@ -457,9 +458,15 @@ export default function KarteAgentReception() {
                 <button onClick={()=>setActionModal("nextAppt")} style={{background:"#EFF6FF",color:"#2563EB",border:"1.5px solid #BFDBFE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📅 次回予約</button>
                 <button onClick={()=>setActionModal("receipt")} style={{background:"#FFF7ED",color:"#C2410C",border:"1.5px solid #FDBA74",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 領収書発行</button>
                 <button onClick={async()=>{
+                  if(!previewRecordId||!billingData) return;
+                  try {
+                    const res = await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:previewRecordId,use_preview:true,preview_items:billingData.items})});
+                    const d = await res.json();
+                    if(d.success) setBillingSaved(true);
+                  } catch(e){console.error("billing save error",e);}
                   await supabase.from("appointments").update({status:"completed"}).eq("id",selApt);
                   window.location.href="/billing";
-                }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 会計へ →</button>
+                }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 {billingSaved ? "会計へ →" : "算定確定 → 会計へ"}</button>
               </div>
             </div>
           )}
