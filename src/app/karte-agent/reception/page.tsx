@@ -134,6 +134,7 @@ export default function KarteAgentReception() {
       try {
         const {data:rec} = await supabase.from("medical_records").select("id").eq("appointment_id",selApt).order("created_at",{ascending:false}).limit(1).single();
         if(rec?.id){
+          setPreviewRecordId(rec.id); // 先にセット（billing-preview失敗でも確定ボタンが使える）
           const res = await fetch("/api/billing-preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:rec.id})});
           const d = await res.json();
           if(d.success){
@@ -141,7 +142,8 @@ export default function KarteAgentReception() {
             const total = d.total_points||0;
             const burden = d.patient_burden || Math.round(total*10*0.3);
             setBillingData({items,total,burden});
-            setPreviewRecordId(rec.id);
+          } else {
+            console.error("billing-preview failed:", d.error);
           }
         }
       } catch(e){console.error("billing-preview error",e);}
@@ -463,11 +465,19 @@ export default function KarteAgentReception() {
                 <button onClick={()=>setActionModal("nextAppt")} style={{background:"#EFF6FF",color:"#2563EB",border:"1.5px solid #BFDBFE",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📅 次回予約</button>
                 <button onClick={()=>setActionModal("receipt")} style={{background:"#FFF7ED",color:"#C2410C",border:"1.5px solid #FDBA74",borderRadius:10,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 領収書発行</button>
                 <button onClick={async()=>{
-                  if(!previewRecordId||!billingData) return;
+                  if(!previewRecordId) return;
                   try {
-                    const res = await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:previewRecordId,use_preview:true,preview_items:billingData.items})});
-                    const d = await res.json();
-                    if(d.success) setBillingSaved(true);
+                    if(billingData && billingData.items.length > 0) {
+                      // プレビュー結果を保存
+                      const res = await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:previewRecordId,use_preview:true,preview_items:billingData.items})});
+                      const d = await res.json();
+                      if(d.success) setBillingSaved(true);
+                    } else {
+                      // プレビュー無し → auto-billingの従来ロジック
+                      const res = await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:previewRecordId})});
+                      const d = await res.json();
+                      if(d.success) setBillingSaved(true);
+                    }
                   } catch(e){console.error("billing save error",e);}
                   await supabase.from("appointments").update({status:"completed"}).eq("id",selApt);
                   window.location.href="/billing";
