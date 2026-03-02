@@ -375,7 +375,12 @@ export default function KarteAgentReception() {
             <div style={{background:"#F0FDF4",borderRadius:14,padding:18,border:"1.5px solid #D1FAE5",textAlign:"center",flexShrink:0}}>
               <div style={{fontSize:18,fontWeight:800,color:"#16A34A",marginBottom:10}}>✅ カルテ確定済み</div>
               <div style={{background:"#FFF",borderRadius:10,padding:14,marginBottom:12,border:"1px solid #E5E7EB"}}>
-                <div style={{fontSize:12,fontWeight:600,color:"#9CA3AF",marginBottom:6}}>📋 算定プレビュー（確認して確定してください）</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div style={{fontSize:12,fontWeight:600,color:"#3B82F6"}}>📋 算定プレビュー（確認して確定してください）</div>
+                  <button onClick={async()=>{
+                    setBillingData(null); setBillingSaved(false);
+                  }} style={{background:"#EFF6FF",color:"#2563EB",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",fontSize:10,fontWeight:600,cursor:"pointer"}}>🔄 再分析</button>
+                </div>
                 {billingLoading ? (
                   <div style={{padding:12,color:"#6B7280",fontSize:13}}>⏳ 算定中...</div>
                 ) : billingData ? (()=>{
