@@ -151,8 +151,8 @@ export default function KarteAgentReception() {
   const getDraft=(key:string)=>drafts.find(d=>d.field_key===key);
   const searchFee = useCallback(async(q:string)=>{
     if(q.length<1){setAddItemResults([]);return;}
-    const {data} = await supabase.from("fee_master").select("code,name,points,category").or(`name.ilike.%${q}%,code.ilike.%${q}%`).limit(10);
-    if(data) setAddItemResults(data as {code:string;name:string;points:number;category:string}[]);
+    const {data} = await supabase.from("fee_master_v2").select("kubun_code,sub_code,name,name_short,points,category").or(`name.ilike.%${q}%,name_short.ilike.%${q}%,kubun_code.ilike.%${q}%`).limit(10);
+    if(data) setAddItemResults(data.map((d: {kubun_code:string;sub_code:string;name:string;name_short:string;points:number;category:string}) => ({code: d.sub_code ? `${d.kubun_code}-${d.sub_code}` : d.kubun_code, name: d.name_short || d.name, points: d.points, category: d.category})));
   },[]);
 
   const approve=async(key:string,editedText?:string)=>{
