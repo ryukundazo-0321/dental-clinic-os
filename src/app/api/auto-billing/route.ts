@@ -181,6 +181,41 @@ export async function POST(request: NextRequest) {
     const recordId = body.record_id;
     if (!recordId) return NextResponse.json({ error: "record_id is required" }, { status: 400 });
 
+    // ★ プレビュー結果が渡された場合、それをそのまま保存する
+    if (body.use_preview && body.preview_items) {
+      const items = body.preview_items as { code: string; name: string; points: number; count: number; tooth_numbers?: string[] }[];
+      const totalPoints = items.reduce((s: number, i: { points: number; count: number }) => s + i.points * i.count, 0);
+
+      // 患者情報取得（負担割合）
+      const { data: rec } = await supabase.from("medical_records").select("patient_id").eq("id", recordId).single();
+      let burdenRatio = 0.3;
+      if (rec?.patient_id) {
+        const { data: pat } = await supabase.from("patients").select("burden_ratio").eq("id", rec.patient_id).single();
+        if (pat?.burden_ratio) burdenRatio = pat.burden_ratio;
+      }
+      const patientBurden = Math.ceil(totalPoints * 10 * burdenRatio);
+
+      const detail = items.map((i: { code: string; name: string; points: number; count: number; tooth_numbers?: string[] }) => ({
+        code: i.code, name: i.name, points: i.points, count: i.count,
+        tooth: i.tooth_numbers?.length ? i.tooth_numbers.map((t: string) => `#${t}`).join(" ") : "",
+      }));
+
+      await supabase.from("billing").upsert({
+        record_id: recordId,
+        total_points: totalPoints,
+        patient_burden: patientBurden,
+        burden_ratio: burdenRatio,
+        procedures_detail: detail,
+        status: "unpaid",
+      }, { onConflict: "record_id" });
+
+      return NextResponse.json({
+        success: true, total_points: totalPoints, patient_burden: patientBurden,
+        items: detail, source: "preview",
+      });
+    }
+
+
     // 1. カルテ取得
     const { data: record, error: recErr } = await supabase
       .from("medical_records")
