@@ -211,6 +211,10 @@ function SessionContent() {
   // Billing
   const [billingItems, setBillingItems] = useState<BillingItem[]>([]);
   const [billingTotal, setBillingTotal] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewDone, setPreviewDone] = useState(false);
+  const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
+  const [matchedProcedures, setMatchedProcedures] = useState<string[]>([]);
   const [showBillingEdit, setShowBillingEdit] = useState(false);
 
   // 通院モード
@@ -575,10 +579,15 @@ function SessionContent() {
       } catch (e) { console.error("P検保存エラー:", e); }
     }
 
-    // 自動算定
+    // 自動算定（プレビュー済みの場合はプレビュー結果を使用）
     let billingResult = "";
     try {
-      const res = await fetch("/api/auto-billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: record.id }) });
+      const billingBody: Record<string, unknown> = { record_id: record.id };
+      if (previewDone && billingItems.length > 0) {
+        billingBody.preview_items = billingItems.map(i => ({ code: i.code, name: i.name, points: i.points, count: i.count, tooth_numbers: i.tooth ? i.tooth.replace(/[#\s]/g, "").split("") : [] }));
+        billingBody.use_preview = true;
+      }
+      const res = await fetch("/api/auto-billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(billingBody) });
       const data = await res.json();
       if (data.success) { billingResult = `✅ 算定完了: ${data.total_points}点 / 患者負担¥${data.patient_burden}`; if (data.items) { setBillingItems(data.items); setBillingTotal(data.total_points); } }
       else billingResult = `⚠️ 算定エラー: ${data.error || "不明"}`;
@@ -678,6 +687,52 @@ function SessionContent() {
         )}
       </div>
     );
+  }
+
+  // 算定プレビュー
+  async function runBillingPreview() {
+    if (!record) return;
+    setPreviewLoading(true);
+    setPreviewDone(false);
+    try {
+      // まずSOAPを保存
+      await supabase.from("medical_records").update({ soap_s: record.soap_s, soap_o: record.soap_o, soap_a: record.soap_a, soap_p: record.soap_p }).eq("id", record.id);
+      const res = await fetch("/api/billing-preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: record.id }) });
+      const data = await res.json();
+      if (data.success) {
+        const items: BillingItem[] = (data.items || []).map((i: { code: string; name: string; points: number; count: number; source: string; tooth_numbers: string[] }) => ({
+          code: i.code, name: i.name, points: i.points, count: i.count,
+          tooth: i.tooth_numbers?.length > 0 ? i.tooth_numbers.map((t: string) => `#${t}`).join(" ") : undefined,
+          source: i.source,
+        }));
+        setBillingItems(items);
+        setBillingTotal(data.total_points || 0);
+        setPreviewWarnings(data.warnings || []);
+        setMatchedProcedures(data.matched_procedures || []);
+        setPreviewDone(true);
+        showMsg(`✅ ${items.length}件の算定項目を検出 / 合計${data.total_points}点`);
+      } else {
+        showMsg(`⚠️ プレビューエラー: ${data.error}`);
+      }
+    } catch (e) { showMsg(`⚠️ プレビュー失敗: ${e instanceof Error ? e.message : "不明"}`); }
+    setPreviewLoading(false);
+  }
+
+  // fee_master検索で手動追加
+  const [feeSearchQuery, setFeeSearchQuery] = useState("");
+  const [feeSearchResults, setFeeSearchResults] = useState<{ code: string; name: string; points: number }[]>([]);
+  async function searchFeeItems(q: string) {
+    setFeeSearchQuery(q);
+    if (q.length < 2) { setFeeSearchResults([]); return; }
+    const { data } = await supabase.from("fee_master_v2").select("kubun_code,sub_code,name,name_short,points").or(`name.ilike.%${q}%,name_short.ilike.%${q}%,kubun_code.ilike.%${q}%`).limit(8);
+    if (data) setFeeSearchResults(data.map((d: { kubun_code: string; sub_code: string; name: string; name_short: string; points: number }) => ({ code: d.sub_code ? `${d.kubun_code}-${d.sub_code}` : d.kubun_code, name: d.name_short || d.name, points: d.points })));
+  }
+  function addFeeItem(item: { code: string; name: string; points: number }) {
+    const newItems = [...billingItems, { code: item.code, name: item.name, points: item.points, count: 1 }];
+    setBillingItems(newItems);
+    setBillingTotal(newItems.reduce((s, i) => s + i.points * i.count, 0));
+    setFeeSearchQuery(""); setFeeSearchResults([]);
+    showMsg(`✅ ${item.name} を追加`);
   }
 
   function removeBillingItem(index: number) { const n = billingItems.filter((_, i) => i !== index); setBillingItems(n); setBillingTotal(n.reduce((s, i) => s + i.points * i.count, 0)); }
@@ -2091,7 +2146,7 @@ function SessionContent() {
               <div className="space-y-3">
                 <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
                   <p className="text-xs font-bold text-green-700">
-                    ✅ Step 6: 確定 — SOAP最終確認・カルテ確定・自動算定
+                    ✅ Step 6: 確定 — 算定プレビュー・確認・カルテ確定
                   </p>
                 </div>
 
@@ -2108,24 +2163,71 @@ function SessionContent() {
                   </div>
                 </div>
 
-                {/* 算定情報 */}
+                {/* 算定プレビュー */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-bold text-gray-700">💊 算定内容</h3>
-                    {billingTotal > 0 && <span className="text-sm font-bold text-sky-600 bg-sky-50 px-3 py-1 rounded-full">合計 {billingTotal.toLocaleString()}点</span>}
+                    <h3 className="text-sm font-bold text-gray-700">📋 算定プレビュー</h3>
+                    <div className="flex items-center gap-2">
+                      {billingTotal > 0 && <span className="text-sm font-bold text-sky-600 bg-sky-50 px-3 py-1 rounded-full">合計 {billingTotal.toLocaleString()}点</span>}
+                      <button onClick={runBillingPreview} disabled={previewLoading} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50">
+                        {previewLoading ? "🔄 分析中..." : previewDone ? "🔄 再分析" : "🔍 算定プレビュー"}
+                      </button>
+                    </div>
                   </div>
-                  {billingItems.length === 0 ? <div className="text-center py-6"><p className="text-xs text-gray-400">診察完了後に自動算定されます</p></div>
-                  : <div className="space-y-1">
-                    <div className="flex items-center px-2 py-1 text-xs text-gray-400 font-bold border-b border-gray-100"><span className="w-24">コード</span><span className="flex-1">項目名</span><span className="w-16 text-right">点数</span><span className="w-12 text-center">回数</span><span className="w-16 text-right">小計</span></div>
-                    {billingItems.map((item, idx) => (
-                      <div key={idx} className="flex items-center px-2 py-1.5 rounded-lg hover:bg-gray-50 text-xs">
-                        <span className="w-24 text-gray-400 font-mono text-xs">{item.code}</span><span className="flex-1 text-gray-700 font-bold">{item.name}{item.tooth && <span className="text-xs text-gray-400 ml-1">({item.tooth})</span>}</span><span className="w-16 text-right text-gray-600">{item.points}</span>
-                        <span className="w-12 text-center text-gray-500">×{item.count}</span>
-                        <span className="w-16 text-right font-bold text-gray-800">{(item.points * item.count).toLocaleString()}</span>
+
+                  {/* マッチした治療パターン */}
+                  {matchedProcedures.length > 0 && (
+                    <div className="mb-3 p-2 bg-blue-50 rounded-lg">
+                      <p className="text-xs font-bold text-blue-700 mb-1">🔍 検出した処置</p>
+                      <div className="flex flex-wrap gap-1">
+                        {matchedProcedures.map((p, i) => <span key={i} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">{p}</span>)}
                       </div>
-                    ))}
-                    <div className="flex items-center px-2 py-2 border-t-2 border-gray-300 mt-1"><span className="flex-1 text-sm font-bold text-gray-800">合計</span><span className="text-sm font-bold text-sky-600">{billingTotal.toLocaleString()}点</span><span className="text-xs text-gray-400 ml-2">(¥{Math.round(billingTotal * 10 * patient.burden_ratio).toLocaleString()})</span></div>
-                  </div>}
+                    </div>
+                  )}
+
+                  {/* 警告 */}
+                  {previewWarnings.length > 0 && (
+                    <div className="mb-3 space-y-1">
+                      {previewWarnings.map((w, i) => <div key={i} className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">{w}</div>)}
+                    </div>
+                  )}
+
+                  {billingItems.length === 0
+                    ? <div className="text-center py-6"><p className="text-xs text-gray-400">{previewLoading ? "分析中..." : "「算定プレビュー」を押してSOAPから算定項目を自動検出します"}</p></div>
+                    : <div className="space-y-1">
+                      <div className="flex items-center px-2 py-1 text-xs text-gray-400 font-bold border-b border-gray-100"><span className="w-20">コード</span><span className="flex-1">項目名</span><span className="w-14 text-right">点数</span><span className="w-12 text-center">回数</span><span className="w-14 text-right">小計</span><span className="w-8"></span></div>
+                      {billingItems.map((item, idx) => (
+                        <div key={idx} className="flex items-center px-2 py-1.5 rounded-lg hover:bg-gray-50 text-xs group">
+                          <span className="w-20 text-gray-400 font-mono text-xs truncate">{item.code}</span>
+                          <span className="flex-1 text-gray-700 font-bold">{item.name}{item.tooth && <span className="text-xs text-gray-400 ml-1">({item.tooth})</span>}</span>
+                          <span className="w-14 text-right text-gray-600">{item.points}</span>
+                          <span className="w-12 text-center">
+                            <input type="number" min="1" max="99" value={item.count} onChange={e => updateBillingItemCount(idx, parseInt(e.target.value) || 1)} className="w-10 text-center text-xs border border-gray-200 rounded px-1 py-0.5" />
+                          </span>
+                          <span className="w-14 text-right font-bold text-gray-800">{(item.points * item.count).toLocaleString()}</span>
+                          <button onClick={() => removeBillingItem(idx)} className="w-8 text-center text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-600 font-bold">✕</button>
+                        </div>
+                      ))}
+                      <div className="flex items-center px-2 py-2 border-t-2 border-gray-300 mt-1"><span className="flex-1 text-sm font-bold text-gray-800">合計</span><span className="text-sm font-bold text-sky-600">{billingTotal.toLocaleString()}点</span><span className="text-xs text-gray-400 ml-2">(¥{Math.round(billingTotal * 10 * patient.burden_ratio).toLocaleString()})</span></div>
+                    </div>
+                  }
+
+                  {/* 手動追加 */}
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <div className="relative">
+                      <input type="text" value={feeSearchQuery} onChange={e => searchFeeItems(e.target.value)} placeholder="＋ 項目を手動追加（名前やコードで検索）" className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400" />
+                      {feeSearchResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto mt-1">
+                          {feeSearchResults.map((r, i) => (
+                            <button key={i} onClick={() => addFeeItem(r)} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-xs border-b border-gray-50 flex justify-between">
+                              <span className="text-gray-700 font-bold">{r.name}</span>
+                              <span className="text-gray-400">{r.points}pt</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {/* AI処方提案 (AI09) */}
@@ -2420,7 +2522,7 @@ ${drugItems.map((d, i) => {
                   <button onClick={() => setActiveTab("dr_exam")} className="text-base text-gray-400 hover:text-gray-600 font-bold">← Dr診察</button>
                   <div className="flex gap-2">
                     <button onClick={saveRecord} disabled={saving} className="bg-white border-2 border-sky-500 text-sky-600 px-4 py-3 rounded-xl text-sm font-bold hover:bg-sky-50 disabled:opacity-50">💾 一時保存</button>
-                    <button onClick={completeSession} disabled={saving} className="bg-green-600 text-white px-8 py-3.5 rounded-xl text-sm font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">✅ 診察完了（カルテ確定・自動算定）</button>
+                    <button onClick={() => { if (!previewDone) { if (!confirm("算定プレビューを実行していません。\nプレビューなしで確定しますか？")) return; } completeSession(); }} disabled={saving} className="bg-green-600 text-white px-8 py-3.5 rounded-xl text-sm font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">{previewDone ? "✅ 確定して会計へ" : "✅ 診察完了（カルテ確定）"}</button>
                   </div>
                 </div>
               </div>
@@ -2437,7 +2539,7 @@ ${drugItems.map((d, i) => {
             </div>
             <div className="flex gap-3">
               <button onClick={saveRecord} disabled={saving} className="bg-white border-2 border-sky-500 text-sky-600 px-6 py-3 rounded-xl text-base font-bold hover:bg-sky-50 disabled:opacity-50">💾 一時保存</button>
-              <button onClick={completeSession} disabled={saving} className="bg-green-600 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">✅ 診察完了（カルテ確定）</button>
+              <button onClick={() => { if (!previewDone) { if (!confirm("算定プレビューを実行していません。\nプレビューなしで確定しますか？")) return; } completeSession(); }} disabled={saving} className="bg-green-600 text-white px-8 py-3.5 rounded-xl text-base font-bold hover:bg-green-700 disabled:opacity-50 shadow-lg shadow-green-200">{previewDone ? "✅ 確定して会計へ" : "✅ 診察完了（カルテ確定）"}</button>
             </div>
           </div>
         </div>
