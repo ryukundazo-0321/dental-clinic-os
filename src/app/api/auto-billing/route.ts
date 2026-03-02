@@ -202,11 +202,13 @@ export async function POST(request: NextRequest) {
 
       await supabase.from("billing").upsert({
         record_id: recordId,
+        patient_id: rec?.patient_id || null,
         total_points: totalPoints,
         patient_burden: patientBurden,
         burden_ratio: burdenRatio,
         procedures_detail: detail,
         status: "unpaid",
+        payment_status: "unpaid",
       }, { onConflict: "record_id" });
 
       return NextResponse.json({
