@@ -10,7 +10,9 @@ interface FeeItem {
   name: string;
   points: number;
   category: string;
-  conditions: { note?: string };
+  kubun_code?: string;
+  sub_code?: string;
+  name_short?: string;
 }
 
 interface BillingPattern {
@@ -244,12 +246,27 @@ export async function POST(request: NextRequest) {
       if (pat?.burden_ratio) burdenRatio = pat.burden_ratio;
     }
 
-    // 4. fee_master取得（※Supabaseデフォルト1000行制限を回避）
-    const { data: feeItems, error: feeErr } = await supabase.from("fee_master").select("*").limit(10000);
+    // 4. fee_master_v2取得（令和6年度正式データ）（※Supabaseデフォルト1000行制限を回避）
+    const { data: feeItems, error: feeErr } = await supabase.from("fee_master_v2").select("*").limit(10000);
     if (feeErr || !feeItems || feeItems.length === 0) {
       return NextResponse.json({ error: "点数マスターが空です", detail: feeErr?.message }, { status: 500 });
     }
-    const feeMap = new Map<string, FeeItem>(feeItems.map((f: FeeItem) => [f.code, f]));
+    // kubun_code-sub_code を code として扱う
+    const feeMap = new Map<string, FeeItem>(feeItems.map((f: Record<string, unknown>) => {
+      const kubun = (f.kubun_code as string) || "";
+      const sub = (f.sub_code as string) || "";
+      const code = sub ? `${kubun}-${sub}` : kubun;
+      const item: FeeItem = {
+        code,
+        name: (f.name_short as string) || (f.name as string) || "",
+        points: (f.points as number) || 0,
+        category: (f.category as string) || "",
+        kubun_code: kubun,
+        sub_code: sub,
+        name_short: (f.name_short as string) || "",
+      };
+      return [code, item];
+    }));
 
     // 5. 現在有効な改定版を取得
     const { data: currentRevision } = await supabase
@@ -341,43 +358,11 @@ export async function POST(request: NextRequest) {
     const addedCodes = new Set<string>();
 
     // addItem関数（重複防止付き）
-    // ──────────────────────────────────────────────────
-    // billing_patternsの一部fee_codesがfee_master VIEWに存在しない。
-    // fee_master_v2 → VIEW変換で別コードにマッピングされているため、
-    // VIEW上の正しいコードへフォールバックする。
-    // ※ フォールバックは fee が見つからない場合のみ発動。
-    //   既に fee_master に存在するコードには一切影響しない。
-    // ──────────────────────────────────────────────────
-    const CODE_FALLBACK: Record<string, string> = {
-      "I005-1": "I001-1",        // 抜髄単根 → VIEW上のコード
-      "I005-2": "I001-2",        // 抜髄2根
-      "I005-3": "I001-3",        // 抜髄3根
-      "I007-1": "I007--1",       // 根管貼薬単根
-      "I008-1": "I008--1",       // 加圧根充単根
-      "J000-2": "J001-1",        // 抜歯前歯
-      "J000-3": "J001-2",        // 抜歯臼歯
-      "D002-3": "D002-mix",      // 歯周混合検査
-      "J003":   "I010-",         // 消炎切開 → 膿瘍切開
-      "M-KEISEI-cr": "M-KEISEI--cr", // 窩洞形成CR
-      "M009-1": "M009-CR",       // 充填材料（単純）
-      "M009-2": "M009-CR-fuku",  // 充填材料（複雑）
-      "M001-1": "M001-sho",      // 窩洞形成（単純）
-      "I030":   "PCEM",          // PMTC → fee_master上のPCEMコード(72点)
-    };
-
+    // fee_master_v2の正式コード(kubun_code-sub_code)で直接参照
     const addItem = (code: string, count = 1, teeth: string[] = []) => {
       if (addedCodes.has(code)) return;
-      const originalCode = code;
-      let fee = feeMap.get(code);
-      // fee_masterにない場合、フォールバックコードを試す
-      if (!fee && CODE_FALLBACK[code]) {
-        const fallbackCode = CODE_FALLBACK[code];
-        if (addedCodes.has(fallbackCode)) return;
-        fee = feeMap.get(fallbackCode);
-        if (fee) code = fallbackCode;
-      }
+      const fee = feeMap.get(code);
       if (fee) {
-        addedCodes.add(originalCode);
         addedCodes.add(code);
         selectedItems.push({
           code: fee.code,
@@ -385,7 +370,7 @@ export async function POST(request: NextRequest) {
           points: fee.points,
           category: fee.category,
           count,
-          note: fee.conditions?.note || "",
+          note: "",
           tooth_numbers: teeth,
         });
       }
@@ -395,11 +380,11 @@ export async function POST(request: NextRequest) {
     // 9. 基本診療料（初診/再診は常に自動追加）
     // ============================================================
     if (isNew) {
-      addItem("A000");
-      addItem("A001-a");
+      addItem("A000-1");
+      addItem("B001-2");
     } else {
-      addItem("A002");
-      addItem("A001-b");
+      addItem("A002-1");
+      addItem("A002-nyuji");
     }
 
     // ============================================================
@@ -532,8 +517,8 @@ export async function POST(request: NextRequest) {
         const teeth = pattern.use_tooth_numbers ? extractedTeeth : [];
         for (const code of pattern.fee_codes) {
           // 歯管: 初診月は80点(B-SHIDO-init)に差し替え
-          if (code === "B-SHIDO" && isNew) {
-            addItem("B-SHIDO-init", 1, teeth);
+          if (code === "B000-4" && isNew) {
+            addItem("B000-4-init", 1, teeth);
           } else {
             addItem(code, 1, teeth);
           }
@@ -544,7 +529,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // フォールバック（billing_patterns取得失敗時の最低限ロジック）
-      if (soapAll.includes("パノラマ")) { addItem("E100-pan"); addItem("E-diag"); }
+      if (soapAll.includes("パノラマ")) { addItem("E100-pano"); addItem("E200-diag"); }
       if (soapAll.includes("デンタル")) { addItem("E100-1"); addItem("E100-1-diag"); }
       if (soapAll.includes("麻酔") || soapAll.includes("浸潤")) { addItem("K001-1", 1, extractedTeeth); }
       // 投薬の技術料はprescribedDrugs検出時に F-shoho/F-chozai で自動追加（後段ロジック）
@@ -554,11 +539,11 @@ export async function POST(request: NextRequest) {
     // パノラマ補完: 初診でSOAPにレントゲン関連記載があれば追加
     // ※ billing_patternsで既に算定済みなら何もしない（addedCodes判定）
     // ──────────────────────────────────────────────────
-    if (isNew && !addedCodes.has("E100-pan")) {
+    if (isNew && !addedCodes.has("E100-pano")) {
       const xrayKw = ["パノラマ", "レントゲン", "x線", "x-ray", "画像診断", "全顎撮影", "pan"];
       if (xrayKw.some(kw => soapAll.includes(kw))) {
-        addItem("E100-pan");
-        addItem("E-diag");
+        addItem("E100-pano");
+        addItem("E200-diag");
       }
     }
 
@@ -569,7 +554,7 @@ export async function POST(request: NextRequest) {
     // 算定ルール: パノラマと同日にデンタルを撮影した場合、
     // デンタルの写真診断料が 50/100 に減額される
     // ──────────────────────────────────────────────────
-    if (addedCodes.has("E100-1") && addedCodes.has("E100-pan")) {
+    if (addedCodes.has("E100-1") && addedCodes.has("E100-pano")) {
       const diagIdx = selectedItems.findIndex(item => item.code === "E100-1-diag");
       if (diagIdx >= 0) {
         const reducedDiag = feeMap.get("E100-1-diag-pano");
@@ -625,44 +610,44 @@ export async function POST(request: NextRequest) {
     // ============================================================
     const prosthCodes = Array.from(addedCodes);
     const hasProsthMain = prosthCodes.some(c =>
-      c.startsWith("M-CRN-") || c.startsWith("M003-") || c === "BR-PON" ||
-      c.startsWith("M-IN-") || c.startsWith("M001-3")
+      c.startsWith("M015-") || c.startsWith("M003-") || c === "M016" ||
+      c.startsWith("M001-3-") || c.startsWith("M001-3")
     );
     const hasDentureNew = prosthCodes.some(c =>
-      c.startsWith("DEN-1-") || c.startsWith("DEN-5-") || c.startsWith("DEN-9-") ||
-      c.startsWith("DEN-12-") || c.startsWith("DEN-FULL")
+      c.startsWith("M018-1") || c.startsWith("M018-2") || c.startsWith("M018-3") ||
+      c.startsWith("M018-4") || c.startsWith("M018-2-")
     );
     const hasFormation = prosthCodes.some(c =>
-      c === "M001-1" || c === "M001-2" || c === "M001-fuku" ||
-      c === "M001-sho" || c === "M003-1" || c === "M003-2" || c === "M003-3"
+      c === "M001-1" || c === "M001-2" || c === "M001-2" ||
+      c === "M001-1" || c === "M003-1" || c === "M003-2" || c === "M003-3"
     );
     const isDenMaintenance = prosthCodes.some(c =>
-      c === "DEN-ADJ" || c === "DEN-REP" || c === "DEN-RELINE"
+      c === "M-ADJ" || c === "M029" || c === "M030"
     );
 
     // 冠・ブリッジの新製工程
     if (hasProsthMain && !isDenMaintenance) {
-      addItem("M-IMP", 1, extractedTeeth);      // 印象採得
-      addItem("M-BITE", 1, extractedTeeth);      // 咬合採得
-      addItem("M-SET", 1, extractedTeeth);       // 装着
-      addItem("M-HOHEKI", 1, extractedTeeth);    // 補綴時診断
+      addItem("M003-2-2", 1, extractedTeeth);      // 印象採得
+      addItem("M006", 1, extractedTeeth);      // 咬合採得
+      addItem("M005", 1, extractedTeeth);       // 装着
+      addItem("M020-1", 1, extractedTeeth);    // 補綴時診断
     }
 
     // 義歯の新製工程
     if (hasDentureNew) {
-      addItem("M-IMP-sei", 1, []);    // 精密印象（義歯は部位不要）
-      addItem("M-BITE", 1, []);       // 咬合採得
-      addItem("DEN-SET", 1, []);      // 義歯装着
-      addItem("M-HOHEKI", 1, []);     // 補綴時診断
+      addItem("M003-2-3", 1, []);    // 精密印象（義歯は部位不要）
+      addItem("M006", 1, []);       // 咬合採得
+      addItem("M005-2", 1, []);      // 義歯装着
+      addItem("M020-1", 1, []);     // 補綴時診断
     }
 
     // 形成があればTEK（仮歯）を追加
     if (hasFormation && (soapAll.includes("tek") || soapAll.includes("仮歯") || soapAll.includes("テンポラリー") || soapAll.includes("テック"))) {
-      addItem("M-TEK", 1, extractedTeeth);
+      addItem("M000-2", 1, extractedTeeth);
     }
 
     // 支台築造があれば形成も追加
-    if (prosthCodes.some(c => c === "M-POST" || c === "M-POST-cast")) {
+    if (prosthCodes.some(c => c === "M002-1" || c === "M002-2")) {
       addItem("M001-1", 1, extractedTeeth); // 窩洞形成（単純）
     }
 
@@ -716,9 +701,9 @@ export async function POST(request: NextRequest) {
     // 処方薬がある場合、投薬の技術料を追加
     if (prescribedDrugs.length > 0) {
       // 処方料（F-shoho: 院内処方 42点）
-      addItem("F-shoho");
+      addItem("F100");
       // 調剤料（F-chozai: 院内調剤 11点）
-      addItem("F-chozai");
+      addItem("F400");
 
       // 各薬剤の薬剤料を計算してselectedItemsに追加
       // 薬剤料 = 薬価 × 数量 × 日数 を 10 で割って五捨五超入で点数化
@@ -899,8 +884,8 @@ export async function POST(request: NextRequest) {
     // 11. 施設基準加算
     // ============================================================
     const existingCodes = selectedItems.map(item => item.code);
-    const hasShoshin = existingCodes.some(c => c === "A000" || c.startsWith("A000"));
-    const hasSaishin = existingCodes.some(c => c === "A002" || c.startsWith("A002"));
+    const hasShoshin = existingCodes.some(c => c.startsWith("A000"));
+    const hasSaishin = existingCodes.some(c => c.startsWith("A002"));
 
     const getGroup = (code: string) => code.replace(/[0-9]/g, "");
     const bestBonus = new Map<string, FacilityBonus>();
@@ -915,8 +900,8 @@ export async function POST(request: NextRequest) {
     }
 
     Array.from(bestBonus.values()).forEach(bonus => {
-      const isShoshinBonus = bonus.target_kubun === "A000";
-      const isSaishinBonus = bonus.target_kubun === "A002";
+      const isShoshinBonus = bonus.target_kubun.startsWith("A000");
+      const isSaishinBonus = bonus.target_kubun.startsWith("A002");
       const hasTarget = existingCodes.some(c => c === bonus.target_kubun || c.startsWith(bonus.target_kubun));
       if ((isShoshinBonus && hasShoshin) || (isSaishinBonus && hasSaishin) || hasTarget) {
         selectedItems.push({
