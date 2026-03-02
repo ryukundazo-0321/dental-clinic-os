@@ -135,8 +135,19 @@ export async function POST(request: NextRequest) {
       .order("display_order");
 
     // ============================================================
-    // 6. 文字起こしテキスト取得（SOAP + 生テキスト）
+    // 6. karte_ai_drafts（承認済み記録）+ 文字起こし + SOAPを統合
     // ============================================================
+    let draftsText = "";
+    if (record.appointment_id) {
+      const { data: drafts } = await supabase
+        .from("karte_ai_drafts")
+        .select("field_key, draft_text")
+        .eq("appointment_id", record.appointment_id);
+      if (drafts && drafts.length > 0) {
+        draftsText = drafts.map((d: { field_key: string; draft_text: string }) => d.draft_text || "").join(" ");
+      }
+    }
+
     let transcriptText = "";
     if (record.appointment_id) {
       const { data: chunks } = await supabase
@@ -149,15 +160,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // P欄は「本日」分のみ（次回予定を除外）
+    // karte_ai_drafts + SOAP + transcript を全て統合（draftsを最優先）
     const soapPToday = record.soap_p ? record.soap_p.split("【次回】")[0].replace("【本日】", "") : "";
-    const soapAll = [record.soap_s, record.soap_o, record.soap_a, soapPToday, transcriptText]
+    const soapAll = [draftsText, record.soap_s, record.soap_o, record.soap_a, soapPToday, transcriptText]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
 
     // 歯番抽出
-    const soapRaw = [record.soap_s, record.soap_o, record.soap_a, soapPToday, transcriptText].filter(Boolean).join(" ");
+    const soapRaw = [draftsText, record.soap_s, record.soap_o, record.soap_a, soapPToday, transcriptText].filter(Boolean).join(" ");
     const toothPattern = /[#＃]?\s*([1-4][1-8]|[5-8][1-5])\s*(?:番)?/g;
     const extractedTeeth: string[] = [];
     let toothMatch;
