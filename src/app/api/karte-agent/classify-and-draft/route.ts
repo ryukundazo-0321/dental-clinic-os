@@ -35,8 +35,9 @@ const CLASSIFY_AND_DRAFT_PROMPT = `あなたは日本の歯科診療所で10年�
 **perio（P検）**: PPD値、BOP、歯周検査所見。
 例: "#46 PPD 4,5,4 / 3,4,3 BOP(+)"
 
-**dh（DH記録・O欄）**: 衛生士の処置、所見、Dr申し送り。
-例: "SC全顎実施 / TBI実施 / 申し送り: #46 PPD4-5mm BOP(+)"
+**dh（DH記録・O欄）**: 衛生士の処置、所見、Dr申し送り。Drの処置でも衛生士関連（SC、PMTC、TBI、フッ素塗布、P検サマリ等）はここに記載。
+例: "SC全顎実施 / TBI実施 / フッ化物歯面塗布 / 申し送り: #46 PPD4-5mm BOP(+)"
+※ 衛生士の処置が音声に含まれない場合は空文字にする
 
 **dr（Dr診察・A/P欄）**: 【A】に歯番号+確定診断名、【P】に処置内容・処方・次回予定。
 保険請求に必要な傷病名を必ず記載。
@@ -117,13 +118,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to parse GPT response" }, { status: 500 });
     }
 
-    // Step 3: Upsert drafts for each field
+    // Step 3: 既存ドラフトを取得
+    const { data: existingDrafts } = await supabase
+      .from("karte_ai_drafts")
+      .select("field_key, draft_text, status")
+      .eq("appointment_id", appointment_id);
+
+    const existingMap = new Map<string, { text: string; status: string }>();
+    if (existingDrafts) {
+      for (const d of existingDrafts) {
+        existingMap.set(d.field_key, { text: d.draft_text || "", status: d.status || "draft" });
+      }
+    }
+
+    // Step 4: Upsert drafts for each field（既存内容に追記していく）
     const fields = ["s", "tooth", "perio", "dh", "dr"];
     let fieldsGenerated = 0;
 
     for (const field of fields) {
-      const text = parsed[field]?.trim();
-      if (!text) continue;
+      const newText = parsed[field]?.trim();
+      // DH記録が空の場合でもドラフトを生成（確定フローに必要）
+      if (!newText && field !== "dh") continue;
+      const draftText = newText || (field === "dh" ? "（DH記録なし — Dr処置のみ）" : "");
+
+      const existing = existingMap.get(field);
+
+      let finalText = draftText;
+      let finalStatus = "draft";
+
+      if (existing && existing.text) {
+        if (existing.text === "（DH記録なし — Dr処置のみ）") {
+          // DHプレースホルダーは上書き
+          finalText = draftText;
+        } else if (draftText === existing.text) {
+          // 完全一致 → 何もしない
+          continue;
+        } else {
+          // 新しい情報がある → 既存に追記（常に安全に追記）
+          finalText = existing.text + "\n" + draftText;
+        }
+        // ステータスは維持
+        if (existing.status === "approved" || existing.status === "confirmed") {
+          finalStatus = existing.status;
+        }
+      }
 
       const { error } = await supabase
         .from("karte_ai_drafts")
@@ -131,8 +169,8 @@ export async function POST(request: NextRequest) {
           {
             appointment_id,
             field_key: field,
-            draft_text: text,
-            status: "draft",
+            draft_text: finalText,
+            status: finalStatus,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "appointment_id,field_key" }
