@@ -579,13 +579,21 @@ function SessionContent() {
       } catch (e) { console.error("P検保存エラー:", e); }
     }
 
-    // 自動算定（プレビュー済みの場合はプレビュー結果を使用）
+    // 自動算定（プレビュー済みの場合はプレビュー結果を使用、未プレビューならbilling-previewを先に走らせる）
     let billingResult = "";
     try {
       const billingBody: Record<string, unknown> = { record_id: record.id };
       if (previewDone && billingItems.length > 0) {
         billingBody.preview_items = billingItems.map(i => ({ code: i.code, name: i.name, points: i.points, count: i.count, tooth_numbers: i.tooth ? i.tooth.replace(/[#\s]/g, "").split("") : [] }));
         billingBody.use_preview = true;
+      } else {
+        // プレビューなし → billing-previewを自動実行してその結果を使う
+        const prevRes = await fetch("/api/billing-preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ record_id: record.id }) });
+        const prevData = await prevRes.json();
+        if (prevData.success && prevData.items?.length > 0) {
+          billingBody.preview_items = prevData.items;
+          billingBody.use_preview = true;
+        }
       }
       const res = await fetch("/api/auto-billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(billingBody) });
       const data = await res.json();
