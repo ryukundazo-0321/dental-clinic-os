@@ -99,6 +99,9 @@ function UnitContent() {
   // 歯式手動編集
   const [toothEditTarget, setToothEditTarget] = useState<string|null>(null);
 
+  // P検手動編集
+  const [perioEditTarget, setPerioEditTarget] = useState<string|null>(null);
+
   // Dental chart & perio
   const [toothChart, setToothChart] = useState<Record<string,string|string[]>>({});
   const [perioData, setPerioData] = useState<Record<string,{buccal:[number,number,number];lingual:[number,number,number];bop:boolean;mobility:number}>>({});
@@ -995,12 +998,12 @@ function UnitContent() {
                     {TOOTH_U.map(t=>{const pd=perioData[t];
                       const buccalVals = perioPoints===6?(pd?.buccal||[0,0,0]):perioPoints===4?[pd?.buccal?.[0]||0,pd?.buccal?.[2]||0]:[Math.max(...(pd?.buccal||[0,0,0]))];
                       const lingualVals = perioPoints===6?(pd?.lingual||[0,0,0]):perioPoints===4?[pd?.lingual?.[0]||0,pd?.lingual?.[2]||0]:[Math.max(...(pd?.lingual||[0,0,0]))];
-                      return <div key={t} style={{display:"flex",flexDirection:"column",alignItems:"center",width:38}}>
+                      return <div key={t} onClick={()=>setPerioEditTarget(perioEditTarget===t?null:t)} style={{display:"flex",flexDirection:"column",alignItems:"center",width:38,cursor:"pointer"}}>
                         <div style={{display:"flex",gap:1,marginBottom:1}}>
                           {buccalVals.map((v,i)=>{const bg=v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0";
                             return <div key={i} style={{width:perioPoints===1?20:perioPoints===4?14:10,height:16,borderRadius:2,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v>=4?"#991B1B":"#166534"}}>{v||""}</div>;})}
                         </div>
-                        <div style={{width:36,height:24,borderRadius:4,background:pd?"#F1F5F9":"#F9FAFB",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pd?"#374151":"#D1D5DB",position:"relative"}}>
+                        <div style={{width:36,height:24,borderRadius:4,background:perioEditTarget===t?"#DBEAFE":pd?"#F1F5F9":"#F9FAFB",border:perioEditTarget===t?"2px solid #3B82F6":"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pd?"#374151":"#D1D5DB",position:"relative"}}>
                           {t}
                           {pd?.bop&&<div style={{position:"absolute",top:-2,right:-2,width:6,height:6,borderRadius:"50%",background:"#EF4444"}} />}
                         </div>
@@ -1018,12 +1021,12 @@ function UnitContent() {
                     {TOOTH_L.map(t=>{const pd=perioData[t];
                       const buccalVals = perioPoints===6?(pd?.buccal||[0,0,0]):perioPoints===4?[pd?.buccal?.[0]||0,pd?.buccal?.[2]||0]:[Math.max(...(pd?.buccal||[0,0,0]))];
                       const lingualVals = perioPoints===6?(pd?.lingual||[0,0,0]):perioPoints===4?[pd?.lingual?.[0]||0,pd?.lingual?.[2]||0]:[Math.max(...(pd?.lingual||[0,0,0]))];
-                      return <div key={t} style={{display:"flex",flexDirection:"column",alignItems:"center",width:38}}>
+                      return <div key={t} onClick={()=>setPerioEditTarget(perioEditTarget===t?null:t)} style={{display:"flex",flexDirection:"column",alignItems:"center",width:38,cursor:"pointer"}}>
                         <div style={{display:"flex",gap:1,marginBottom:1}}>
                           {buccalVals.map((v,i)=>{const bg=v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0";
                             return <div key={i} style={{width:perioPoints===1?20:perioPoints===4?14:10,height:16,borderRadius:2,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v>=4?"#991B1B":"#166534"}}>{v||""}</div>;})}
                         </div>
-                        <div style={{width:36,height:24,borderRadius:4,background:pd?"#F1F5F9":"#F9FAFB",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pd?"#374151":"#D1D5DB",position:"relative"}}>
+                        <div style={{width:36,height:24,borderRadius:4,background:perioEditTarget===t?"#DBEAFE":pd?"#F1F5F9":"#F9FAFB",border:perioEditTarget===t?"2px solid #3B82F6":"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pd?"#374151":"#D1D5DB",position:"relative"}}>
                           {t}
                           {pd?.bop&&<div style={{position:"absolute",top:-2,right:-2,width:6,height:6,borderRadius:"50%",background:"#EF4444"}} />}
                         </div>
@@ -1035,6 +1038,124 @@ function UnitContent() {
                     })}
                   </div>
                 </div>
+
+                {/* P検 手動入力パネル */}
+                {perioEditTarget&&(()=>{
+                  const pd=perioData[perioEditTarget]||{buccal:[0,0,0] as [number,number,number],lingual:[0,0,0] as [number,number,number],bop:false,mobility:0};
+                  const updatePerio=(field:string,value:unknown)=>{
+                    const updated={...pd,[field]:value};
+                    setPerioData(prev=>({...prev,[perioEditTarget]:updated as typeof pd}));
+                    // DBにも保存
+                    if(patient?.id){
+                      const allPerio={...perioData,[perioEditTarget]:updated};
+                      supabase.from("patients").update({current_perio_chart:allPerio}).eq("id",patient.id).then(()=>{});
+                    }
+                  };
+                  const setBuccalVal=(idx:number,val:number)=>{const b=[...pd.buccal] as [number,number,number];b[idx]=val;updatePerio("buccal",b);};
+                  const setLingualVal=(idx:number,val:number)=>{const l=[...pd.lingual] as [number,number,number];l[idx]=val;updatePerio("lingual",l);};
+                  const allTeeth=[...TOOTH_U,...TOOTH_L];
+                  const curIdx=allTeeth.indexOf(perioEditTarget);
+                  const prevTooth=curIdx>0?allTeeth[curIdx-1]:null;
+                  const nextTooth=curIdx<allTeeth.length-1?allTeeth[curIdx+1]:null;
+
+                  return(
+                    <div style={{background:"#FFF",borderRadius:14,padding:20,border:"2px solid #3B82F6",boxShadow:"0 4px 20px rgba(59,130,246,0.15)"}}>
+                      <div style={{textAlign:"center",marginBottom:12}}>
+                        <span style={{fontSize:24,fontWeight:900}}>#{perioEditTarget}</span>
+                        <span style={{fontSize:12,color:"#6B7280",marginLeft:6}}>歯周検査データ</span>
+                      </div>
+
+                      {/* 頬側 */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6}}>頬側 (MB / B / DB)</div>
+                          <div style={{display:"flex",gap:6}}>
+                            {[0,1,2].map(i=>(
+                              <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                                {[...Array(13)].map((_,v)=>(
+                                  <button key={v} onClick={()=>setBuccalVal(i,v)}
+                                    style={{width:32,height:22,borderRadius:4,fontSize:12,fontWeight:pd.buccal[i]===v?800:500,
+                                      background:pd.buccal[i]===v?(v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0"):"#F9FAFB",
+                                      border:pd.buccal[i]===v?"2px solid #3B82F6":"1px solid #E5E7EB",
+                                      color:pd.buccal[i]===v?"#111":"#9CA3AF",cursor:"pointer",padding:0}}>
+                                    {v}
+                                  </button>
+                                )).reverse()}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6,textAlign:"right"}}>舌側 (ML / L / DL)</div>
+                          <div style={{display:"flex",gap:6}}>
+                            {[0,1,2].map(i=>(
+                              <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                                {[...Array(13)].map((_,v)=>(
+                                  <button key={v} onClick={()=>setLingualVal(i,v)}
+                                    style={{width:32,height:22,borderRadius:4,fontSize:12,fontWeight:pd.lingual[i]===v?800:500,
+                                      background:pd.lingual[i]===v?(v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0"):"#F9FAFB",
+                                      border:pd.lingual[i]===v?"2px solid #3B82F6":"1px solid #E5E7EB",
+                                      color:pd.lingual[i]===v?"#111":"#9CA3AF",cursor:"pointer",padding:0}}>
+                                    {v}
+                                  </button>
+                                )).reverse()}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* BOP・動揺度・分岐部 */}
+                      <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,fontWeight:700}}>BOP:</span>
+                          <button onClick={()=>updatePerio("bop",!pd.bop)}
+                            style={{padding:"4px 14px",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",
+                              background:pd.bop?"#FEE2E2":"#F0FDF4",border:pd.bop?"2px solid #EF4444":"2px solid #22C55E",
+                              color:pd.bop?"#DC2626":"#16A34A"}}>
+                            {pd.bop?"(+) 出血あり":"(-) 出血なし"}
+                          </button>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,fontWeight:700}}>動揺:</span>
+                          {[0,1,2,3].map(m=>(
+                            <button key={m} onClick={()=>updatePerio("mobility",m)}
+                              style={{width:30,height:28,borderRadius:6,fontSize:13,fontWeight:700,cursor:"pointer",
+                                background:pd.mobility===m?"#DBEAFE":"#F9FAFB",border:pd.mobility===m?"2px solid #3B82F6":"1px solid #E5E7EB",
+                                color:pd.mobility===m?"#2563EB":"#9CA3AF"}}>
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,fontWeight:700}}>分岐部:</span>
+                          {(["—","F1","F2","F3"] as const).map((f,fi)=>(
+                            <button key={f} onClick={()=>updatePerio("furcation",fi===0?0:fi)}
+                              style={{padding:"4px 10px",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",
+                                background:(pd as Record<string,unknown>).furcation===(fi===0?0:fi)?"#DBEAFE":"#F9FAFB",
+                                border:(pd as Record<string,unknown>).furcation===(fi===0?0:fi)?"2px solid #3B82F6":"1px solid #E5E7EB",
+                                color:(pd as Record<string,unknown>).furcation===(fi===0?0:fi)?"#2563EB":"#9CA3AF"}}>
+                              {f}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* ナビゲーション */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:14}}>
+                        <button onClick={()=>prevTooth&&setPerioEditTarget(prevTooth)}
+                          style={{background:prevTooth?"#F9FAFB":"transparent",border:prevTooth?"1px solid #E5E7EB":"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:600,cursor:prevTooth?"pointer":"default",color:prevTooth?"#374151":"#D1D5DB"}}>
+                          ← 前の歯 {prevTooth?`#${prevTooth}`:""}
+                        </button>
+                        <button onClick={()=>setPerioEditTarget(null)} style={{background:"none",border:"none",color:"#6B7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>閉じる</button>
+                        <button onClick={()=>nextTooth&&setPerioEditTarget(nextTooth)}
+                          style={{background:nextTooth?"#3B82F6":"transparent",border:"none",borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:nextTooth?"pointer":"default",color:nextTooth?"#FFF":"#D1D5DB"}}>
+                          次の歯 → {nextTooth?`#${nextTooth}`:""}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {drafts.perio&&(
                   <div style={{background:"#FFF",borderRadius:12,padding:16,border:"1px solid #E5E7EB"}}>
                     <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>P検記録</div>
