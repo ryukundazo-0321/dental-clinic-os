@@ -105,6 +105,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, confirmation_id: conf.id });
     }
 
+    // ===== REVOKE BY APPOINTMENT =====
+    if (action === "revoke_by_appointment") {
+      const { appointment_id, reason } = body;
+      if (!appointment_id) return NextResponse.json({ error: "Missing appointment_id" }, { status: 400 });
+      const { data: confs } = await supabase
+        .from("karte_confirmations")
+        .select("id, revoked")
+        .eq("appointment_id", appointment_id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      let confId: string | null = null;
+      if (confs) {
+        for (const c of confs as { id: string; revoked: boolean | null }[]) {
+          if (!c.revoked) { confId = c.id; break; }
+        }
+      }
+      if (!confId) return NextResponse.json({ error: "No active confirmation found" }, { status: 404 });
+      await supabase.from("karte_confirmations").update({ revoked: true, revoked_at: new Date().toISOString(), revoked_reason: reason || null }).eq("id", confId);
+      await supabase.from("karte_ai_drafts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("appointment_id", appointment_id).eq("status", "confirmed");
+      await supabase.from("medical_records").update({ status: "in_progress", doctor_confirmed: false }).eq("appointment_id", appointment_id);
+      await supabase.from("appointments").update({ status: "in_consultation" }).eq("id", appointment_id);
+      return NextResponse.json({ success: true });
+    }
+
     // ===== REVOKE =====
     if (action === "revoke") {
       const { confirmation_id, reason } = body;
