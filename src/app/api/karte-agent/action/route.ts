@@ -40,7 +40,6 @@ export async function POST(request: NextRequest) {
       const { appointment_id, staff_id } = body;
       if (!appointment_id) return NextResponse.json({ error: "Missing appointment_id" }, { status: 400 });
 
-      // Check all fields are approved
       const { data: drafts } = await supabase
         .from("karte_ai_drafts")
         .select("*")
@@ -53,11 +52,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Not all fields approved" }, { status: 400 });
       }
 
-      // Build snapshot
       const snapshot: Record<string, string> = {};
       drafts?.forEach((d: { field_key: string; draft_text: string }) => { snapshot[d.field_key] = d.draft_text; });
 
-      // Insert confirmation
       const { data: conf, error: confError } = await supabase
         .from("karte_confirmations")
         .insert({
@@ -70,13 +67,11 @@ export async function POST(request: NextRequest) {
 
       if (confError) return NextResponse.json({ error: confError.message }, { status: 500 });
 
-      // Update draft statuses to confirmed
       await supabase
         .from("karte_ai_drafts")
         .update({ status: "confirmed", updated_at: new Date().toISOString() })
         .eq("appointment_id", appointment_id);
 
-      // Write back to medical_records
       const soapS = snapshot.s || null;
       const soapO = [snapshot.tooth, snapshot.perio, snapshot.dh].filter(Boolean).join("\n\n") || null;
       const soapA = snapshot.dr?.match(/【A】[\s\S]*?(?=【P】|$)/)?.[0]?.replace("【A】", "").trim() || null;
@@ -96,7 +91,6 @@ export async function POST(request: NextRequest) {
 
       if (mrError) console.error("medical_records update error:", mrError);
 
-      // Update appointment status
       await supabase
         .from("appointments")
         .update({ status: "completed" })
@@ -109,25 +103,41 @@ export async function POST(request: NextRequest) {
     if (action === "revoke_by_appointment") {
       const { appointment_id, reason } = body;
       if (!appointment_id) return NextResponse.json({ error: "Missing appointment_id" }, { status: 400 });
-      const { data: confs, error: confError } = await supabase
-        .from("karte_confirmations")
-        .select("*")
+
+      // Revert drafts: confirmed -> approved
+      await supabase
+        .from("karte_ai_drafts")
+        .update({ status: "approved", updated_at: new Date().toISOString() })
         .eq("appointment_id", appointment_id)
-        .order("created_at", { ascending: false })
-        .limit(5);
-      console.log("revoke_by_appointment - appointment_id:", appointment_id, "confs:", JSON.stringify(confs), "error:", confError);
-      let confId: string | null = null;
-      if (confs && confs.length > 0) {
-        // Try to find non-revoked, but if all have revoked=null treat as active
-        for (const c of confs as { id: string; revoked: boolean | null }[]) {
-          if (c.revoked !== true) { confId = c.id; break; }
+        .eq("status", "confirmed");
+
+      // Revert medical_records
+      await supabase
+        .from("medical_records")
+        .update({ status: "in_progress", doctor_confirmed: false })
+        .eq("appointment_id", appointment_id);
+
+      // Revert appointment
+      await supabase
+        .from("appointments")
+        .update({ status: "in_consultation" })
+        .eq("id", appointment_id);
+
+      // Mark confirmations as revoked (best effort, ignore errors)
+      const { data: confs } = await supabase
+        .from("karte_confirmations")
+        .select("id")
+        .eq("appointment_id", appointment_id);
+
+      if (confs) {
+        for (const c of confs) {
+          await supabase
+            .from("karte_confirmations")
+            .update({ revoked: true, revoked_reason: reason || "revoked" })
+            .eq("id", c.id);
         }
       }
-      if (!confId) return NextResponse.json({ error: "No active confirmation found", debug: { confs, confError } }, { status: 404 });
-      await supabase.from("karte_confirmations").update({ revoked: true, revoked_at: new Date().toISOString(), revoked_reason: reason || null }).eq("id", confId);
-      await supabase.from("karte_ai_drafts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("appointment_id", appointment_id).eq("status", "confirmed");
-      await supabase.from("medical_records").update({ status: "in_progress", doctor_confirmed: false }).eq("appointment_id", appointment_id);
-      await supabase.from("appointments").update({ status: "in_consultation" }).eq("id", appointment_id);
+
       return NextResponse.json({ success: true });
     }
 
@@ -136,7 +146,6 @@ export async function POST(request: NextRequest) {
       const { confirmation_id, reason } = body;
       if (!confirmation_id) return NextResponse.json({ error: "Missing confirmation_id" }, { status: 400 });
 
-      // Get the confirmation to find appointment_id
       const { data: conf } = await supabase
         .from("karte_confirmations")
         .select("appointment_id")
@@ -145,26 +154,22 @@ export async function POST(request: NextRequest) {
 
       if (!conf) return NextResponse.json({ error: "Confirmation not found" }, { status: 404 });
 
-      // Mark as revoked
       await supabase
         .from("karte_confirmations")
-        .update({ revoked: true, revoked_at: new Date().toISOString(), revoked_reason: reason || null })
+        .update({ revoked: true, revoked_reason: reason || null })
         .eq("id", confirmation_id);
 
-      // Revert drafts to approved
       await supabase
         .from("karte_ai_drafts")
         .update({ status: "approved", updated_at: new Date().toISOString() })
         .eq("appointment_id", conf.appointment_id)
         .eq("status", "confirmed");
 
-      // Revert medical_records
       await supabase
         .from("medical_records")
         .update({ status: "in_progress", doctor_confirmed: false })
         .eq("appointment_id", conf.appointment_id);
 
-      // Revert appointment
       await supabase
         .from("appointments")
         .update({ status: "in_consultation" })
