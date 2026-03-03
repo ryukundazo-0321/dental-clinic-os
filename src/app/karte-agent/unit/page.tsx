@@ -4,12 +4,15 @@ import { supabase } from "@/lib/supabase";
 import { useSearchParams } from "next/navigation";
 
 const STEPS = [
-  { key: "s", label: "主訴(S)" },
-  { key: "tooth", label: "歯式" },
-  { key: "perio", label: "P検" },
-  { key: "dh", label: "DH記録" },
-  { key: "dr", label: "Dr診察" },
+  { key: "s", label: "主訴(S)", short: "S", color: "#2563EB", bg: "#EFF6FF" },
+  { key: "tooth", label: "歯式", short: "🦷", color: "#7C3AED", bg: "#F5F3FF" },
+  { key: "perio", label: "P検", short: "P", color: "#0D9488", bg: "#F0FDFA" },
+  { key: "dh", label: "DH記録", short: "O", color: "#D97706", bg: "#FFFBEB" },
+  { key: "dr", label: "Dr診察", short: "AP", color: "#DC2626", bg: "#FEF2F2" },
 ];
+
+const TOOTH_U = ["18","17","16","15","14","13","12","11","21","22","23","24","25","26","27","28"];
+const TOOTH_L = ["48","47","46","45","44","43","42","41","31","32","33","34","35","36","37","38"];
 
 const UR=["18","17","16","15","14","13","12","11"];
 const UL=["21","22","23","24","25","26","27","28"];
