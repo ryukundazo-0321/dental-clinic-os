@@ -239,13 +239,18 @@ function UnitContent() {
   };
 
   const stopBatch = async()=>{
-    if(!mediaRec.current||mediaRec.current.state==="inactive") return;
-    const blob=await new Promise<Blob>((resolve)=>{
-      mediaRec.current!.onstop=()=>resolve(new Blob(audioChunks.current,{type:"audio/webm"}));
-      mediaRec.current!.stop();
-      mediaRec.current!.stream.getTracks().forEach(t=>t.stop());
-    });
-    setRecording(false); setTranscribing(true); setStatus("📝 文字起こし中...");
+    if(!mediaRec.current||mediaRec.current.state==="inactive"){setRecording(false);return;}
+    const blob=await Promise.race([
+      new Promise<Blob>((resolve)=>{
+        mediaRec.current!.onstop=()=>resolve(new Blob(audioChunks.current,{type:"audio/webm"}));
+        mediaRec.current!.stop();
+        mediaRec.current!.stream.getTracks().forEach(t=>t.stop());
+      }),
+      new Promise<Blob>((_,reject)=>setTimeout(()=>reject(new Error("MediaRecorder timeout")),5000))
+    ]).catch(e=>{console.error(e);return null;});
+    setRecording(false);
+    if(!blob){setStatus("❌ 録音停止タイムアウト");return;}
+    setTranscribing(true); setStatus("📝 文字起こし中...");
     if(recTime<3){setStatus("⚠️ 録音が短すぎます（3秒以上録音してください）");setTranscribing(false);return;}
     try{
       const tokenRes=await fetch("/api/whisper-token"); const tokenData=await tokenRes.json();
@@ -276,7 +281,7 @@ function UnitContent() {
         else setStatus("⚠️ "+(r.error||"振り分け問題"));}
       else setStatus("❌ AI振り分けエラー");
     }catch(e){console.error(e);setStatus("❌ 文字起こし失敗");}
-    setTranscribing(false);
+    finally{setTranscribing(false);setRecording(false);}
   };
 
   // ===== OPTION A: REALTIME WebRTC =====
@@ -503,7 +508,7 @@ function UnitContent() {
         else setStatus("⚠️ "+(r.error||"振り分け問題"));}
       else setStatus("❌ AI振り分けエラー");
     }catch(e){console.error(e);setStatus("❌ 振り分け失敗");}
-    setTranscribing(false);
+    finally{setTranscribing(false);setRecording(false);}
   };
 
   // Unified start/stop
@@ -540,10 +545,10 @@ function UnitContent() {
   const handleRevoke=async()=>{
     let cid=confirmId;
     if(!cid){
-      const{data:conf}=await supabase.from("karte_confirmations").select("id").eq("appointment_id",appointmentId).eq("revoked",false).order("created_at",{ascending:false}).limit(1);
+      const{data:conf}=await supabase.from("karte_confirmations").select("id").eq("appointment_id",appointmentId).or("revoked.is.null,revoked.eq.false").order("created_at",{ascending:false}).limit(1);
       if(conf&&conf.length>0) cid=conf[0].id;
     }
-    if(!cid){setStatus("❌ 確定レコードが見つかりません");return;}
+    if(!cid) return;
     await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"revoke",confirmation_id:cid,reason:"Dr修正"})});
     setConfirmed(false);setConfirmId(null);setBillingData(null);setBillingSaved(false);loadDrafts();
