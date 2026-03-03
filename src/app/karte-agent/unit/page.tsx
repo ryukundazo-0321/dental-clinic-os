@@ -543,15 +543,11 @@ function UnitContent() {
     else setStatus("❌ "+(data.error||"確定失敗"));
   };
   const handleRevoke=async()=>{
-    let cid=confirmId;
-    if(!cid){
-      const{data:conf}=await supabase.from("karte_confirmations").select("id").eq("appointment_id",appointmentId).or("revoked.is.null,revoked.eq.false").order("created_at",{ascending:false}).limit(1);
-      if(conf&&conf.length>0) cid=conf[0].id;
-    }
-    if(!cid) return;
-    await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({action:"revoke",confirmation_id:cid,reason:"Dr修正"})});
-    setConfirmed(false);setConfirmId(null);setBillingData(null);setBillingSaved(false);loadDrafts();
+    const res=await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"revoke_by_appointment",appointment_id:appointmentId,reason:"Dr修正"})});
+    const data=await res.json();
+    if(data.success){setConfirmed(false);setConfirmId(null);setBillingData(null);setBillingSaved(false);loadDrafts();setStatus("");}
+    else setStatus("\u274c "+(data.error||"取り消し失敗"));
   };
 
   const apCnt=STEPS.filter(st=>drafts[st.key]?.status==="approved"||drafts[st.key]?.status==="confirmed").length;
