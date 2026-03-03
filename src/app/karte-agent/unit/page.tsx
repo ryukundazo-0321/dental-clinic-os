@@ -178,7 +178,14 @@ function UnitContent() {
       const d:Record<string,{draft_text:string;status:string}>={};
       data.forEach((r:{field_key:string;draft_text:string;status:string})=>{d[r.field_key]=r;});
       setDrafts(d);
-      if(Object.keys(d).length>=5&&Object.values(d).every(v=>v.status==="confirmed")) setConfirmed(true);
+      if(Object.keys(d).length>=5&&Object.values(d).every(v=>v.status==="confirmed")){
+        setConfirmed(true);
+        // confirmIdをDBから復元
+        if(!confirmId){
+          const {data:conf}=await supabase.from("karte_confirmations").select("id").eq("appointment_id",appointmentId).order("created_at",{ascending:false}).limit(1);
+          if(conf&&conf.length>0) setConfirmId(conf[0].id);
+        }
+      }
       else setConfirmed(false);
     }
     const {data:chunks}=await supabase.from("karte_transcript_chunks").select("corrected_text, raw_text, created_at")
@@ -626,6 +633,7 @@ function UnitContent() {
             <div style={{textAlign:"center"}}>
               <div style={{fontSize:48}}>✅</div>
               <div style={{fontSize:20,fontWeight:800,color:"#16A34A",marginTop:6}}>カルテ確定済み</div>
+              <div style={{fontSize:11,color:"#9CA3AF",marginTop:4}}>追加録音するには確定を取り消してください</div>
             </div>
           ):hasDrafts?(
             <div style={{textAlign:"center"}}>
