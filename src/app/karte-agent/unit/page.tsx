@@ -538,10 +538,15 @@ function UnitContent() {
     else setStatus("❌ "+(data.error||"確定失敗"));
   };
   const handleRevoke=async()=>{
-    if(!confirmId) return;
+    let cid=confirmId;
+    if(!cid){
+      const{data:conf}=await supabase.from("karte_confirmations").select("id").eq("appointment_id",appointmentId).eq("revoked",false).order("created_at",{ascending:false}).limit(1);
+      if(conf&&conf.length>0) cid=conf[0].id;
+    }
+    if(!cid){setStatus("❌ 確定レコードが見つかりません");return;}
     await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({action:"revoke",confirmation_id:confirmId,reason:"Dr修正"})});
-    setConfirmed(false);setConfirmId(null);loadDrafts();
+      body:JSON.stringify({action:"revoke",confirmation_id:cid,reason:"Dr修正"})});
+    setConfirmed(false);setConfirmId(null);setBillingData(null);setBillingSaved(false);loadDrafts();
   };
 
   const apCnt=STEPS.filter(st=>drafts[st.key]?.status==="approved"||drafts[st.key]?.status==="confirmed").length;
