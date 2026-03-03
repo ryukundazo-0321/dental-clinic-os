@@ -55,6 +55,18 @@ function UnitContent() {
   const [confirmId, setConfirmId] = useState<string|null>(null);
   const [status, setStatus] = useState("");
 
+  // 編集・承認関連
+  const [editing, setEditing] = useState<string|null>(null);
+  const [editVal, setEditVal] = useState("");
+
+  // 算定プレビュー関連
+  const [billingData, setBillingData] = useState<{items:{code:string;name:string;points:number;count:number;category:string}[];total:number;burden:number}|null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingSaved, setBillingSaved] = useState(false);
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addItemSearch, setAddItemSearch] = useState("");
+  const [addItemResults, setAddItemResults] = useState<{code:string;name:string;points:number;category:string}[]>([]);
+
   // Dental chart & perio
   const [toothChart, setToothChart] = useState<Record<string,string|string[]>>({});
   const [perioData, setPerioData] = useState<Record<string,{buccal:[number,number,number];lingual:[number,number,number];bop:boolean;mobility:number}>>({});
@@ -457,6 +469,25 @@ function UnitContent() {
   const stopRecording=()=>mode==="batch"?stopBatch():stopRealtime();
 
   // Confirm / Revoke
+  // 承認
+  const approve=async(key:string,editedText?:string)=>{
+    await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"approve",appointment_id:appointmentId,field_key:key,edited_text:editedText})});
+    setEditing(null);loadDrafts();
+  };
+  // 再生成
+  const regenerateDraft=async(key:string)=>{
+    await fetch("/api/karte-agent/generate-draft",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({appointment_id:appointmentId,field_key:key})});
+    loadDrafts();
+  };
+  // fee検索
+  const searchFee=async(q:string)=>{
+    if(!q||q.length<2){setAddItemResults([]);return;}
+    const {data}=await supabase.from("fee_master_v2").select("kubun_code,sub_code,name,name_short,points,category").or(`name.ilike.%${q}%,name_short.ilike.%${q}%,kubun_code.ilike.%${q}%`).limit(10);
+    if(data) setAddItemResults(data.map(f=>({code:f.sub_code?`${f.kubun_code}-${f.sub_code}`:f.kubun_code,name:f.name_short||f.name,points:f.points,category:f.category||"other"})));
+  };
+
   const handleConfirm=async()=>{
     const res=await fetch("/api/karte-agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"confirm",appointment_id:appointmentId})});
@@ -473,6 +504,29 @@ function UnitContent() {
 
   const apCnt=STEPS.filter(st=>drafts[st.key]?.status==="approved"||drafts[st.key]?.status==="confirmed").length;
   const hasDrafts=Object.keys(drafts).length>0;
+
+  // confirmed時にbilling-previewを自動実行
+  useEffect(()=>{
+    if(!confirmed||!appointmentId||billingData) return;
+    (async()=>{
+      setBillingLoading(true);
+      try{
+        const {data:rec}=await supabase.from("medical_records").select("id").eq("appointment_id",appointmentId).order("created_at",{ascending:false}).limit(1).single();
+        if(rec?.id){
+          setRecordId(rec.id);
+          const res=await fetch("/api/billing-preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:rec.id})});
+          const d=await res.json();
+          if(d.success){
+            const items=(d.items||[]) as {code:string;name:string;points:number;count:number;category:string}[];
+            const total=d.total_points||0;
+            const burden=d.patient_burden||Math.round(total*10*0.3);
+            setBillingData({items,total,burden});
+          }
+        }
+      }catch(e){console.error("billing-preview error",e);}
+      setBillingLoading(false);
+    })();
+  },[confirmed,appointmentId,billingData]);
   const fmt=(s:number)=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
 
   if(!appointmentId){
@@ -716,22 +770,134 @@ function UnitContent() {
             </div>
           )}
 
-          {/* ===== カルテ内容（AI drafts） ===== */}
+          {/* ===== カルテ内容（AI drafts）＋ 編集・承認 ===== */}
           <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>カルテ内容</div>
           {STEPS.map(st=>{
             const d=drafts[st.key];const done=d?.status==="approved"||d?.status==="confirmed";const has=!!d;
+            const isEd=editing===st.key;
             return(
               <div key={st.key} style={{background:"#FFF",borderRadius:12,padding:14,border:"1px solid "+(done?"#D1FAE5":has?"#FDE68A":"#E5E7EB"),opacity:has?1:0.35}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                   <span style={{fontSize:14,fontWeight:700}}>{st.label}</span>
-                  {done&&<span style={{fontSize:11,fontWeight:600,color:"#16A34A"}}>✓ 承認済</span>}
-                  {has&&!done&&<span style={{fontSize:11,fontWeight:600,color:"#D97706"}}>受付確認中</span>}
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    {!d&&hasDrafts&&<button onClick={()=>regenerateDraft(st.key)} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:600,cursor:"pointer"}}>AI生成</button>}
+                    {done?<span style={{fontSize:11,fontWeight:600,color:"#16A34A"}}>✓ 承認済</span>
+                      :has?<span style={{fontSize:10,fontWeight:600,color:"#D97706"}}>確認待ち</span>
+                      :<span style={{fontSize:10,color:"#D1D5DB"}}>待機</span>}
+                  </div>
                 </div>
-                {has&&d?(<div style={{fontSize:14,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginTop:8}}>{d.draft_text}</div>)
-                  :(<div style={{fontSize:13,color:"#D1D5DB",fontStyle:"italic",marginTop:4}}>—</div>)}
+                {has&&d?(
+                  isEd?(
+                    <div style={{marginTop:8}}>
+                      <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:10,fontSize:13,color:"#111827",outline:"none",resize:"vertical",minHeight:70,lineHeight:1.7}} />
+                      <div style={{display:"flex",gap:6,marginTop:6,justifyContent:"flex-end"}}>
+                        <button onClick={()=>setEditing(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>キャンセル</button>
+                        <button onClick={()=>approve(st.key,editVal)} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>保存して承認</button>
+                      </div>
+                    </div>
+                  ):(
+                    <div>
+                      <div style={{fontSize:14,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginTop:8,background:"#F9FAFB",borderRadius:8,padding:10}}>{d.draft_text}</div>
+                      <div style={{display:"flex",gap:6,marginTop:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                        <button onClick={()=>regenerateDraft(st.key)} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>🔄 再生成</button>
+                        {!done&&<button onClick={()=>{setEditing(st.key);setEditVal(d.draft_text);}} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✏ 修正</button>}
+                        {!done&&<button onClick={()=>approve(st.key)} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"5px 16px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✓ 承認</button>}
+                      </div>
+                    </div>
+                  )
+                ):(<div style={{fontSize:13,color:"#D1D5DB",fontStyle:"italic",marginTop:4}}>—</div>)}
               </div>
             );
           })}
+
+          {/* ===== 算定プレビュー（確定後） ===== */}
+          {confirmed&&(
+            <div style={{background:"#F0FDF4",borderRadius:14,padding:18,border:"1.5px solid #D1FAE5",flexShrink:0}}>
+              <div style={{fontSize:18,fontWeight:800,color:"#16A34A",textAlign:"center",marginBottom:10}}>✅ カルテ確定済み</div>
+              <div style={{background:"#FFF",borderRadius:10,padding:14,marginBottom:12,border:"1px solid #E5E7EB"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div style={{fontSize:12,fontWeight:600,color:"#3B82F6"}}>📋 算定プレビュー（確認して確定してください）</div>
+                  <button onClick={()=>{setBillingData(null);setBillingSaved(false);}} style={{background:"#EFF6FF",color:"#2563EB",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",fontSize:10,fontWeight:600,cursor:"pointer"}}>🔄 再分析</button>
+                </div>
+                {billingLoading?(
+                  <div style={{padding:12,color:"#6B7280",fontSize:13}}>⏳ 算定中...</div>
+                ):billingData?(()=>{
+                  const items=billingData.items;
+                  const basicPts=items.filter(i=>i.category==="basic"||i.code.startsWith("A0")).reduce((s,i)=>s+i.points*i.count,0);
+                  const rxPts=items.filter(i=>i.category==="prescription"||i.code.startsWith("F-")).reduce((s,i)=>s+i.points*i.count,0);
+                  const procPts=billingData.total-basicPts-rxPts;
+                  return(
+                    <div>
+                      <div style={{display:"flex",justifyContent:"center",gap:16,flexWrap:"wrap"}}>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>初再診料</div><div style={{fontSize:18,fontWeight:800}}>{basicPts}</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処置</div><div style={{fontSize:18,fontWeight:800}}>{procPts}</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処方</div><div style={{fontSize:18,fontWeight:800}}>{rxPts}</div></div>
+                        <div style={{textAlign:"center",borderLeft:"2px solid #E5E7EB",paddingLeft:16}}><div style={{fontSize:10,color:"#6B7280"}}>合計</div><div style={{fontSize:24,fontWeight:900,color:"#2563EB"}}>{billingData.total.toLocaleString()}<span style={{fontSize:12}}>点</span></div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>3割負担</div><div style={{fontSize:24,fontWeight:900}}>¥{billingData.burden.toLocaleString()}</div></div>
+                      </div>
+                      <div style={{marginTop:10,maxHeight:200,overflowY:"auto",textAlign:"left"}}>
+                        {items.map((it,i)=>(
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#374151",padding:"3px 8px",borderBottom:"1px solid #F3F4F6"}}>
+                            <span style={{flex:1}}>{it.name}</span>
+                            <span style={{fontSize:10,color:"#9CA3AF"}}>{it.points}×</span>
+                            <input type="number" value={it.count} min={1} max={99} style={{width:36,textAlign:"center",border:"1px solid #D1D5DB",borderRadius:4,fontSize:11,padding:"1px 2px"}}
+                              onChange={e=>{const ni=[...items];ni[i]={...ni[i],count:Math.max(1,parseInt(e.target.value)||1)};const nt=ni.reduce((s,x)=>s+x.points*x.count,0);setBillingData({...billingData!,items:ni,total:nt,burden:Math.round(nt*10*0.3)});}} />
+                            <span style={{fontWeight:600,minWidth:48,textAlign:"right"}}>{(it.points*it.count).toLocaleString()}点</span>
+                            <button onClick={()=>{const ni=items.filter((_,j)=>j!==i);const nt=ni.reduce((s,x)=>s+x.points*x.count,0);setBillingData({...billingData!,items:ni,total:nt,burden:Math.round(nt*10*0.3)});}} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{marginTop:6,padding:"0 8px"}}>
+                        {!showAddItem?(
+                          <button onClick={()=>setShowAddItem(true)} style={{background:"none",border:"1px dashed #D1D5DB",borderRadius:6,padding:"4px 12px",fontSize:11,color:"#6B7280",cursor:"pointer",width:"100%"}}>＋ 項目を追加</button>
+                        ):(
+                          <div style={{border:"1px solid #D1D5DB",borderRadius:6,padding:6}}>
+                            <div style={{display:"flex",gap:4}}>
+                              <input placeholder="項目名 or コードで検索..." value={addItemSearch} onChange={e=>{setAddItemSearch(e.target.value);searchFee(e.target.value);}} style={{flex:1,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 8px",fontSize:11}} />
+                              <button onClick={()=>{setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);}} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:13}}>✕</button>
+                            </div>
+                            {addItemResults.length>0&&(
+                              <div style={{maxHeight:120,overflowY:"auto",marginTop:4}}>
+                                {addItemResults.map((r,i)=>(
+                                  <div key={i} onClick={()=>{
+                                    const ni=[...(billingData?.items||[]),{code:r.code,name:r.name,points:r.points,count:1,category:r.category}];
+                                    const nt=ni.reduce((s,x)=>s+x.points*x.count,0);
+                                    setBillingData({items:ni,total:nt,burden:Math.round(nt*10*0.3)});
+                                    setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);
+                                  }} style={{display:"flex",justifyContent:"space-between",padding:"3px 6px",fontSize:10,cursor:"pointer",borderBottom:"1px solid #F3F4F6"}}
+                                    onMouseOver={e=>(e.currentTarget.style.background="#EFF6FF")} onMouseOut={e=>(e.currentTarget.style.background="transparent")}>
+                                    <span>{r.name}</span><span style={{fontWeight:600}}>{r.points}点</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })():(
+                  <div style={{padding:12,color:"#EF4444",fontSize:13}}>⚠️ 算定データを取得できませんでした</div>
+                )}
+              </div>
+              <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                <button onClick={async()=>{
+                  if(!recordId) return;
+                  try{
+                    if(billingData&&billingData.items.length>0){
+                      const res=await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:recordId,use_preview:true,preview_items:billingData.items})});
+                      const d=await res.json();if(d.success) setBillingSaved(true);
+                    }else{
+                      const res=await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:recordId})});
+                      const d=await res.json();if(d.success) setBillingSaved(true);
+                    }
+                  }catch(e){console.error("billing save error",e);}
+                  await supabase.from("appointments").update({status:"completed"}).eq("id",appointmentId);
+                  window.location.href="/billing";
+                }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"12px 28px",fontSize:15,fontWeight:800,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 {billingSaved?"会計へ →":"算定確定 → 会計へ"}</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
