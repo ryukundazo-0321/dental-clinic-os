@@ -1068,13 +1068,13 @@ function UnitContent() {
                       {/* 頬側 */}
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
                         <div>
-                          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6}}>頬側 (MB / B / DB)</div>
+                          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6}}>頬側 {perioPoints===6?"(MB / B / DB)":perioPoints===4?"(M / D)":"(最深部)"}</div>
                           <div style={{display:"flex",gap:6}}>
-                            {[0,1,2].map(i=>(
+                            {(perioPoints===6?[0,1,2]:perioPoints===4?[0,2]:[0]).map(i=>(
                               <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 {[...Array(13)].map((_,v)=>(
                                   <button key={v} onClick={()=>setBuccalVal(i,v)}
-                                    style={{width:32,height:22,borderRadius:4,fontSize:12,fontWeight:pd.buccal[i]===v?800:500,
+                                    style={{width:perioPoints===1?48:perioPoints===4?40:32,height:22,borderRadius:4,fontSize:12,fontWeight:pd.buccal[i]===v?800:500,
                                       background:pd.buccal[i]===v?(v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0"):"#F9FAFB",
                                       border:pd.buccal[i]===v?"2px solid #3B82F6":"1px solid #E5E7EB",
                                       color:pd.buccal[i]===v?"#111":"#9CA3AF",cursor:"pointer",padding:0}}>
@@ -1086,13 +1086,13 @@ function UnitContent() {
                           </div>
                         </div>
                         <div>
-                          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6,textAlign:"right"}}>舌側 (ML / L / DL)</div>
+                          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6,textAlign:"right"}}>舌側 {perioPoints===6?"(ML / L / DL)":perioPoints===4?"(M / D)":"(最深部)"}</div>
                           <div style={{display:"flex",gap:6}}>
-                            {[0,1,2].map(i=>(
+                            {(perioPoints===6?[0,1,2]:perioPoints===4?[0,2]:[0]).map(i=>(
                               <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 {[...Array(13)].map((_,v)=>(
                                   <button key={v} onClick={()=>setLingualVal(i,v)}
-                                    style={{width:32,height:22,borderRadius:4,fontSize:12,fontWeight:pd.lingual[i]===v?800:500,
+                                    style={{width:perioPoints===1?48:perioPoints===4?40:32,height:22,borderRadius:4,fontSize:12,fontWeight:pd.lingual[i]===v?800:500,
                                       background:pd.lingual[i]===v?(v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0"):"#F9FAFB",
                                       border:pd.lingual[i]===v?"2px solid #3B82F6":"1px solid #E5E7EB",
                                       color:pd.lingual[i]===v?"#111":"#9CA3AF",cursor:"pointer",padding:0}}>
