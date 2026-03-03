@@ -47,6 +47,7 @@ function UnitContent() {
   const [recTime, setRecTime] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [transcriptChunks, setTranscriptChunks] = useState<{time:string;text:string}[]>([]);
   const [realtimeLines, setRealtimeLines] = useState<{text:string;time:string;isFinal:boolean}[]>([]);
   const [drafts, setDrafts] = useState<Record<string,{draft_text:string;status:string}>>({});
   const [messages, setMessages] = useState<{related_field:string|null;message_text:string;created_at:string}[]>([]);
@@ -133,9 +134,15 @@ function UnitContent() {
       if(Object.keys(d).length>=5&&Object.values(d).every(v=>v.status==="confirmed")) setConfirmed(true);
       else setConfirmed(false);
     }
-    const {data:chunks}=await supabase.from("karte_transcript_chunks").select("corrected_text, raw_text")
+    const {data:chunks}=await supabase.from("karte_transcript_chunks").select("corrected_text, raw_text, created_at")
       .eq("appointment_id",appointmentId).order("chunk_index",{ascending:true});
-    if(chunks&&chunks.length>0) setTranscript(chunks.map((c:{corrected_text:string;raw_text:string})=>c.corrected_text||c.raw_text).join("\n"));
+    if(chunks&&chunks.length>0) {
+      setTranscript(chunks.map((c:{corrected_text:string;raw_text:string})=>c.corrected_text||c.raw_text).join("\n"));
+      setTranscriptChunks(chunks.map((c:{corrected_text:string;raw_text:string;created_at:string})=>({
+        time: c.created_at ? new Date(c.created_at).toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}) : "",
+        text: c.corrected_text||c.raw_text
+      })));
+    }
   },[appointmentId]);
 
   const loadMessages = useCallback(async()=>{
@@ -198,6 +205,8 @@ function UnitContent() {
       const wr=await whisperRes.json(); let raw=wr.text||"";
       if(!raw||raw.trim().length<5){setStatus("⚠️ 音声を認識できませんでした");setTranscribing(false);return;}
       // 文字起こし完了 → 前回分に追記してからAI振り分け
+      const now = new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"});
+      setTranscriptChunks(prev => [...prev, {time:now, text:raw}]);
       const newTranscript = transcript ? transcript + "\n" + raw : raw;
       setTranscript(newTranscript); setStatus("🤖 AI振り分け中...");
       // chunkをDBに保存（billing-previewで参照するため）
@@ -249,6 +258,14 @@ function UnitContent() {
       // Add audio track
       pc.addTrack(stream.getTracks()[0]);
 
+      // MediaRecorderも同時に録音開始（Whisperフォールバック用）
+      try {
+        const mr=new MediaRecorder(stream,{mimeType:"audio/webm;codecs=opus"});
+        mediaRec.current=mr; audioChunks.current=[];
+        mr.ondataavailable=(e)=>{if(e.data.size>0) audioChunks.current.push(e.data);};
+        mr.start(1000);
+      } catch(e){ console.warn("MediaRecorder fallback not available:",e); }
+
       // Create data channel for events
       const dc=pc.createDataChannel("oai-events");
       dcRef.current=dc;
@@ -259,21 +276,16 @@ function UnitContent() {
         dc.send(JSON.stringify({
           type: "session.update",
           session: {
-            type: "realtime",
-            audio: {
-              input: {
-                transcription: {
-                  model: "gpt-4o-transcribe",
-                  language: "ja",
-                },
-                noise_reduction: { type: "near_field" },
-                turn_detection: {
-                  type: "server_vad",
-                  threshold: 0.5,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: 800,
-                },
-              },
+            input_audio_transcription: {
+              model: "gpt-4o-transcribe",
+              language: "ja",
+            },
+            input_audio_noise_reduction: { type: "near_field" },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.2,
+              prefix_padding_ms: 800,
+              silence_duration_ms: 2000,
             },
           },
         }));
@@ -388,18 +400,51 @@ function UnitContent() {
     if(pcRef.current) pcRef.current.close();
     if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop());
     pcRef.current=null; dcRef.current=null; streamRef.current=null;
+    // Stop MediaRecorder
+    if(mediaRec.current&&mediaRec.current.state!=="inactive"){
+      mediaRec.current.stop();
+    }
 
     setRecording(false);
-    const fullText=realtimeTranscript.current;
+    let fullText=realtimeTranscript.current;
+
+    // リアルタイム結果が不十分→Whisperで再文字起こし
+    if((!fullText||fullText.trim().length<20)&&audioChunks.current.length>0){
+      setStatus("🔄 Whisperで再文字起こし中...");
+      try{
+        const blob=new Blob(audioChunks.current,{type:"audio/webm"});
+        const tokenRes=await fetch("/api/whisper-token");const tokenData=await tokenRes.json();
+        if(tokenData.key){
+          const fd=new FormData();
+          fd.append("file",blob,"recording.webm");fd.append("model","gpt-4o-transcribe");fd.append("language","ja");
+          const wr=await fetch("https://api.openai.com/v1/audio/transcriptions",{
+            method:"POST",headers:{Authorization:`Bearer ${tokenData.key}`},body:fd});
+          if(wr.ok){const r=await wr.json();if(r.text&&r.text.trim().length>(fullText?.trim().length||0)){fullText=r.text;}}
+        }
+      }catch(e){console.error("Whisper fallback error:",e);}
+    }
+
     if(!fullText||fullText.trim().length<5){
       setStatus("⚠️ 文字起こしが短すぎます"); return;
     }
-    setTranscript(fullText);
+    // 追記方式
+    const now = new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"});
+    setTranscriptChunks(prev => [...prev, {time:now, text:fullText}]);
+    const newTranscript = transcript ? transcript + "\n" + fullText : fullText;
+    setTranscript(newTranscript);
+
+    // chunkをDBに保存
+    const chunkIndex = Date.now();
+    supabase.from("karte_transcript_chunks").upsert({
+      appointment_id:appointmentId, chunk_index:chunkIndex,
+      raw_text:fullText, corrected_text:fullText, is_final:true,
+    },{onConflict:"appointment_id,chunk_index"}).then(()=>{});
+
     setTranscribing(true); setStatus("🤖 AI振り分け中...");
 
     try{
       const classifyRes=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({appointment_id:appointmentId,transcript:fullText})});
+        body:JSON.stringify({appointment_id:appointmentId,transcript:newTranscript})});
       if(classifyRes.ok){const r=await classifyRes.json();if(r.success){setStatus(`✅ ${r.fields_generated}フィールド生成完了！`);loadDrafts();}
         else setStatus("⚠️ "+(r.error||"振り分け問題"));}
       else setStatus("❌ AI振り分けエラー");
@@ -540,10 +585,17 @@ function UnitContent() {
           )}
 
           {/* Batch transcript */}
-          {mode==="batch"&&transcript&&(
+          {mode==="batch"&&transcriptChunks.length>0&&(
             <div style={{width:"100%",maxWidth:340}}>
               <div style={{fontSize:11,fontWeight:600,color:"#9CA3AF",marginBottom:4}}>📝 文字起こし結果</div>
-              <div style={{background:"#F9FAFB",borderRadius:8,padding:10,fontSize:12,color:"#374151",lineHeight:1.7,maxHeight:200,overflow:"auto",whiteSpace:"pre-wrap"}}>{transcript}</div>
+              <div style={{background:"#F9FAFB",borderRadius:8,padding:10,maxHeight:300,overflow:"auto"}}>
+                {transcriptChunks.map((c,i)=>(
+                  <div key={i} style={{marginBottom:10,paddingBottom:8,borderBottom:i<transcriptChunks.length-1?"1px solid #E5E7EB":"none"}}>
+                    <div style={{fontSize:9,color:"#3B82F6",fontWeight:600,marginBottom:2}}>{c.time} — 録音 {i+1}</div>
+                    <div style={{fontSize:12,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{c.text}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
