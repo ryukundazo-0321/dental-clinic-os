@@ -67,6 +67,9 @@ function UnitContent() {
   const [addItemSearch, setAddItemSearch] = useState("");
   const [addItemResults, setAddItemResults] = useState<{code:string;name:string;points:number;category:string}[]>([]);
 
+  // 右タブ
+  const [rightTab, setRightTab] = useState<"karte"|"tooth"|"perio">("karte");
+
   // Dental chart & perio
   const [toothChart, setToothChart] = useState<Record<string,string|string[]>>({});
   const [perioData, setPerioData] = useState<Record<string,{buccal:[number,number,number];lingual:[number,number,number];bop:boolean;mobility:number}>>({});
@@ -667,237 +670,294 @@ function UnitContent() {
           )}
         </div>
 
-        {/* Right: karte content */}
-        <div style={{flex:1,overflow:"auto",padding:16,display:"flex",flexDirection:"column",gap:8}}>
 
-          {/* ===== 歯式チャート（常時表示） ===== */}
-          <div style={{background:"#FFF",borderRadius:12,padding:14,border:"1px solid #E5E7EB"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-              <span style={{fontSize:14,fontWeight:700}}>🦷 歯式チャート</span>
-              <span style={{fontSize:10,color:"#9CA3AF"}}>{Object.keys(toothChart).filter(k=>{const p=getPrimary(toothChart,k);return p!=="normal";}).length}歯に所見</span>
-            </div>
-            {/* 上顎 */}
-            <div style={{display:"flex",justifyContent:"center",gap:2,marginBottom:2}}>
-              {[...UR,...UL].map(t=>{const p=getPrimary(toothChart,t);const c=TS[p]||TS.normal;
-                return <div key={t} title={`#${t} ${c.lb||"健全"}`} style={{width:18,height:18,borderRadius:3,fontSize:7,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",background:c.bg,color:c.tx,border:`1px solid ${c.bd}`}}>{c.lb||t}</div>;})}
-            </div>
-            <div style={{display:"flex",justifyContent:"center"}}><div style={{width:290,borderTop:"1px solid #CBD5E1",margin:"1px 0"}} /></div>
-            {/* 下顎 */}
-            <div style={{display:"flex",justifyContent:"center",gap:2,marginTop:2}}>
-              {[...LR,...LL].map(t=>{const p=getPrimary(toothChart,t);const c=TS[p]||TS.normal;
-                return <div key={t} title={`#${t} ${c.lb||"健全"}`} style={{width:18,height:18,borderRadius:3,fontSize:7,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",background:c.bg,color:c.tx,border:`1px solid ${c.bd}`}}>{c.lb||t}</div>;})}
-            </div>
-            {/* ステータスサマリ */}
-            {Object.keys(toothChart).length>0&&(
-              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:8,paddingTop:8,borderTop:"1px solid #F1F5F9"}}>
-                {Object.entries(Object.keys(toothChart).reduce((acc,t)=>{const p=getPrimary(toothChart,t);if(p!=="normal"){acc[p]=(acc[p]||0)+1;}return acc;},{} as Record<string,number>)).map(([s,c])=>{const cfg=TS[s]||TS.normal;
-                  return <span key={s} style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:cfg.bg,color:cfg.tx}}>{cfg.lb} {c}</span>;})}
+        {/* Right: Tabbed content */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Tab header */}
+          <div style={{display:"flex",borderBottom:"2px solid #E5E7EB",background:"#FFF",flexShrink:0}}>
+            {([["karte","📋 カルテ"],["tooth","🦷 歯式"],["perio","📊 P検"]] as [string,string][]).map(([key,label])=>(
+              <button key={key} onClick={()=>setRightTab(key as "karte"|"tooth"|"perio")}
+                style={{flex:1,padding:"12px 0",fontSize:14,fontWeight:rightTab===key?800:600,
+                  color:rightTab===key?"#2563EB":"#6B7280",background:"transparent",border:"none",
+                  borderBottom:rightTab===key?"3px solid #2563EB":"3px solid transparent",cursor:"pointer",
+                  transition:"all 0.15s"}}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div style={{flex:1,overflow:"auto",padding:16}}>
+
+            {/* ====== TAB: カルテ ====== */}
+            {rightTab==="karte"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {STEPS.map(st=>{
+                  const d=drafts[st.key];const done=d?.status==="approved"||d?.status==="confirmed";const has=!!d;
+                  const isEd=editing===st.key;
+                  return(
+                    <div key={st.key} style={{background:"#FFF",borderRadius:12,padding:16,border:"1.5px solid "+(done?"#BBF7D0":has?"#FDE68A":"#E5E7EB")}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{width:28,height:28,borderRadius:8,background:st.bg,display:"flex",alignItems:"center",justifyContent:"center",color:st.color,fontSize:12,fontWeight:800}}>{st.short}</div>
+                          <span style={{fontSize:15,fontWeight:700}}>{st.label}</span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          {!d&&hasDrafts&&<button onClick={()=>regenerateDraft(st.key)} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer"}}>AI生成</button>}
+                          {done?<span style={{fontSize:12,fontWeight:700,color:"#16A34A"}}>✓ 承認済</span>
+                            :has?<span style={{fontSize:11,fontWeight:600,color:"#D97706"}}>確認待ち</span>
+                            :<span style={{fontSize:11,color:"#D1D5DB"}}>待機</span>}
+                        </div>
+                      </div>
+                      {has&&d?(
+                        isEd?(
+                          <div>
+                            <textarea value={editVal} onChange={e=>setEditVal(e.target.value)}
+                              style={{width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:10,padding:12,fontSize:14,color:"#111827",outline:"none",resize:"vertical",minHeight:80,lineHeight:1.8}} />
+                            <div style={{display:"flex",gap:8,marginTop:8,justifyContent:"flex-end"}}>
+                              <button onClick={()=>setEditing(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:600,cursor:"pointer"}}>キャンセル</button>
+                              <button onClick={()=>approve(st.key,editVal)} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>保存して承認</button>
+                            </div>
+                          </div>
+                        ):(
+                          <div>
+                            <div style={{background:"#F9FAFB",borderRadius:10,padding:12,fontSize:14,color:"#374151",lineHeight:1.9,whiteSpace:"pre-wrap"}}>{d.draft_text}</div>
+                            <div style={{display:"flex",gap:8,marginTop:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                              <button onClick={()=>regenerateDraft(st.key)} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>🔄 再生成</button>
+                              {!done&&<button onClick={()=>{setEditing(st.key);setEditVal(d.draft_text);}} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>✏ 修正</button>}
+                              {!done&&<button onClick={()=>approve(st.key)} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"6px 18px",fontSize:12,fontWeight:700,cursor:"pointer"}}>✓ 承認</button>}
+                            </div>
+                          </div>
+                        )
+                      ):(<div style={{fontSize:14,color:"#D1D5DB",fontStyle:"italic"}}>—</div>)}
+                    </div>
+                  );
+                })}
+
+                {/* カルテ確定ボタン */}
+                {apCnt>=5&&!confirmed&&(
+                  <div style={{textAlign:"center",padding:12}}>
+                    <div style={{fontSize:13,color:"#16A34A",fontWeight:700,marginBottom:8}}>{apCnt}/5 承認済み</div>
+                    <button onClick={handleConfirm} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:14,padding:"14px 48px",fontSize:16,fontWeight:800,cursor:"pointer"}}>カルテ確定する</button>
+                  </div>
+                )}
+
+                {/* 算定プレビュー（確定後） */}
+                {confirmed&&(
+                  <div style={{background:"#F0FDF4",borderRadius:14,padding:20,border:"1.5px solid #D1FAE5"}}>
+                    <div style={{fontSize:20,fontWeight:800,color:"#16A34A",textAlign:"center",marginBottom:12}}>✅ カルテ確定済み</div>
+                    <div style={{background:"#FFF",borderRadius:12,padding:16,marginBottom:14,border:"1px solid #E5E7EB"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                        <div style={{fontSize:13,fontWeight:700,color:"#3B82F6"}}>📋 算定プレビュー（確認して確定してください）</div>
+                        <button onClick={()=>{setBillingData(null);setBillingSaved(false);}} style={{background:"#EFF6FF",color:"#2563EB",border:"1px solid #BFDBFE",borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>🔄 再分析</button>
+                      </div>
+                      {billingLoading?(
+                        <div style={{padding:16,color:"#6B7280",fontSize:14,textAlign:"center"}}>⏳ 算定中...</div>
+                      ):billingData?(()=>{
+                        const items=billingData.items;
+                        const basicPts=items.filter(i=>i.category==="basic"||i.code.startsWith("A0")).reduce((s,i)=>s+i.points*i.count,0);
+                        const rxPts=items.filter(i=>i.category==="prescription"||i.code.startsWith("F-")).reduce((s,i)=>s+i.points*i.count,0);
+                        const procPts=billingData.total-basicPts-rxPts;
+                        return(
+                          <div>
+                            <div style={{display:"flex",justifyContent:"center",gap:20,flexWrap:"wrap",marginBottom:12}}>
+                              <div style={{textAlign:"center"}}><div style={{fontSize:11,color:"#6B7280"}}>初再診料</div><div style={{fontSize:22,fontWeight:800}}>{basicPts}</div></div>
+                              <div style={{textAlign:"center"}}><div style={{fontSize:11,color:"#6B7280"}}>処置</div><div style={{fontSize:22,fontWeight:800}}>{procPts}</div></div>
+                              <div style={{textAlign:"center"}}><div style={{fontSize:11,color:"#6B7280"}}>処方</div><div style={{fontSize:22,fontWeight:800}}>{rxPts}</div></div>
+                              <div style={{textAlign:"center",borderLeft:"2px solid #E5E7EB",paddingLeft:20}}><div style={{fontSize:11,color:"#6B7280"}}>合計</div><div style={{fontSize:28,fontWeight:900,color:"#2563EB"}}>{billingData.total.toLocaleString()}<span style={{fontSize:14}}>点</span></div></div>
+                              <div style={{textAlign:"center"}}><div style={{fontSize:11,color:"#6B7280"}}>3割負担</div><div style={{fontSize:28,fontWeight:900}}>¥{billingData.burden.toLocaleString()}</div></div>
+                            </div>
+                            <div style={{maxHeight:250,overflowY:"auto"}}>
+                              {items.map((it,i)=>(
+                                <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"#374151",padding:"6px 10px",borderBottom:"1px solid #F3F4F6"}}>
+                                  <span style={{flex:1,fontWeight:500}}>{it.name}</span>
+                                  <span style={{fontSize:11,color:"#9CA3AF"}}>{it.points}×</span>
+                                  <input type="number" value={it.count} min={1} max={99} style={{width:40,textAlign:"center",border:"1px solid #D1D5DB",borderRadius:6,fontSize:12,padding:"2px 4px"}}
+                                    onChange={e=>{const ni=[...items];ni[i]={...ni[i],count:Math.max(1,parseInt(e.target.value)||1)};const nt=ni.reduce((s,x)=>s+x.points*x.count,0);setBillingData({...billingData!,items:ni,total:nt,burden:Math.round(nt*10*0.3)});}} />
+                                  <span style={{fontWeight:700,minWidth:56,textAlign:"right"}}>{(it.points*it.count).toLocaleString()}点</span>
+                                  <button onClick={()=>{const ni=items.filter((_,j)=>j!==i);const nt=ni.reduce((s,x)=>s+x.points*x.count,0);setBillingData({...billingData!,items:ni,total:nt,burden:Math.round(nt*10*0.3)});}} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:16,padding:0}}>×</button>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{marginTop:8}}>
+                              {!showAddItem?(
+                                <button onClick={()=>setShowAddItem(true)} style={{background:"none",border:"1px dashed #D1D5DB",borderRadius:8,padding:"6px 14px",fontSize:12,color:"#6B7280",cursor:"pointer",width:"100%"}}>＋ 項目を追加</button>
+                              ):(
+                                <div style={{border:"1px solid #D1D5DB",borderRadius:8,padding:8}}>
+                                  <div style={{display:"flex",gap:4}}>
+                                    <input placeholder="項目名 or コードで検索..." value={addItemSearch} onChange={e=>{setAddItemSearch(e.target.value);searchFee(e.target.value);}} style={{flex:1,border:"1px solid #E5E7EB",borderRadius:6,padding:"4px 10px",fontSize:12}} />
+                                    <button onClick={()=>{setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);}} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:14}}>✕</button>
+                                  </div>
+                                  {addItemResults.length>0&&(
+                                    <div style={{maxHeight:140,overflowY:"auto",marginTop:4}}>
+                                      {addItemResults.map((r,i)=>(
+                                        <div key={i} onClick={()=>{
+                                          const ni=[...(billingData?.items||[]),{code:r.code,name:r.name,points:r.points,count:1,category:r.category}];
+                                          const nt=ni.reduce((s,x)=>s+x.points*x.count,0);
+                                          setBillingData({items:ni,total:nt,burden:Math.round(nt*10*0.3)});
+                                          setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);
+                                        }} style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",fontSize:11,cursor:"pointer",borderBottom:"1px solid #F3F4F6",borderRadius:4}}
+                                          onMouseOver={e=>(e.currentTarget.style.background="#EFF6FF")} onMouseOut={e=>(e.currentTarget.style.background="transparent")}>
+                                          <span>{r.name}</span><span style={{fontWeight:600}}>{r.points}点</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })():(
+                        <div style={{padding:16,color:"#EF4444",fontSize:14,textAlign:"center"}}>⚠️ 算定データを取得できませんでした</div>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                      <button onClick={handleRevoke} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:10,padding:"10px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>↩ 確定取り消し</button>
+                      <button onClick={async()=>{
+                        if(!recordId) return;
+                        try{
+                          if(billingData&&billingData.items.length>0){
+                            const res=await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:recordId,use_preview:true,preview_items:billingData.items})});
+                            const d=await res.json();if(d.success) setBillingSaved(true);
+                          }else{
+                            const res=await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:recordId})});
+                            const d=await res.json();if(d.success) setBillingSaved(true);
+                          }
+                        }catch(e){console.error("billing save error",e);}
+                        await supabase.from("appointments").update({status:"completed"}).eq("id",appointmentId);
+                        window.location.href="/billing";
+                      }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:12,padding:"12px 32px",fontSize:16,fontWeight:800,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 {billingSaved?"会計へ →":"算定確定 → 会計へ"}</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* レントゲンアップロード */}
-            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid #F1F5F9"}}>
-              <div style={{display:"flex",gap:6}}>
-                <label style={{cursor:"pointer",flex:1}}>
-                  <div style={{background:"#F5F3FF",border:"1px dashed #C4B5FD",borderRadius:8,padding:"8px 0",textAlign:"center",fontSize:11,fontWeight:600,color:"#7C3AED"}}>
-                    {xrayUploading?"🤖 AI分析中...":"📷 レントゲン → AI歯式分析"}
+            {/* ====== TAB: 歯式 ====== */}
+            {rightTab==="tooth"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                <div style={{background:"#FFF",borderRadius:14,padding:20,border:"1px solid #E5E7EB"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+                    <span style={{fontSize:18,fontWeight:800}}>🦷 歯式チャート</span>
+                    <span style={{fontSize:12,color:"#9CA3AF"}}>{Object.keys(toothChart).filter(k=>{const p=getPrimary(toothChart,k);return p!=="normal";}).length}歯に所見</span>
                   </div>
-                  <input type="file" accept="image/*" style={{display:"none"}} disabled={xrayUploading} onChange={async(e)=>{
-                    const file=e.target.files?.[0]; if(!file||!patient||!recordId) return;
-                    setXrayUploading(true); setStatus("📤 レントゲンアップロード中...");
-                    try{
-                      const fd=new FormData(); fd.append("file",file); fd.append("patient_id",patient.id); fd.append("record_id",recordId); fd.append("image_type","panorama");
-                      const upRes=await fetch("/api/image-upload",{method:"POST",body:fd}); const upData=await upRes.json();
-                      if(!upData.success){setStatus("❌ アップロード失敗");setXrayUploading(false);return;}
-                      setStatus("🤖 AI歯式分析中...");
-                      const aiRes=await fetch("/api/xray-analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image_base64:upData.image.base64,patient_id:patient.id})});
-                      const aiData=await aiRes.json();
-                      if(aiData.success&&aiData.tooth_chart){
-                        const nc={...toothChart}; Object.entries(aiData.tooth_chart).forEach(([t,s])=>{if(TS[s as string]) nc[t]=[s as string];});
-                        setToothChart(nc);
-                        await supabase.from("medical_records").update({tooth_chart:nc}).eq("id",recordId);
-                        setStatus(`✅ ${Object.keys(aiData.tooth_chart).length}歯を分析・反映`);
-                      } else setStatus("❌ AI分析失敗");
-                    }catch{setStatus("❌ レントゲン処理エラー");}
-                    setXrayUploading(false); e.target.value="";
-                  }} />
-                </label>
-                <label style={{cursor:"pointer",flex:1}}>
-                  <div style={{background:"#F5F3FF",border:"1px dashed #C4B5FD",borderRadius:8,padding:"8px 0",textAlign:"center",fontSize:11,fontWeight:600,color:"#7C3AED"}}>
-                    📸 カメラ撮影
+                  {/* 上顎 */}
+                  <div style={{display:"flex",justifyContent:"center",gap:3,marginBottom:4}}>
+                    {TOOTH_U.map(t=>{const p=getPrimary(toothChart,t);const s=TS[p]||TS.normal;
+                      return <div key={t} style={{width:38,height:38,borderRadius:8,background:s.bg,border:`2px solid ${s.tx}40`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                        <div style={{fontSize:8,color:s.tx,fontWeight:700}}>{p!=="normal"?s.lb:""}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:s.tx}}>{t}</div>
+                      </div>;
+                    })}
                   </div>
-                  <input type="file" accept="image/*" capture="environment" style={{display:"none"}} disabled={xrayUploading} onChange={async(e)=>{
-                    const file=e.target.files?.[0]; if(!file||!patient||!recordId) return;
-                    setXrayUploading(true); setStatus("📤 アップロード中...");
-                    try{
-                      const fd=new FormData(); fd.append("file",file); fd.append("patient_id",patient.id); fd.append("record_id",recordId); fd.append("image_type","panorama");
-                      const upRes=await fetch("/api/image-upload",{method:"POST",body:fd}); const upData=await upRes.json();
-                      if(!upData.success){setStatus("❌ アップロード失敗");setXrayUploading(false);return;}
-                      setStatus("🤖 AI歯式分析中...");
-                      const aiRes=await fetch("/api/xray-analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image_base64:upData.image.base64,patient_id:patient.id})});
-                      const aiData=await aiRes.json();
-                      if(aiData.success&&aiData.tooth_chart){
-                        const nc={...toothChart}; Object.entries(aiData.tooth_chart).forEach(([t,s])=>{if(TS[s as string]) nc[t]=[s as string];});
-                        setToothChart(nc);
-                        await supabase.from("medical_records").update({tooth_chart:nc}).eq("id",recordId);
-                        setStatus(`✅ ${Object.keys(aiData.tooth_chart).length}歯を分析・反映`);
-                      } else setStatus("❌ AI分析失敗");
-                    }catch{setStatus("❌ レントゲン処理エラー");}
-                    setXrayUploading(false); e.target.value="";
-                  }} />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* ===== P検サマリ（常時表示） ===== */}
-          {Object.keys(perioData).length>0&&(
-            <div style={{background:"#FFF",borderRadius:12,padding:14,border:"1px solid #E5E7EB"}}>
-              <span style={{fontSize:14,fontWeight:700}}>📊 P検サマリ</span>
-              {(()=>{
-                let bopP=0,bopT=0,d4=0,d6=0;
-                Object.values(perioData).forEach(pd=>{if(pd.bop)bopP++;bopT++;[...pd.buccal,...pd.lingual].forEach(v=>{if(v>=4)d4++;if(v>=6)d6++;});});
-                const bopR=bopT>0?Math.round(bopP/bopT*1000)/10:0;
-                return(
-                  <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
-                    <div style={{background:bopR>30?"#FEF2F2":"#F0FDF4",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:bopR>30?"#DC2626":"#16A34A"}}>BOP {bopR}%</div>
-                    <div style={{background:"#F9FAFB",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:"#374151"}}>PPD≧4: {d4}</div>
-                    {d6>0&&<div style={{background:"#FEF2F2",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:"#DC2626"}}>PPD≧6: {d6}</div>}
-                    <div style={{background:"#F9FAFB",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,color:"#6B7280"}}>{Object.keys(perioData).length}歯</div>
+                  <div style={{height:2,background:"#E5E7EB",margin:"4px auto",width:"95%"}} />
+                  {/* 下顎 */}
+                  <div style={{display:"flex",justifyContent:"center",gap:3,marginTop:4}}>
+                    {TOOTH_L.map(t=>{const p=getPrimary(toothChart,t);const s=TS[p]||TS.normal;
+                      return <div key={t} style={{width:38,height:38,borderRadius:8,background:s.bg,border:`2px solid ${s.tx}40`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                        <div style={{fontSize:12,fontWeight:700,color:s.tx}}>{t}</div>
+                        <div style={{fontSize:8,color:s.tx,fontWeight:700}}>{p!=="normal"?s.lb:""}</div>
+                      </div>;
+                    })}
                   </div>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* ===== カルテ内容（AI drafts）＋ 編集・承認 ===== */}
-          <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>カルテ内容</div>
-          {STEPS.map(st=>{
-            const d=drafts[st.key];const done=d?.status==="approved"||d?.status==="confirmed";const has=!!d;
-            const isEd=editing===st.key;
-            return(
-              <div key={st.key} style={{background:"#FFF",borderRadius:12,padding:14,border:"1px solid "+(done?"#D1FAE5":has?"#FDE68A":"#E5E7EB"),opacity:has?1:0.35}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                  <span style={{fontSize:14,fontWeight:700}}>{st.label}</span>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    {!d&&hasDrafts&&<button onClick={()=>regenerateDraft(st.key)} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:600,cursor:"pointer"}}>AI生成</button>}
-                    {done?<span style={{fontSize:11,fontWeight:600,color:"#16A34A"}}>✓ 承認済</span>
-                      :has?<span style={{fontSize:10,fontWeight:600,color:"#D97706"}}>確認待ち</span>
-                      :<span style={{fontSize:10,color:"#D1D5DB"}}>待機</span>}
+                  {/* 凡例 */}
+                  <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"center",flexWrap:"wrap"}}>
+                    {Object.entries(TS).filter(([k])=>k!=="normal"&&Object.values(toothChart).some(v=>typeof v==="string"?v===k:Array.isArray(v)&&v.includes(k))).map(([k,v])=>(
+                      <span key={k} style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:v.bg,color:v.tx}}>{v.lb}</span>
+                    ))}
                   </div>
                 </div>
-                {has&&d?(
-                  isEd?(
-                    <div style={{marginTop:8}}>
-                      <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{width:"100%",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:10,fontSize:13,color:"#111827",outline:"none",resize:"vertical",minHeight:70,lineHeight:1.7}} />
-                      <div style={{display:"flex",gap:6,marginTop:6,justifyContent:"flex-end"}}>
-                        <button onClick={()=>setEditing(null)} style={{background:"#F3F4F6",color:"#6B7280",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>キャンセル</button>
-                        <button onClick={()=>approve(st.key,editVal)} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>保存して承認</button>
-                      </div>
-                    </div>
-                  ):(
-                    <div>
-                      <div style={{fontSize:14,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginTop:8,background:"#F9FAFB",borderRadius:8,padding:10}}>{d.draft_text}</div>
-                      <div style={{display:"flex",gap:6,marginTop:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
-                        <button onClick={()=>regenerateDraft(st.key)} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>🔄 再生成</button>
-                        {!done&&<button onClick={()=>{setEditing(st.key);setEditVal(d.draft_text);}} style={{background:"#F9FAFB",color:"#6B7280",border:"1px solid #E5E7EB",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>✏ 修正</button>}
-                        {!done&&<button onClick={()=>approve(st.key)} style={{background:"#111827",color:"#FFF",border:"none",borderRadius:8,padding:"5px 16px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✓ 承認</button>}
-                      </div>
-                    </div>
-                  )
-                ):(<div style={{fontSize:13,color:"#D1D5DB",fontStyle:"italic",marginTop:4}}>—</div>)}
-              </div>
-            );
-          })}
-
-          {/* ===== 算定プレビュー（確定後） ===== */}
-          {confirmed&&(
-            <div style={{background:"#F0FDF4",borderRadius:14,padding:18,border:"1.5px solid #D1FAE5",flexShrink:0}}>
-              <div style={{fontSize:18,fontWeight:800,color:"#16A34A",textAlign:"center",marginBottom:10}}>✅ カルテ確定済み</div>
-              <div style={{background:"#FFF",borderRadius:10,padding:14,marginBottom:12,border:"1px solid #E5E7EB"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{fontSize:12,fontWeight:600,color:"#3B82F6"}}>📋 算定プレビュー（確認して確定してください）</div>
-                  <button onClick={()=>{setBillingData(null);setBillingSaved(false);}} style={{background:"#EFF6FF",color:"#2563EB",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",fontSize:10,fontWeight:600,cursor:"pointer"}}>🔄 再分析</button>
+                {/* レントゲン・カメラ */}
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={()=>{const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=async(e)=>{
+                    const f=(e.target as HTMLInputElement).files?.[0];if(!f||!appointmentId) return;
+                    setXrayUploading(true);
+                    const fd=new FormData();fd.append("file",f);fd.append("appointment_id",appointmentId);
+                    try{const r=await fetch("/api/xray-analyze",{method:"POST",body:fd});const d=await r.json();
+                      if(d.tooth_updates){setToothChart(prev=>({...prev,...d.tooth_updates}));}}catch(e){console.error(e);}
+                    setXrayUploading(false);
+                  };inp.click();}} style={{flex:1,background:"#EDE9FE",color:"#7C3AED",border:"2px dashed #C4B5FD",borderRadius:12,padding:"16px 0",fontSize:14,fontWeight:700,cursor:"pointer",textAlign:"center"}}>
+                    {xrayUploading?"⏳ 分析中...":"📸 レントゲン → AI歯式分析"}
+                  </button>
+                  <button style={{flex:1,background:"#EDE9FE",color:"#7C3AED",border:"2px dashed #C4B5FD",borderRadius:12,padding:"16px 0",fontSize:14,fontWeight:700,cursor:"pointer",textAlign:"center"}}>📷 カメラ撮影</button>
                 </div>
-                {billingLoading?(
-                  <div style={{padding:12,color:"#6B7280",fontSize:13}}>⏳ 算定中...</div>
-                ):billingData?(()=>{
-                  const items=billingData.items;
-                  const basicPts=items.filter(i=>i.category==="basic"||i.code.startsWith("A0")).reduce((s,i)=>s+i.points*i.count,0);
-                  const rxPts=items.filter(i=>i.category==="prescription"||i.code.startsWith("F-")).reduce((s,i)=>s+i.points*i.count,0);
-                  const procPts=billingData.total-basicPts-rxPts;
-                  return(
-                    <div>
-                      <div style={{display:"flex",justifyContent:"center",gap:16,flexWrap:"wrap"}}>
-                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>初再診料</div><div style={{fontSize:18,fontWeight:800}}>{basicPts}</div></div>
-                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処置</div><div style={{fontSize:18,fontWeight:800}}>{procPts}</div></div>
-                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>処方</div><div style={{fontSize:18,fontWeight:800}}>{rxPts}</div></div>
-                        <div style={{textAlign:"center",borderLeft:"2px solid #E5E7EB",paddingLeft:16}}><div style={{fontSize:10,color:"#6B7280"}}>合計</div><div style={{fontSize:24,fontWeight:900,color:"#2563EB"}}>{billingData.total.toLocaleString()}<span style={{fontSize:12}}>点</span></div></div>
-                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:"#6B7280"}}>3割負担</div><div style={{fontSize:24,fontWeight:900}}>¥{billingData.burden.toLocaleString()}</div></div>
-                      </div>
-                      <div style={{marginTop:10,maxHeight:200,overflowY:"auto",textAlign:"left"}}>
-                        {items.map((it,i)=>(
-                          <div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#374151",padding:"3px 8px",borderBottom:"1px solid #F3F4F6"}}>
-                            <span style={{flex:1}}>{it.name}</span>
-                            <span style={{fontSize:10,color:"#9CA3AF"}}>{it.points}×</span>
-                            <input type="number" value={it.count} min={1} max={99} style={{width:36,textAlign:"center",border:"1px solid #D1D5DB",borderRadius:4,fontSize:11,padding:"1px 2px"}}
-                              onChange={e=>{const ni=[...items];ni[i]={...ni[i],count:Math.max(1,parseInt(e.target.value)||1)};const nt=ni.reduce((s,x)=>s+x.points*x.count,0);setBillingData({...billingData!,items:ni,total:nt,burden:Math.round(nt*10*0.3)});}} />
-                            <span style={{fontWeight:600,minWidth:48,textAlign:"right"}}>{(it.points*it.count).toLocaleString()}点</span>
-                            <button onClick={()=>{const ni=items.filter((_,j)=>j!==i);const nt=ni.reduce((s,x)=>s+x.points*x.count,0);setBillingData({...billingData!,items:ni,total:nt,burden:Math.round(nt*10*0.3)});}} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>×</button>
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{marginTop:6,padding:"0 8px"}}>
-                        {!showAddItem?(
-                          <button onClick={()=>setShowAddItem(true)} style={{background:"none",border:"1px dashed #D1D5DB",borderRadius:6,padding:"4px 12px",fontSize:11,color:"#6B7280",cursor:"pointer",width:"100%"}}>＋ 項目を追加</button>
-                        ):(
-                          <div style={{border:"1px solid #D1D5DB",borderRadius:6,padding:6}}>
-                            <div style={{display:"flex",gap:4}}>
-                              <input placeholder="項目名 or コードで検索..." value={addItemSearch} onChange={e=>{setAddItemSearch(e.target.value);searchFee(e.target.value);}} style={{flex:1,border:"1px solid #E5E7EB",borderRadius:4,padding:"3px 8px",fontSize:11}} />
-                              <button onClick={()=>{setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);}} style={{background:"none",border:"none",color:"#9CA3AF",cursor:"pointer",fontSize:13}}>✕</button>
-                            </div>
-                            {addItemResults.length>0&&(
-                              <div style={{maxHeight:120,overflowY:"auto",marginTop:4}}>
-                                {addItemResults.map((r,i)=>(
-                                  <div key={i} onClick={()=>{
-                                    const ni=[...(billingData?.items||[]),{code:r.code,name:r.name,points:r.points,count:1,category:r.category}];
-                                    const nt=ni.reduce((s,x)=>s+x.points*x.count,0);
-                                    setBillingData({items:ni,total:nt,burden:Math.round(nt*10*0.3)});
-                                    setShowAddItem(false);setAddItemSearch("");setAddItemResults([]);
-                                  }} style={{display:"flex",justifyContent:"space-between",padding:"3px 6px",fontSize:10,cursor:"pointer",borderBottom:"1px solid #F3F4F6"}}
-                                    onMouseOver={e=>(e.currentTarget.style.background="#EFF6FF")} onMouseOut={e=>(e.currentTarget.style.background="transparent")}>
-                                    <span>{r.name}</span><span style={{fontWeight:600}}>{r.points}点</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })():(
-                  <div style={{padding:12,color:"#EF4444",fontSize:13}}>⚠️ 算定データを取得できませんでした</div>
+                {/* 歯式テキスト（ドラフトから） */}
+                {drafts.tooth&&(
+                  <div style={{background:"#FFF",borderRadius:12,padding:16,border:"1px solid #E5E7EB"}}>
+                    <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>歯式記録</div>
+                    <div style={{fontSize:14,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{drafts.tooth.draft_text}</div>
+                  </div>
                 )}
               </div>
-              <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                <button onClick={async()=>{
-                  if(!recordId) return;
-                  try{
-                    if(billingData&&billingData.items.length>0){
-                      const res=await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:recordId,use_preview:true,preview_items:billingData.items})});
-                      const d=await res.json();if(d.success) setBillingSaved(true);
-                    }else{
-                      const res=await fetch("/api/auto-billing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record_id:recordId})});
-                      const d=await res.json();if(d.success) setBillingSaved(true);
-                    }
-                  }catch(e){console.error("billing save error",e);}
-                  await supabase.from("appointments").update({status:"completed"}).eq("id",appointmentId);
-                  window.location.href="/billing";
-                }} style={{background:"linear-gradient(135deg,#22C55E,#16A34A)",color:"#FFF",border:"none",borderRadius:10,padding:"12px 28px",fontSize:15,fontWeight:800,cursor:"pointer",boxShadow:"0 2px 12px rgba(34,197,94,0.2)"}}>💰 {billingSaved?"会計へ →":"算定確定 → 会計へ"}</button>
+            )}
+
+            {/* ====== TAB: P検 ====== */}
+            {rightTab==="perio"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                <div style={{background:"#FFF",borderRadius:14,padding:20,border:"1px solid #E5E7EB"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+                    <span style={{fontSize:18,fontWeight:800}}>📊 歯周検査（6点法）</span>
+                    <div style={{display:"flex",gap:10}}>
+                      <span style={{fontSize:11,display:"flex",alignItems:"center",gap:3}}><span style={{width:10,height:10,background:"#BBF7D0",borderRadius:3,display:"inline-block"}} />≤3mm</span>
+                      <span style={{fontSize:11,display:"flex",alignItems:"center",gap:3}}><span style={{width:10,height:10,background:"#FED7AA",borderRadius:3,display:"inline-block"}} />4-5mm</span>
+                      <span style={{fontSize:11,display:"flex",alignItems:"center",gap:3}}><span style={{width:10,height:10,background:"#FCA5A5",borderRadius:3,display:"inline-block"}} />≥6mm</span>
+                      <span style={{fontSize:11,display:"flex",alignItems:"center",gap:3}}><span style={{width:8,height:8,background:"#EF4444",borderRadius:"50%",display:"inline-block"}} />BOP</span>
+                    </div>
+                  </div>
+                  {/* 上顎 P検チャート */}
+                  <div style={{marginBottom:4,fontSize:11,fontWeight:600,color:"#6B7280"}}>上顎</div>
+                  <div style={{display:"flex",justifyContent:"center",gap:1,marginBottom:2}}>
+                    {TOOTH_U.map(t=>{const pd=perioData[t];
+                      return <div key={t} style={{display:"flex",flexDirection:"column",alignItems:"center",width:38}}>
+                        <div style={{display:"flex",gap:1,marginBottom:1}}>
+                          {(pd?.buccal||[0,0,0]).map((v,i)=>{const bg=v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0";
+                            return <div key={i} style={{width:10,height:16,borderRadius:2,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v>=4?"#991B1B":"#166534"}}>{v||""}</div>;})}
+                        </div>
+                        <div style={{width:36,height:24,borderRadius:4,background:pd?"#F1F5F9":"#F9FAFB",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pd?"#374151":"#D1D5DB",position:"relative"}}>
+                          {t}
+                          {pd?.bop&&<div style={{position:"absolute",top:-2,right:-2,width:6,height:6,borderRadius:"50%",background:"#EF4444"}} />}
+                        </div>
+                        <div style={{display:"flex",gap:1,marginTop:1}}>
+                          {(pd?.lingual||[0,0,0]).map((v,i)=>{const bg=v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0";
+                            return <div key={i} style={{width:10,height:16,borderRadius:2,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v>=4?"#991B1B":"#166534"}}>{v||""}</div>;})}
+                        </div>
+                      </div>;
+                    })}
+                  </div>
+                  <div style={{height:2,background:"#E5E7EB",margin:"8px auto",width:"95%"}} />
+                  {/* 下顎 P検チャート */}
+                  <div style={{marginBottom:4,fontSize:11,fontWeight:600,color:"#6B7280"}}>下顎</div>
+                  <div style={{display:"flex",justifyContent:"center",gap:1}}>
+                    {TOOTH_L.map(t=>{const pd=perioData[t];
+                      return <div key={t} style={{display:"flex",flexDirection:"column",alignItems:"center",width:38}}>
+                        <div style={{display:"flex",gap:1,marginBottom:1}}>
+                          {(pd?.buccal||[0,0,0]).map((v,i)=>{const bg=v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0";
+                            return <div key={i} style={{width:10,height:16,borderRadius:2,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v>=4?"#991B1B":"#166534"}}>{v||""}</div>;})}
+                        </div>
+                        <div style={{width:36,height:24,borderRadius:4,background:pd?"#F1F5F9":"#F9FAFB",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pd?"#374151":"#D1D5DB",position:"relative"}}>
+                          {t}
+                          {pd?.bop&&<div style={{position:"absolute",top:-2,right:-2,width:6,height:6,borderRadius:"50%",background:"#EF4444"}} />}
+                        </div>
+                        <div style={{display:"flex",gap:1,marginTop:1}}>
+                          {(pd?.lingual||[0,0,0]).map((v,i)=>{const bg=v>=6?"#FCA5A5":v>=4?"#FED7AA":"#BBF7D0";
+                            return <div key={i} style={{width:10,height:16,borderRadius:2,background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:v>=4?"#991B1B":"#166534"}}>{v||""}</div>;})}
+                        </div>
+                      </div>;
+                    })}
+                  </div>
+                </div>
+                {/* P検テキスト（ドラフトから） */}
+                {drafts.perio&&(
+                  <div style={{background:"#FFF",borderRadius:12,padding:16,border:"1px solid #E5E7EB"}}>
+                    <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>P検記録</div>
+                    <div style={{fontSize:13,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{drafts.perio.draft_text}</div>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )}
+
+          </div>
         </div>
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
