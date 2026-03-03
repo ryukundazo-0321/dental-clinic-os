@@ -109,19 +109,21 @@ export async function POST(request: NextRequest) {
     if (action === "revoke_by_appointment") {
       const { appointment_id, reason } = body;
       if (!appointment_id) return NextResponse.json({ error: "Missing appointment_id" }, { status: 400 });
-      const { data: confs } = await supabase
+      const { data: confs, error: confError } = await supabase
         .from("karte_confirmations")
-        .select("id, revoked")
+        .select("*")
         .eq("appointment_id", appointment_id)
         .order("created_at", { ascending: false })
         .limit(5);
+      console.log("revoke_by_appointment - appointment_id:", appointment_id, "confs:", JSON.stringify(confs), "error:", confError);
       let confId: string | null = null;
-      if (confs) {
+      if (confs && confs.length > 0) {
+        // Try to find non-revoked, but if all have revoked=null treat as active
         for (const c of confs as { id: string; revoked: boolean | null }[]) {
-          if (!c.revoked) { confId = c.id; break; }
+          if (c.revoked !== true) { confId = c.id; break; }
         }
       }
-      if (!confId) return NextResponse.json({ error: "No active confirmation found" }, { status: 404 });
+      if (!confId) return NextResponse.json({ error: "No active confirmation found", debug: { confs, confError } }, { status: 404 });
       await supabase.from("karte_confirmations").update({ revoked: true, revoked_at: new Date().toISOString(), revoked_reason: reason || null }).eq("id", confId);
       await supabase.from("karte_ai_drafts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("appointment_id", appointment_id).eq("status", "confirmed");
       await supabase.from("medical_records").update({ status: "in_progress", doctor_confirmed: false }).eq("appointment_id", appointment_id);
