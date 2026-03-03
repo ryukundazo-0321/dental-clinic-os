@@ -207,7 +207,6 @@ export async function POST(request: NextRequest) {
         patient_burden: patientBurden,
         burden_ratio: burdenRatio,
         procedures_detail: detail,
-        status: "unpaid",
         payment_status: "unpaid",
       }, { onConflict: "record_id" });
 
