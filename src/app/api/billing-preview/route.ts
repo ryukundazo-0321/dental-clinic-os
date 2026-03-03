@@ -180,6 +180,33 @@ export async function POST(request: NextRequest) {
     // ============================================================
     // 7. procedure_master でキーワードマッチ
     // ============================================================
+    // 同義語マッピング（略語・表記ゆれ対応）
+    const synonyms: Record<string, string[]> = {
+      "sc": ["スケーリング", "sc", "歯石除去", "歯石取り"],
+      "スケーリング": ["sc", "スケーリング", "歯石除去"],
+      "cr充填": ["cr充填", "cr", "充填", "レジン", "コンポジット", "光cr"],
+      "cr": ["cr充填", "充填", "レジン"],
+      "浸麻": ["浸麻", "浸潤麻酔", "麻酔", "キシロカイン"],
+      "p検": ["p検", "歯周検査", "ポケット", "ppd", "bop"],
+      "歯周検査": ["p検", "歯周検査", "ppd"],
+      "フッ素": ["フッ素", "フッ化物", "フッ素塗布", "フッ化物歯面塗布"],
+      "フッ化物歯面塗布": ["フッ素", "フッ化物", "フッ素塗布"],
+      "tbi": ["tbi", "ブラッシング指導", "歯磨き指導"],
+      "処方": ["処方", "ロキソニン", "ロキソプロフェン", "フロモックス", "レバミピド", "カロナール", "アモキシシリン"],
+    };
+
+    // soapAllに同義語展開を追加
+    let expandedSoap = soapAll;
+    for (const [key, syns] of Object.entries(synonyms)) {
+      if (soapAll.includes(key.toLowerCase())) {
+        for (const syn of syns) {
+          if (!expandedSoap.includes(syn.toLowerCase())) {
+            expandedSoap += " " + syn.toLowerCase();
+          }
+        }
+      }
+    }
+
     const matchedProcedures: { proc: ProcedureMaster; score: number }[] = [];
 
     if (procedures) {
@@ -189,7 +216,7 @@ export async function POST(request: NextRequest) {
         // キーワードマッチスコア: マッチしたキーワード数
         let score = 0;
         for (const kw of proc.soap_keywords) {
-          if (soapAll.includes(kw.toLowerCase())) {
+          if (expandedSoap.includes(kw.toLowerCase())) {
             score += 1;
           }
         }
