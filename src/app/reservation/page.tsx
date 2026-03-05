@@ -24,7 +24,6 @@ type Appointment = {
   medical_records: { id: string; status: string; soap_s: string | null }[] | null;
 };
 
-// 治療サマリー情報の型
 type TreatmentSummary = {
   diagnoses: { name: string; tooth_number: string; start_date: string }[];
   lastVisit: {
@@ -58,7 +57,6 @@ const STATUS_TRANSITIONS: Record<string, { next: string; label: string }[]> = {
 
 const STATUS_ORDER = ["reserved", "checked_in", "in_consultation", "completed", "billing_done", "cancelled"];
 
-// FDI歯番号を日本語で表示
 function toothLabel(tooth: string) {
   if (!tooth) return "";
   const num = parseInt(tooth);
@@ -83,7 +81,6 @@ export default function ReservationManagePage() {
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [timeSlotOptions, setTimeSlotOptions] = useState<string[]>([]);
 
-  // 手動追加フォーム
   const [addForm, setAddForm] = useState({
     name_kanji: "", name_kana: "", date_of_birth: "", phone: "",
     patient_number: "", appointment_date: "",
@@ -93,7 +90,6 @@ export default function ReservationManagePage() {
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState("");
 
-  // ★ 再診照合 + 治療サマリー用state
   const [matchedPatient, setMatchedPatient] = useState<{ id: string; name_kanji: string } | null>(null);
   const [treatmentSummary, setTreatmentSummary] = useState<TreatmentSummary | null>(null);
   const [lookupDone, setLookupDone] = useState(false);
@@ -101,7 +97,6 @@ export default function ReservationManagePage() {
   const [visitReason, setVisitReason] = useState<"continuing" | "new_complaint" | "">(""); 
   const [newComplaint, setNewComplaint] = useState("");
 
-  // ===== 初期化 =====
   useEffect(() => {
     async function loadConfig() {
       const c = await getClinicConfig();
@@ -118,7 +113,6 @@ export default function ReservationManagePage() {
     loadConfig();
   }, []);
 
-  // ===== 予約データ取得 =====
   useEffect(() => {
     fetchAppointments();
     const channel = supabase
@@ -143,7 +137,6 @@ export default function ReservationManagePage() {
     setLoading(false);
   }
 
-  // ===== ステータス変更 =====
   async function updateStatus(appointment: Appointment, newStatus: string, cancelType?: string) {
     const updateData: Record<string, unknown> = { status: newStatus };
     if (cancelType) updateData.cancel_type = cancelType;
@@ -177,16 +170,12 @@ export default function ReservationManagePage() {
     if (selectedApt?.id === appointment.id) setSelectedApt((prev) => prev ? { ...prev, status: newStatus } : null);
   }
 
-  // ============================================================
-  // ★ 再診患者照合 + 治療サマリー取得
-  // ============================================================
   async function lookupReturningPatient() {
     setLookupLoading(true);
     setAddError("");
     try {
       let patient: { id: string; name_kanji: string } | null = null;
 
-      // 方法1: 患者ID（P-XXXXX）で検索
       if (addForm.patient_number.trim()) {
         let pNum = addForm.patient_number.trim().toUpperCase();
         if (/^\d+$/.test(pNum)) pNum = `P-${pNum.padStart(5, "0")}`;
@@ -195,7 +184,6 @@ export default function ReservationManagePage() {
           .eq("patient_number", pNum).single();
         patient = data;
       }
-      // 方法2: 氏名 + 生年月日 + 電話番号で検索
       if (!patient && addForm.name_kanji && addForm.date_of_birth && addForm.phone) {
         const { data } = await supabase.from("patients").select("id, name_kanji")
           .eq("name_kanji", addForm.name_kanji).eq("date_of_birth", addForm.date_of_birth).eq("phone", addForm.phone).single();
@@ -208,7 +196,6 @@ export default function ReservationManagePage() {
         return;
       }
 
-      // フォームに患者名を自動入力
       if (addForm.patient_number.trim() && !addForm.name_kanji) {
         const { data: pFull } = await supabase.from("patients").select("name_kanji, name_kana, date_of_birth, phone").eq("id", patient.id).single();
         if (pFull) {
@@ -217,8 +204,6 @@ export default function ReservationManagePage() {
       }
 
       setMatchedPatient(patient);
-
-      // 治療サマリー取得
       const summary = await fetchTreatmentSummary(patient.id);
       setTreatmentSummary(summary);
       setLookupDone(true);
@@ -229,7 +214,6 @@ export default function ReservationManagePage() {
   }
 
   async function fetchTreatmentSummary(patientId: string): Promise<TreatmentSummary> {
-    // (a) 現在の傷病名（outcome が null = 治療中）
     const { data: diagData } = await supabase
       .from("patient_diagnoses")
       .select("diagnosis_name, tooth_number, start_date, outcome")
@@ -247,7 +231,6 @@ export default function ReservationManagePage() {
       new Set(diagnoses.map((d: { tooth_number: string }) => d.tooth_number).filter(Boolean))
     );
 
-    // (b) 前回の来院情報
     const { data: lastApt } = await supabase
       .from("appointments")
       .select("scheduled_at, medical_records ( soap_a, soap_p, procedures_text )")
@@ -264,20 +247,16 @@ export default function ReservationManagePage() {
       const mr = (lastApt.medical_records as unknown as { soap_a: string; soap_p: string; procedures_text: string }[])?.[0];
       const soapP = mr?.soap_p || "";
       const soapA = mr?.soap_a || "";
-
       const nextMatch = soapP.match(/次回[：:\s]*(.+)/);
       nextPlan = nextMatch ? nextMatch[1].trim() : "";
-
       const proceduresPart = nextMatch ? soapP.substring(0, nextMatch.index) : soapP;
       const procedures = proceduresPart
         .split(/[・、,\s]+/)
         .map((s: string) => s.trim())
         .filter((s: string) => s && s !== "次回" && s.length < 20);
-
       lastVisit = { date: lastApt.scheduled_at, soap_p: soapP, soap_a: soapA, procedures };
     }
 
-    // (c) 治療計画書を取得
     let treatmentPlanSummary = "";
     const { data: tp } = await supabase
       .from("treatment_plans")
@@ -294,7 +273,6 @@ export default function ReservationManagePage() {
     return { diagnoses, lastVisit, nextPlan, activeTeeth, treatmentPlanSummary };
   }
 
-  // ===== 手動予約追加 =====
   async function handleAddAppointment() {
     setAddLoading(true);
     setAddError("");
@@ -321,23 +299,16 @@ export default function ReservationManagePage() {
       const bookDate = addForm.appointment_date || selectedDate;
       const scheduledAt = `${bookDate}T${addForm.time}:00`;
 
-      // ダブルブッキングチェック（同一時間帯の予約数）
       const { data: existingApts } = await supabase.from("appointments")
-        .select("id")
-        .eq("scheduled_at", scheduledAt)
-        .neq("status", "cancelled");
+        .select("id").eq("scheduled_at", scheduledAt).neq("status", "cancelled");
       if (existingApts && config && existingApts.length >= config.maxPatientsPerSlot) {
         setAddError(`この時間帯（${addForm.time}）は既に満枠です。別の時間を選択してください。`);
         setAddLoading(false);
         return;
       }
-      // 同一担当医の重複チェック
       if (addForm.doctor_id) {
         const { data: doctorApts } = await supabase.from("appointments")
-          .select("id")
-          .eq("scheduled_at", scheduledAt)
-          .eq("doctor_id", addForm.doctor_id)
-          .neq("status", "cancelled");
+          .select("id").eq("scheduled_at", scheduledAt).eq("doctor_id", addForm.doctor_id).neq("status", "cancelled");
         if (doctorApts && doctorApts.length > 0) {
           const docName = doctors.find(d => d.id === addForm.doctor_id)?.name || "選択した担当医";
           setAddError(`${docName}はこの時間帯に既に予約があります。`);
@@ -346,7 +317,6 @@ export default function ReservationManagePage() {
         }
       }
 
-      // 来院目的をnotes に保存
       let notes = "";
       if (addForm.patient_type === "returning" && visitReason === "continuing" && treatmentSummary?.nextPlan) {
         notes = `【継続治療】${treatmentSummary.nextPlan}`;
@@ -362,7 +332,6 @@ export default function ReservationManagePage() {
       }).select("id").single();
       if (aptErr || !appointment) { setAddError("予約登録に失敗しました"); setAddLoading(false); return; }
 
-      // medical_record作成
       const mrData: Record<string, unknown> = { appointment_id: appointment.id, patient_id: patientId, status: "draft" };
       if (addForm.patient_type === "returning" && visitReason === "new_complaint" && newComplaint) {
         mrData.soap_s = `【主訴】${newComplaint}`;
@@ -423,7 +392,6 @@ export default function ReservationManagePage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-4">
-        {/* 日付選択 */}
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split("T")[0]); }}
             className="bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-50 text-sm">◀</button>
@@ -439,7 +407,6 @@ export default function ReservationManagePage() {
           <span className="text-sm text-gray-400 ml-auto">全 {appointments.length} 件</span>
         </div>
 
-        {/* ステータスフロー */}
         <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4 overflow-x-auto">
           <div className="flex items-center gap-1 min-w-max justify-center">
             {STATUS_ORDER.filter((s) => s !== "cancelled").map((key, idx, arr) => (
@@ -454,7 +421,6 @@ export default function ReservationManagePage() {
           </div>
         </div>
 
-        {/* フィルター */}
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           <button onClick={() => setFilterStatus("all")}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${filterStatus === "all" ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-500"}`}>
@@ -468,7 +434,6 @@ export default function ReservationManagePage() {
           ))}
         </div>
 
-        {/* メイン */}
         <div className="flex gap-4">
           <div className="flex-1">
             {loading ? (
@@ -549,14 +514,12 @@ export default function ReservationManagePage() {
                     <div><p className="text-xs text-gray-400 mb-0.5">保険種別</p><p className="text-sm text-gray-900">{selectedApt.patients?.insurance_type || "-"}</p></div>
                     <div><p className="text-xs text-gray-400 mb-0.5">負担割合</p><p className="text-sm text-gray-900">{selectedApt.patients?.burden_ratio ? `${selectedApt.patients.burden_ratio * 10}割` : "-"}</p></div>
                   </div>
-                  {/* 来院目的 */}
                   {selectedApt.notes && (
                     <div className="border-t border-gray-100 pt-3">
                       <p className="text-xs text-gray-400 mb-0.5">来院目的</p>
                       <p className="text-sm font-bold text-purple-700">{selectedApt.notes}</p>
                     </div>
                   )}
-                  {/* 担当医 */}
                   {selectedApt.doctor_id && doctors.find((d) => d.id === selectedApt.doctor_id) && (
                     <div className="border-t border-gray-100 pt-3">
                       <p className="text-xs text-gray-400 mb-0.5">担当医</p>
@@ -565,7 +528,6 @@ export default function ReservationManagePage() {
                       </p>
                     </div>
                   )}
-                  {/* カルテ */}
                   <div className="border-t border-gray-100 pt-3">
                     <p className="text-xs text-gray-400 mb-1.5">カルテ</p>
                     {selectedApt.medical_records?.length ? (
@@ -578,14 +540,51 @@ export default function ReservationManagePage() {
                       </div>
                     ) : <p className="text-sm text-gray-400">カルテ未作成</p>}
                   </div>
-                  {/* ステータス */}
+
+                  {/* ===== ★ 診察ボタン群 ===== */}
+                  <div className="border-t border-gray-100 pt-3 space-y-2">
+                    <Link
+                      href={`/consultation/hub?appointment_id=${selectedApt.id}`}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-sky-600 text-white rounded-lg font-bold text-sm hover:bg-sky-700 transition-colors"
+                    >
+                      📋 診察画面を開く →
+                    </Link>
+                    <Link
+                      href={`/karte-agent/unit?appointment_id=${selectedApt.id}`}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-900 text-white rounded-lg font-bold text-sm hover:bg-gray-700 transition-colors"
+                    >
+                      🤖 カルテエージェントで開く →
+                    </Link>
+                    <Link
+                      href={`/karte-agent/consultation?appointment_id=${selectedApt.id}`}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 text-white rounded-lg font-bold text-sm hover:bg-emerald-700 transition-colors"
+                    >
+                      🦷 新診察ページで開く →
+                    </Link>
+                    {["in_consultation", "completed", "billing_done"].includes(selectedApt.status) && (
+                      <button
+                        onClick={() => updateStatus(selectedApt, "completed")}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-bold text-sm hover:bg-purple-100 transition-colors"
+                      >
+                        ✅ 診察完了
+                      </button>
+                    )}
+                    {selectedApt.medical_records?.length ? (
+                      <Link
+                        href={`/chart?record_id=${selectedApt.medical_records[0].id}`}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-lg font-bold text-sm hover:bg-gray-100 transition-colors"
+                      >
+                        📋 カルテを開く
+                      </Link>
+                    ) : null}
+                  </div>
+
                   <div className="border-t border-gray-100 pt-3">
                     <p className="text-xs text-gray-400 mb-1.5">現在のステータス</p>
                     <span className={`inline-flex items-center gap-1 text-sm font-bold px-3 py-1.5 rounded-full ${STATUS_CONFIG[selectedApt.status]?.bg} ${STATUS_CONFIG[selectedApt.status]?.color}`}>
                       {STATUS_CONFIG[selectedApt.status]?.icon} {STATUS_CONFIG[selectedApt.status]?.label}
                     </span>
                   </div>
-                  {/* ステータス変更 */}
                   {STATUS_TRANSITIONS[selectedApt.status]?.length > 0 && (
                     <div className="border-t border-gray-100 pt-3">
                       <p className="text-xs text-gray-400 mb-2">次のアクション</p>
@@ -609,9 +608,7 @@ export default function ReservationManagePage() {
         </div>
       </main>
 
-      {/* ============================================================ */}
-      {/* ===== 手動追加モーダル（★治療サマリー統合版）===== */}
-      {/* ============================================================ */}
+      {/* 手動追加モーダル */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -620,7 +617,6 @@ export default function ReservationManagePage() {
               <button onClick={resetAddModal} className="text-gray-400 hover:text-gray-600">✕</button>
             </div>
             <div className="p-5 space-y-4">
-              {/* 初診/再診 切替 */}
               <div className="flex gap-2">
                 <button onClick={() => { setAddForm({ ...addForm, patient_type: "new" }); setLookupDone(false); setMatchedPatient(null); setTreatmentSummary(null); setVisitReason(""); }}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-bold ${addForm.patient_type === "new" ? "bg-sky-600 text-white" : "bg-gray-100 text-gray-500"}`}>🆕 初診</button>
@@ -634,7 +630,6 @@ export default function ReservationManagePage() {
                 </div>
               )}
 
-              {/* ★ 再診: 患者ID入力（最優先） */}
               {addForm.patient_type === "returning" && !lookupDone && (
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">患者ID（診察券番号）</label>
@@ -643,7 +638,6 @@ export default function ReservationManagePage() {
                 </div>
               )}
 
-              {/* 氏名 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">氏名（漢字）{addForm.patient_type === "new" && <span className="text-red-500">*</span>}{addForm.patient_type === "returning" && <span className="text-xs text-gray-400 ml-1">（ID入力時は不要）</span>}</label>
                 <input type="text" value={addForm.name_kanji} onChange={(e) => { setAddForm({ ...addForm, name_kanji: e.target.value }); if (addForm.patient_type === "returning") { setLookupDone(false); setMatchedPatient(null); setTreatmentSummary(null); } }}
@@ -667,7 +661,6 @@ export default function ReservationManagePage() {
                   placeholder="09012345678" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
               </div>
 
-              {/* ★ 再診: 照合ボタン */}
               {addForm.patient_type === "returning" && !lookupDone && (
                 <button onClick={lookupReturningPatient}
                   disabled={lookupLoading || (!addForm.patient_number.trim() && (!addForm.name_kanji || !addForm.date_of_birth || !addForm.phone))}
@@ -676,10 +669,8 @@ export default function ReservationManagePage() {
                 </button>
               )}
 
-              {/* ★ 照合成功 → 治療サマリーカード */}
               {addForm.patient_type === "returning" && lookupDone && treatmentSummary && (
                 <div className="space-y-3">
-                  {/* 照合結果 */}
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">
                     <span className="text-lg">✅</span>
                     <div>
@@ -687,14 +678,11 @@ export default function ReservationManagePage() {
                       <p className="text-xs text-green-600">患者情報が一致しました</p>
                     </div>
                   </div>
-
-                  {/* 治療サマリーカード */}
                   <div className="border border-gray-200 rounded-xl overflow-hidden">
                     <div className="bg-gray-50 px-3 py-2 border-b border-gray-200">
                       <p className="text-xs font-bold text-gray-700">📋 治療状況</p>
                     </div>
                     <div className="p-3 space-y-2.5">
-                      {/* 治療中の傷病名 */}
                       {treatmentSummary.diagnoses.length > 0 ? (
                         <div>
                           <p className="text-[10px] font-bold text-gray-400 mb-1">治療中</p>
@@ -717,8 +705,6 @@ export default function ReservationManagePage() {
                       ) : (
                         <p className="text-xs text-gray-400">治療中の傷病名なし</p>
                       )}
-
-                      {/* 前回来院 */}
                       {treatmentSummary.lastVisit && (
                         <div className="border-t border-gray-100 pt-2">
                           <p className="text-[10px] font-bold text-gray-400 mb-1">前回: {formatDateJP(treatmentSummary.lastVisit.date)}</p>
@@ -731,16 +717,12 @@ export default function ReservationManagePage() {
                           )}
                         </div>
                       )}
-
-                      {/* 次回予定 */}
                       {treatmentSummary.nextPlan && (
                         <div className="border-t border-gray-100 pt-2">
                           <p className="text-[10px] font-bold text-gray-400 mb-1">次回予定</p>
                           <p className="text-xs font-bold text-purple-700">{treatmentSummary.nextPlan}</p>
                         </div>
                       )}
-
-                      {/* 治療計画書 */}
                       {treatmentSummary.treatmentPlanSummary && (
                         <div className="border-t border-gray-100 pt-2">
                           <p className="text-[10px] font-bold text-gray-400 mb-1">📋 治療計画</p>
@@ -749,8 +731,6 @@ export default function ReservationManagePage() {
                       )}
                     </div>
                   </div>
-
-                  {/* 来院目的選択 */}
                   <div>
                     <p className="text-xs font-bold text-gray-700 mb-1.5">来院目的</p>
                     <div className="flex gap-2">
@@ -764,8 +744,6 @@ export default function ReservationManagePage() {
                       </button>
                     </div>
                   </div>
-
-                  {/* 新しい主訴の内容入力 */}
                   {visitReason === "new_complaint" && (
                     <div>
                       <label className="block text-xs font-bold text-gray-700 mb-1">主訴の内容</label>
@@ -777,7 +755,6 @@ export default function ReservationManagePage() {
                 </div>
               )}
 
-              {/* 予約日 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">予約日<span className="text-red-500">*</span></label>
                 <input type="date" value={addForm.appointment_date || selectedDate}
@@ -785,17 +762,13 @@ export default function ReservationManagePage() {
                   min={new Date().toISOString().split("T")[0]}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
               </div>
-
-              {/* 予約時間 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">予約時間<span className="text-red-500">*</span></label>
                 <select value={addForm.time} onChange={(e) => setAddForm({ ...addForm, time: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400 bg-white">
                   {(() => {
-                    // config由来のスロット + 15分刻みの追加スロットを生成
                     const allSlots = new Set<string>();
                     timeSlotOptions.forEach(t => allSlots.add(t));
-                    // 15分刻みで 09:00〜20:00 をカバー
                     for (let h = 9; h <= 20; h++) {
                       for (const m of [0, 15, 30, 45]) {
                         if (h === 20 && m > 0) break;
@@ -806,8 +779,6 @@ export default function ReservationManagePage() {
                   })()}
                 </select>
               </div>
-
-              {/* 担当医 */}
               {doctors.length > 0 && (
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">担当医</label>
@@ -818,8 +789,6 @@ export default function ReservationManagePage() {
                   </select>
                 </div>
               )}
-
-              {/* 初診のみ: 保険情報 */}
               {addForm.patient_type === "new" && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -838,9 +807,7 @@ export default function ReservationManagePage() {
                   </div>
                 </div>
               )}
-
               {addError && <div className="bg-red-50 border border-red-200 rounded-lg p-2.5"><p className="text-red-600 text-sm">{addError}</p></div>}
-
               <div className="flex gap-3 pt-2">
                 <button onClick={resetAddModal} className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-lg font-bold">キャンセル</button>
                 <button onClick={handleAddAppointment} disabled={addLoading || (addForm.patient_type === "returning" && !lookupDone)}
@@ -853,7 +820,7 @@ export default function ReservationManagePage() {
         </div>
       )}
 
-      {/* ===== キャンセル分類モーダル ===== */}
+      {/* キャンセル分類モーダル */}
       {showCancelModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
@@ -884,7 +851,7 @@ export default function ReservationManagePage() {
         </div>
       )}
 
-      {/* ===== 日計表モーダル ===== */}
+      {/* 日計表モーダル */}
       {showDailySummary && (() => {
         const dayApts = appointments;
         const total = dayApts.length;
@@ -908,23 +875,18 @@ export default function ReservationManagePage() {
                 <button onClick={() => setShowDailySummary(false)} className="text-gray-400 hover:text-white text-lg">✕</button>
               </div>
               <div className="p-5 space-y-4">
-                {/* 集計カード */}
                 <div className="grid grid-cols-4 gap-2">
                   <div className="bg-sky-50 rounded-xl p-3 text-center border border-sky-200"><p className="text-2xl font-bold text-sky-700">{total}</p><p className="text-[10px] text-sky-500 font-bold">総予約</p></div>
                   <div className="bg-green-50 rounded-xl p-3 text-center border border-green-200"><p className="text-2xl font-bold text-green-700">{completed}</p><p className="text-[10px] text-green-500 font-bold">診療完了</p></div>
                   <div className="bg-orange-50 rounded-xl p-3 text-center border border-orange-200"><p className="text-2xl font-bold text-orange-700">{inProgress}</p><p className="text-[10px] text-orange-500 font-bold">進行中</p></div>
                   <div className="bg-red-50 rounded-xl p-3 text-center border border-red-200"><p className="text-2xl font-bold text-red-700">{cancelled}</p><p className="text-[10px] text-red-500 font-bold">キャンセル</p></div>
                 </div>
-
-                {/* 内訳 */}
                 <div className="bg-gray-50 rounded-xl p-4 space-y-2">
                   <h4 className="text-xs font-bold text-gray-700 mb-2">📋 内訳</h4>
                   <div className="flex justify-between text-xs"><span className="text-gray-500">新患</span><span className="font-bold text-gray-800">{newPatients}人</span></div>
                   <div className="flex justify-between text-xs"><span className="text-gray-500">再診</span><span className="font-bold text-gray-800">{returning}人</span></div>
                   <div className="flex justify-between text-xs"><span className="text-gray-500">稼働率</span><span className="font-bold text-gray-800">{total > 0 ? 100 - cancelRate : 0}%</span></div>
                 </div>
-
-                {/* キャンセル内訳 */}
                 {cancelled > 0 && (
                   <div className="bg-red-50 rounded-xl p-4 space-y-2 border border-red-200">
                     <h4 className="text-xs font-bold text-red-700 mb-2">❌ キャンセル内訳（{cancelRate}%）</h4>
@@ -934,8 +896,6 @@ export default function ReservationManagePage() {
                     {cancelUnknown > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">❓ 未分類</span><span className="font-bold text-gray-500">{cancelUnknown}件</span></div>}
                   </div>
                 )}
-
-                {/* キャンセル患者リスト */}
                 {cancelled > 0 && (
                   <div>
                     <h4 className="text-xs font-bold text-gray-500 mb-2">キャンセル者一覧</h4>
@@ -957,7 +917,6 @@ export default function ReservationManagePage() {
                     </div>
                   </div>
                 )}
-
                 <button onClick={() => setShowDailySummary(false)} className="w-full bg-gray-800 text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-700">閉じる</button>
               </div>
             </div>
