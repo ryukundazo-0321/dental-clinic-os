@@ -1,215 +1,155 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const maxDuration = 180;
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-const CLASSIFY_AND_DRAFT_PROMPT_TMPL = `あなたは日本の歯科診療所で10年以上の経験を持つ電子カルテAIアシスタントです。
-
-## あなたの仕事
-歯科診察の文字起こしテキストを受け取り、5つのカルテフィールドに振り分けて整形します。
-
-## Step 1: テキストの理解と補正
-音声認識の誤変換を補正してください：
-- 歯番号: 「6版」→6番、「市場にばん」→4番2番、「碁盤」→5番
-- 処置: 「CR充電」→CR充填、「FMS」→FMC、「印傷」→印象、「テク」→TEK
-- 用語: 「浸魔」→浸麻、「罰随」→抜髄、「感根地」→感根治、「コン中」→根充
-- 薬名: 「録そにん」→ロキソニン、「フロモクス」→フロモックス
-
-## Step 2: 5フィールドへの振り分けと整形
-
-### 歯番号（FDI表記）
-右上: 11-18, 左上: 21-28, 右下: 41-48, 左下: 31-38
-「右下6番」→#46, 「左上3番」→#23
-
-### 各フィールド
-
-**s（主訴・S欄）**: 患者の訴え・症状を簡潔に。
-例: "右下臼歯部の疼痛（冷水痛+）。2週間前から発症。"
-
-**tooth（歯式）**: 歯番号とステータスの一覧。
-例: "#46 C3（治療中）/ #47 C2"
-
-**perio（P検）**: PPD値、BOP、歯周検査所見。
-\${perioPromptExtra}
-例: "#46 PPD 4,5,4 / 3,4,3 BOP(+)"
-
-**dh（DH記録・O欄）**: 衛生士の処置、所見、Dr申し送り。Drの処置でも衛生士関連（SC、PMTC、TBI、フッ素塗布、P検サマリ等）はここに記載。
-例: "SC全顎実施 / TBI実施 / フッ化物歯面塗布 / 申し送り: #46 PPD4-5mm BOP(+)"
-※ 衛生士の処置が音声に含まれない場合は空文字にする
-
-**dr（Dr診察・A/P欄）**: 【A】に歯番号+確定診断名、【P】に処置内容・処方・次回予定。
-保険請求に必要な傷病名を必ず記載。
-例:
-【A】#46 急性歯髄炎(Pul)
-【P】本日: #46 浸麻・抜髄 / 処方: ロキソプロフェン60mg 3T/5日 / 次回: 根充
-
-## 重要
-- テキストに含まれない情報は追加しない
-- 該当する内容がないフィールドは空文字にする
-- 歯番号が明示されている場合はそのまま使う
-
-## 出力形式
-JSON形式のみ。余計な説明は不要。
-{
-  "s": "...",
-  "tooth": "...",
-  "perio": "...",
-  "dh": "...",
-  "dr": "..."
-}`;
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "OpenAI API key not set" }, { status: 500 });
+    const { transcript, medical_record_id, field_key, patient_id } = await req.json();
 
-    const { appointment_id, transcript, perio_points, perio_order } = await request.json();
-    if (!appointment_id || !transcript) {
-      return NextResponse.json({ error: "appointment_id and transcript required" }, { status: 400 });
+    if (!transcript) {
+      return NextResponse.json({ error: "transcript is required" }, { status: 400 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    // 傷病名マスタを取得（音声からの傷病名検出に使用）
+    const { data: diagnosisMaster } = await supabase
+      .from("diagnosis_master")
+      .select("code, name, category")
+      .order("category", { ascending: true });
 
-    // Step 1: Save full transcript as a chunk
-    await supabase.from("karte_transcript_chunks").insert({
-      appointment_id,
-      chunk_index: 0,
-      raw_text: transcript,
-      corrected_text: transcript,
-      speaker_role: "mixed",
-      classified_field: null,
-    });
+    const diagnosisList = (diagnosisMaster || [])
+      .map((d: { code: string; name: string; category: string }) => `${d.code}:${d.name}(${d.category})`)
+      .join("\n");
 
-    // Build perio-specific prompt
-    let perioPromptExtra = "";
-    if (perio_points === 1) {
-      perioPromptExtra = "P検は1点式（各歯の最深部の値のみ）で記録されています。数値が1つずつ読まれている場合、1歯ごとの最深部値として解釈してください。";
-    } else if (perio_points === 4) {
-      perioPromptExtra = "P検は4点式（頬側近心、頬側遠心、舌側近心、舌側遠心）で記録されています。数値が4つずつ読まれている場合、4点として解釈してください。";
-    } else {
-      perioPromptExtra = "P検は6点式（MB,B,DB,ML,L,DL）で記録されています。数値が6つずつ読まれている場合、6点として解釈してください。";
+    const systemPrompt = `あなたは歯科クリニックの音声記録を解析するAIです。
+スタッフの発言を解析し、以下のJSON形式で出力してください。
+
+## 出力形式（必ずこのJSON形式のみ出力）
+{
+  "s": "患者の主訴・症状（SOAPのS）",
+  "tooth": "歯式・歯の状態に関する所見",
+  "perio": "歯周組織の所見（ポケット深さ等）",
+  "dh": "歯科衛生士の処置記録",
+  "dr": "ドクターの処置・診断記録",
+  "detected_diagnoses": [
+    {
+      "tooth": "歯番（例: 46、16、全顎等）",
+      "code": "傷病名コード（diagnosis_masterより）",
+      "name": "傷病名（diagnosis_masterより）",
+      "confidence": 0.0〜1.0の信頼度,
+      "reason": "検出理由（音声中の根拠となった発言）"
     }
-    if (perio_order === "konoji") {
-      perioPromptExtra += " 検査順序はコの字型（右上→左上→左下→右下）です。歯番号が省略されている場合、この順序で次の歯と解釈してください。";
-    } else if (perio_order === "z") {
-      perioPromptExtra += " 検査順序はZ型（右上→左上→右下→左下）です。";
-    } else if (perio_order === "s") {
-      perioPromptExtra += " 検査順序はS型です。";
-    } else if (perio_order === "buccal-lingual") {
-      perioPromptExtra += " 検査順序は頬側→舌側（1歯ずつ頬側と舌側を交互に記録）です。";
-    }
+  ]
+}
 
-    // Step 2: GPT-4o classification + drafting in one call
-    const gptRes = await fetch("https://api.openai.com/v1/chat/completions", {
+## 傷病名検出ルール
+- 音声から歯番と症状を組み合わせて傷病名を推定する
+- 「虫歯」「むし歯」「カリエス」→ C1/C2/C3/C4のいずれか（深さの言及で判断）
+- 「歯髄炎」「神経が死んでいる」「神経を取る」→ Pul（慢性/急性）
+- 「根尖病巣」「膿が出ている」「根っこの炎症」→ Per/Perico
+- 「歯周病」「ポケットが深い」「グラグラ」→ P1/P2/P3
+- 「歯肉炎」「歯ぐきが腫れている」→ G
+- 「抜歯」「抜く」→ 根拠となる病名を推定（C4/Per等）
+- 「詰め物が取れた」「クラウンが外れた」→ 脱離
+- 信頼度0.7未満の場合でも出力（フロントでフィルタリング）
+- 歯番が不明な場合は tooth を "" にする
+- detected_diagnosesは最大5件まで
+
+## 傷病名マスタ（参照用）
+${diagnosisList.slice(0, 3000)}
+...（他多数）
+
+## 注意事項
+- 余分な説明文は不要、JSONのみ出力
+- 傷病名が検出できない場合はdetected_diagnosesを空配列にする
+- 歯番は「右上6番」→「16」、「左下4番」→「34」のように歯科用番号に変換`;
+
+    const userPrompt = `以下の音声テキストを解析してください：
+
+${transcript}`;
+
+    // OpenAI APIを呼び出し
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
       body: JSON.stringify({
         model: "gpt-4o",
         messages: [
-          { role: "system", content: CLASSIFY_AND_DRAFT_PROMPT_TMPL.replace("${perioPromptExtra}", perioPromptExtra) },
-          { role: "user", content: transcript },
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
         ],
-        temperature: 0,
-        max_tokens: 3000,
+        temperature: 0.3,
         response_format: { type: "json_object" },
       }),
     });
 
-    if (!gptRes.ok) {
-      const errText = await gptRes.text();
-      console.error("GPT error:", gptRes.status, errText);
-      return NextResponse.json({ error: `GPT error: ${gptRes.status}` }, { status: 500 });
+    if (!openaiRes.ok) {
+      const err = await openaiRes.text();
+      console.error("OpenAI error:", err);
+      return NextResponse.json({ error: "OpenAI API error" }, { status: 500 });
     }
 
-    const gptData = await gptRes.json();
-    const content = gptData.choices?.[0]?.message?.content;
-    if (!content) {
-      return NextResponse.json({ error: "Empty GPT response" }, { status: 500 });
-    }
+    const openaiData = await openaiRes.json();
+    const rawContent = openaiData.choices[0]?.message?.content || "{}";
 
-    let parsed: Record<string, string>;
+    let parsed: {
+      s?: string;
+      tooth?: string;
+      perio?: string;
+      dh?: string;
+      dr?: string;
+      detected_diagnoses?: Array<{
+        tooth: string;
+        code: string;
+        name: string;
+        confidence: number;
+        reason: string;
+      }>;
+    };
     try {
-      parsed = JSON.parse(content);
-    } catch (e) {
-      console.error("JSON parse error:", e, content);
-      return NextResponse.json({ error: "Failed to parse GPT response" }, { status: 500 });
+      parsed = JSON.parse(rawContent);
+    } catch {
+      parsed = { s: rawContent, detected_diagnoses: [] };
     }
 
-    // Step 3: 既存ドラフトを取得
-    const { data: existingDrafts } = await supabase
-      .from("karte_ai_drafts")
-      .select("field_key, draft_text, status")
-      .eq("appointment_id", appointment_id);
-
-    const existingMap = new Map<string, { text: string; status: string }>();
-    if (existingDrafts) {
-      for (const d of existingDrafts) {
-        existingMap.set(d.field_key, { text: d.draft_text || "", status: d.status || "draft" });
-      }
+    // detected_diagnosesを信頼度でソート
+    if (parsed.detected_diagnoses) {
+      parsed.detected_diagnoses.sort((a, b) => b.confidence - a.confidence);
     }
 
-    // Step 4: Upsert drafts for each field（既存内容に追記していく）
-    const fields = ["s", "tooth", "perio", "dh", "dr"];
-    let fieldsGenerated = 0;
-
-    for (const field of fields) {
-      const newText = parsed[field]?.trim();
-      // DH記録が空の場合でもドラフトを生成（確定フローに必要）
-      if (!newText && field !== "dh") continue;
-      const draftText = newText || (field === "dh" ? "（DH記録なし — Dr処置のみ）" : "");
-
-      const existing = existingMap.get(field);
-
-      let finalText = draftText;
-      let finalStatus = "draft";
-
-      if (existing && existing.text) {
-        if (existing.text === "（DH記録なし — Dr処置のみ）") {
-          // DHプレースホルダーは上書き
-          finalText = draftText;
-        } else if (draftText === existing.text) {
-          // 完全一致 → 何もしない
-          continue;
-        } else {
-          // 新しい情報がある → 既存に追記（常に安全に追記）
-          finalText = existing.text + "\n" + draftText;
+    // medical_record_idがある場合はドラフト保存
+    if (medical_record_id && field_key) {
+      const fieldsToSave = ["s", "tooth", "perio", "dh", "dr"];
+      for (const key of fieldsToSave) {
+        const value = parsed[key as keyof typeof parsed];
+        if (value && typeof value === "string" && value.trim()) {
+          await supabase.from("karte_ai_drafts").upsert(
+            {
+              medical_record_id,
+              field_key: key,
+              content: value,
+              status: "draft",
+              source: "voice",
+            },
+            { onConflict: "medical_record_id,field_key" }
+          );
         }
-        // ステータスは維持
-        if (existing.status === "approved" || existing.status === "confirmed") {
-          finalStatus = existing.status;
-        }
-      }
-
-      const { error } = await supabase
-        .from("karte_ai_drafts")
-        .upsert(
-          {
-            appointment_id,
-            field_key: field,
-            draft_text: finalText,
-            status: finalStatus,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "appointment_id,field_key" }
-        );
-
-      if (error) {
-        console.error(`Draft upsert error for ${field}:`, error);
-      } else {
-        fieldsGenerated++;
       }
     }
 
     return NextResponse.json({
       success: true,
-      fields_generated: fieldsGenerated,
-      drafts: parsed,
+      classified: parsed,
+      detected_diagnoses: parsed.detected_diagnoses || [],
     });
-  } catch (e) {
-    console.error("classify-and-draft error:", e);
+  } catch (error) {
+    console.error("classify-and-draft error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
