@@ -33,7 +33,7 @@ const CLASSIFY_AND_DRAFT_PROMPT_TMPL = `あなたは日本の歯科診療所で1
 例: "#46 C3（治療中）/ #47 C2"
 
 **perio（P検）**: PPD値、BOP、歯周検査所見。
-${perioPromptExtra}
+\${perioPromptExtra}
 例: "#46 PPD 4,5,4 / 3,4,3 BOP(+)"
 
 **dh（DH記録・O欄）**: 衛生士の処置、所見、Dr申し送り。Drの処置でも衛生士関連（SC、PMTC、TBI、フッ素塗布、P検サマリ等）はここに記載。
