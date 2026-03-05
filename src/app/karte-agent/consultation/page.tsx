@@ -1,189 +1,1541 @@
 "use client";
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { supabase } from "@/lib/supabase";
-import { useSearchParams } from "next/navigation";
 
-// 歯式記号
-const S = (n: string) => {
-  const q = Math.floor(parseInt(n) / 10), p = parseInt(n) % 10;
-  return ({ 1: "\u2510", 2: "\u250C", 3: "\u2514", 4: "\u2518" } as Record<number,string>)[q] + p;
-};
-const TU = ["18","17","16","15","14","13","12","11","21","22","23","24","25","26","27","28"];
-const TL = ["48","47","46","45","44","43","42","41","31","32","33","34","35","36","37","38"];
-const STATUSES = ["健全","C1","C2","C3","C4","CR","In","Cr","欠損","Br","残根","治療中","FMC","TEK"];
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
-type Patient = { id:string; name:string; age:number; insurance:string; burden:number };
-type Diag = { tooth:string; code:string; name:string; short:string };
-type Proc = { tooth:string; diagnosis_short:string; procedure_name:string; fee_items:{code:string;name:string;points:number;count:number}[]; points:number };
-type Banner = { text:string; icon:string; choices:{label:string;primary?:boolean;fn:()=>void}[] };
-type Pred = { code:string; name:string; short:string; probability:number };
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-const CL = {bg:"#F5F6F8",sf:"#FFF",pri:"#1A56DB",priL:"#E8EFFC",acc:"#059669",accL:"#ECFDF5",wrn:"#D97706",wrnL:"#FFFBEB",txt:"#111827",sub:"#6B7280",bdr:"#E5E7EB",dk:"#1E293B",red:"#DC2626",redL:"#FEF2F2",ai:"#7C3AED",aiL:"#F5F3FF"};
+// ==============================
+// 型定義
+// ==============================
+interface Patient {
+  id: string;
+  name: string;
+  birth_date: string;
+  insurance_type: string;
+  current_tooth_chart: Record<string, ToothStatus> | null;
+}
 
-function Content() {
-  const sp = useSearchParams();
-  const aptId = sp.get("appointment_id") || "";
-  const [patient, setPatient] = useState<Patient|null>(null);
-  const [isNew, setIsNew] = useState(true);
-  const [prevChart, setPrevChart] = useState<Record<string,string>>({});
-  const [chart, setChart] = useState<Record<string,string>>({});
-  const [diags, setDiags] = useState<Diag[]>([]);
-  const [procs, setProcs] = useState<Proc[]>([]);
-  const [preds, setPreds] = useState<Pred[]>([]);
-  const [sS, setSS] = useState(""); const [sO, setSO] = useState(""); const [sA, setSA] = useState(""); const [sP, setSP] = useState("");
-  const [popup, setPopup] = useState<string|null>(null);
-  const [sel, setSel] = useState<string|null>(null);
-  const [banner, setBanner] = useState<Banner|null>(null);
-  const [dSearch, setDSearch] = useState("");
-  const [dMaster, setDMaster] = useState<{code:string;name:string;category:string}[]>([]);
-  const [rec, setRec] = useState(false);
-  const [recT, setRecT] = useState(0);
-  const [stat, setStat] = useState("");
-  const [total, setTotal] = useState(0);
-  const [past, setPast] = useState<{date:string;entries:string[]}[]>([]);
-  const [pastO, setPastO] = useState(false);
-  const [pp, setPP] = useState<1|4|6>(6);
-  const [rid, setRid] = useState<string|null>(null);
-  const mr = useRef<MediaRecorder|null>(null);
-  const ac = useRef<Blob[]>([]);
-  const tr = useRef<ReturnType<typeof setInterval>|null>(null);
+interface Appointment {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  appointment_date: string;
+  visit_type: string;
+  chief_complaint: string;
+  status: string;
+}
 
-  // Load data
+interface MedicalRecord {
+  id: string;
+  appointment_id: string;
+  patient_id: string;
+  soap_s: string;
+  soap_o: string;
+  soap_a: string;
+  soap_p: string;
+  tooth_chart: Record<string, ToothStatus> | null;
+  previous_tooth_chart: Record<string, ToothStatus> | null;
+  structured_procedures: StructuredProcedure[];
+  predicted_diagnoses: PredictedDiagnosis[];
+  status: string;
+}
+
+interface ToothStatus {
+  status: string; // healthy/caries/missing/crown/implant/rct/bridge
+  treatment?: string;
+  notes?: string;
+}
+
+interface StructuredProcedure {
+  id: string;
+  tooth: string;
+  diagnosis_code: string;
+  diagnosis_name: string;
+  procedure_name: string;
+  points: number;
+  category: string;
+  timestamp: string;
+}
+
+interface PredictedDiagnosis {
+  tooth?: string;
+  code: string;
+  name: string;
+  confidence: number;
+  source?: string;
+}
+
+interface DetectedDiagnosis {
+  tooth: string;
+  code: string;
+  name: string;
+  confidence: number;
+  reason: string;
+}
+
+interface ProcedurePattern {
+  id: string;
+  procedure_name: string;
+  category: string;
+  points: number;
+  fee_items: string[];
+  applicable_diagnoses: string[];
+}
+
+interface BillingMissItem {
+  procedure_name: string;
+  reason: string;
+  points: number;
+  procedure_id: string;
+}
+
+type PopupType =
+  | null
+  | "photo"
+  | "perio"
+  | "voice"
+  | "diagnosis"
+  | "treatment"
+  | "billing";
+
+// ==============================
+// 歯番ユーティリティ
+// ==============================
+const TOOTH_NUMBERS = [
+  18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28,
+  48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38,
+];
+
+const UPPER_TEETH = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+const LOWER_TEETH = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+
+function toothStatusColor(status?: string) {
+  switch (status) {
+    case "caries": return "bg-red-400 text-white";
+    case "missing": return "bg-gray-600 text-white";
+    case "crown": return "bg-yellow-400";
+    case "implant": return "bg-blue-400 text-white";
+    case "rct": return "bg-purple-400 text-white";
+    case "bridge": return "bg-orange-400";
+    case "healthy": return "bg-green-100";
+    default: return "bg-white border border-gray-200";
+  }
+}
+
+function calcAge(birthDate: string): number {
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+// ==============================
+// メインコンポーネント
+// ==============================
+export default function ConsultationPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const appointmentId = searchParams.get("appointment_id");
+
+  // データ
+  const [patient, setPatient] = useState<Patient | null>(null);
+  const [appointment, setAppointment] = useState<Appointment | null>(null);
+  const [medicalRecord, setMedicalRecord] = useState<MedicalRecord | null>(null);
+  const [pastRecords, setPastRecords] = useState<MedicalRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // UI状態
+  const [popup, setPopup] = useState<PopupType>(null);
+  const [showPastRecords, setShowPastRecords] = useState(false);
+  const [showSoap, setShowSoap] = useState(false);
+  const [activityLog, setActivityLog] = useState<string[]>([]);
+
+  // バナー状態
+  const [detectedDiagnoses, setDetectedDiagnoses] = useState<DetectedDiagnosis[]>([]);
+  const [billingMissItems, setBillingMissItems] = useState<BillingMissItem[]>([]);
+  const [suggestedTreatments, setSuggestedTreatments] = useState<ProcedurePattern[]>([]);
+  const [confirmedDiagnosis, setConfirmedDiagnosis] = useState<DetectedDiagnosis | null>(null);
+
+  // 音声録音
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [transcript, setTranscript] = useState("");
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 写真
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [aiToothFindings, setAiToothFindings] = useState<Array<{ tooth: string; finding: string; confidence: number }>>([]);
+
+  // P検
+  const [perioRecording, setPerioRecording] = useState(false);
+  const [perioData, setPerioData] = useState<Record<string, number>>({});
+
+  // 歯式編集
+  const [editingTooth, setEditingTooth] = useState<number | null>(null);
+  const [toothChartDraft, setToothChartDraft] = useState<Record<string, ToothStatus>>({});
+
+  // 傷病名選択
+  const [diagnosisSearch, setDiagnosisSearch] = useState("");
+  const [diagnosisMaster, setDiagnosisMaster] = useState<Array<{ code: string; name: string; category: string }>>([]);
+  const [selectedTooth, setSelectedTooth] = useState("");
+
+  // フォーカス制御
+  const [focusStep, setFocusStep] = useState<"photo" | "perio" | "voice" | "diagnosis" | "treatment" | "billing" | null>(null);
+
+  // ==============================
+  // データ取得
+  // ==============================
   useEffect(() => {
-    if (!aptId) return;
-    (async () => {
-      const {data:apt} = await supabase.from("appointments").select("patient_id,patient_type,patients(id,name_kanji,date_of_birth,insurance_type,burden_ratio,current_tooth_chart,current_perio_chart)").eq("id",aptId).single();
-      if (!apt?.patients) return;
-      const p = apt.patients as unknown as {id:string;name_kanji:string;date_of_birth:string;insurance_type:string;burden_ratio:number;current_tooth_chart:Record<string,string>|null};
-      const age = p.date_of_birth ? Math.floor((Date.now()-new Date(p.date_of_birth).getTime())/31557600000) : 0;
-      setPatient({id:p.id,name:p.name_kanji,age,insurance:p.insurance_type||"社保",burden:p.burden_ratio||0.3});
-      setIsNew(apt.patient_type==="new");
-      if (apt.patient_type!=="new" && p.current_tooth_chart) {
-        const tc:Record<string,string>={};
-        Object.entries(p.current_tooth_chart).forEach(([k,v])=>{
-          if(typeof v==="string") tc[k]=v;
-          else if(typeof v==="object"&&v&&"status" in (v as Record<string,string>)) tc[k]=(v as Record<string,string>).status;
-        });
-        setPrevChart(tc); setChart({...tc});
-      }
-      const {data:r} = await supabase.from("medical_records").select("id,soap_s,soap_o,soap_a,soap_p,tooth_chart,predicted_diagnoses,structured_procedures,previous_tooth_chart").eq("appointment_id",aptId).limit(1).single();
-      if (r) {
-        setRid(r.id);
-        if(r.soap_s) setSS(r.soap_s); if(r.soap_o) setSO(r.soap_o); if(r.soap_a) setSA(r.soap_a); if(r.soap_p) setSP(r.soap_p);
-        if(r.tooth_chart&&Object.keys(r.tooth_chart as object).length>0) setChart(r.tooth_chart as Record<string,string>);
-        if(r.previous_tooth_chart) setPrevChart(r.previous_tooth_chart as Record<string,string>);
-        if(r.predicted_diagnoses&&(r.predicted_diagnoses as Pred[]).length>0) {
-          const pr=r.predicted_diagnoses as Pred[];
-          setPreds(pr);
-          setBanner({text:`問診票から: ${pr.map(x=>x.name).join(", ")} の可能性`,icon:"💡",choices:[{label:"確認する",primary:true,fn:()=>{setPopup("diagSelect");setBanner(null);}},{label:"閉じる",fn:()=>setBanner(null)}]});
-        }
-        if(r.structured_procedures&&(r.structured_procedures as Proc[]).length>0) setProcs(r.structured_procedures as Proc[]);
-      }
-      const {data:ed} = await supabase.from("patient_diagnoses").select("diagnosis_code,diagnosis_name,tooth_number").eq("patient_id",p.id).is("outcome",null);
-      if(ed) setDiags(ed.map(d=>({tooth:d.tooth_number||"",code:d.diagnosis_code,name:d.diagnosis_name,short:d.diagnosis_name})));
-      if(apt.patient_type!=="new") {
-        const {data:pa} = await supabase.from("appointments").select("scheduled_at,medical_records(soap_a,soap_p)").eq("patient_id",p.id).eq("status","completed").order("scheduled_at",{ascending:false}).limit(5);
-        if(pa) setPast(pa.map((a:{scheduled_at:string;medical_records:{soap_a:string;soap_p:string}[]|null})=>{const d=new Date(a.scheduled_at);const m=(a.medical_records as {soap_a:string;soap_p:string}[]|null)?.[0];return{date:`${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`,entries:[m?.soap_a,m?.soap_p].filter(Boolean) as string[]};}).filter(x=>x.entries.length>0));
-      }
-      const {data:dm} = await supabase.from("diagnosis_master").select("code,name,category").in("category",["う蝕","歯髄・根尖","歯周","外傷","硬組織疾患","補綴"]).order("category");
-      if(dm) setDMaster(dm);
-    })();
-  },[aptId]);
+    if (!appointmentId) return;
+    fetchAll();
+  }, [appointmentId]);
 
-  useEffect(()=>{if(rec){tr.current=setInterval(()=>setRecT(t=>t+1),1000);}else if(tr.current){clearInterval(tr.current);}return()=>{if(tr.current)clearInterval(tr.current);};},[rec]);
-  useEffect(()=>{const b=isNew?267:56;setTotal(b+procs.reduce((s,p)=>s+p.points,0));},[procs,isNew]);
-
-  const save = useCallback(async()=>{if(!rid)return;await supabase.from("medical_records").update({tooth_chart:chart,structured_procedures:procs,soap_s:sS,soap_o:sO,soap_a:sA,soap_p:sP}).eq("id",rid);},[rid,chart,procs,sS,sO,sA,sP]);
-  const stRef = useRef<ReturnType<typeof setTimeout>|null>(null);
-  useEffect(()=>{if(stRef.current)clearTimeout(stRef.current);stRef.current=setTimeout(save,5000);return()=>{if(stRef.current)clearTimeout(stRef.current);};},[save]);
-
-  const setTooth = (t:string,st:string)=>{setChart(p=>({...p,[t]:st}));setStat(`${S(t)} → ${st}`);};
-
-  const confirmDiag = async(code:string,name:string,short:string,tooth:string)=>{
-    setDiags(p=>[...p,{tooth,code,name,short}]);
-    if(patient) await supabase.from("patient_diagnoses").insert({patient_id:patient.id,diagnosis_code:code,diagnosis_name:name,tooth_number:tooth,start_date:new Date().toISOString().split("T")[0],outcome:null});
-    setSA(p=>p?p+"\n"+`${S(tooth)} ${name}`:`${S(tooth)} ${name}`);
+  async function fetchAll() {
+    setLoading(true);
     try {
-      const res=await fetch("/api/suggest-treatment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({diagnosis_code:code,diagnosis_short:short,tooth})});
-      if(res.ok){const d=await res.json();if(d.treatments?.length>0){
-        const pri=["restoration","endo","perio","prosth"];
-        const sorted=d.treatments.sort((a:{category:string},b:{category:string})=>{const ai=pri.indexOf(a.category);const bi=pri.indexOf(b.category);return(ai===-1?99:ai)-(bi===-1?99:bi);});
-        const top=sorted.slice(0,5);
-        setBanner({text:`${S(tooth)} ${short} の治療パターン`,icon:"💡",choices:top.map((t:{procedure_name:string;fee_items:{code:string;name:string;points:number;count:number}[];total_points:number})=>({label:`${t.procedure_name} (${t.total_points}点)`,fn:()=>{setProcs(p=>[...p,{tooth,diagnosis_short:short,procedure_name:t.procedure_name,fee_items:t.fee_items,points:t.total_points}]);setSP(p=>p?p+"\n"+`${S(tooth)} ${t.procedure_name}`:`本日: ${S(tooth)} ${t.procedure_name}`);setBanner(null);setStat(`✅ ${S(tooth)} ${t.procedure_name}`);}}))}); }}
-    } catch(e){console.error(e);}
-  };
+      // 予約取得
+      const { data: appt } = await supabase
+        .from("appointments")
+        .select("*")
+        .eq("id", appointmentId)
+        .single();
+      if (!appt) throw new Error("appointment not found");
+      setAppointment(appt);
 
-  const startRec = async()=>{try{const s=await navigator.mediaDevices.getUserMedia({audio:true});const m=new MediaRecorder(s,{mimeType:"audio/webm;codecs=opus"});mr.current=m;ac.current=[];m.ondataavailable=e=>{if(e.data.size>0)ac.current.push(e.data);};m.start(1000);setRec(true);setRecT(0);setStat("🎙 録音中...");}catch{setStat("❌ マイク不可");}};
-  const stopRec = async()=>{if(!mr.current||mr.current.state==="inactive"){setRec(false);return;}const b=await Promise.race([new Promise<Blob>(r=>{mr.current!.onstop=()=>r(new Blob(ac.current,{type:"audio/webm"}));mr.current!.stop();mr.current!.stream.getTracks().forEach(t=>t.stop());}),new Promise<Blob>((_,j)=>setTimeout(()=>j(new Error("to")),5000))]).catch(()=>null);setRec(false);if(!b){setStat("❌ 録音エラー");return;}if(recT<3){setStat("⚠️ 短すぎます");return;}setStat("📝 文字起こし中...");
-    try{const tk=await fetch("/api/whisper-token");const td=await tk.json();if(!td.key){setStat("❌ APIキー失敗");return;}const fd=new FormData();fd.append("file",b,"rec.webm");fd.append("model","gpt-4o-transcribe");fd.append("language","ja");const wr=await fetch("https://api.openai.com/v1/audio/transcriptions",{method:"POST",headers:{Authorization:`Bearer ${td.key}`},body:fd});if(!wr.ok){setStat(`❌ 認識エラー(${wr.status})`);return;}const rt=await wr.json();const tx=rt.text||"";if(!tx||tx.trim().length<5){setStat("⚠️ 認識失敗");return;}setStat("🤖 AI分析中...");
-      const cr=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({appointment_id:aptId,transcript:tx,perio_points:pp})});
-      if(cr.ok){const r=await cr.json();if(r.success){if(r.drafts?.s&&!sS)setSS(r.drafts.s);if(r.drafts?.dh)setSO(p=>p?p+"\n"+r.drafts.dh:r.drafts.dh);if(r.drafts?.dr){const am=r.drafts.dr.match(/【A】([\s\S]*?)(?=【P】|$)/);const pm=r.drafts.dr.match(/【P】([\s\S]*)/);if(am)setSA(p=>p?p+"\n"+am[1].trim():am[1].trim());if(pm)setSP(p=>p?p+"\n"+pm[1].trim():pm[1].trim());}setStat("✅ AI分析完了");}}
-    }catch(e){console.error(e);setStat("❌ 失敗");}};
+      // 患者取得
+      const { data: pt } = await supabase
+        .from("patients")
+        .select("*")
+        .eq("id", appt.patient_id)
+        .single();
+      setPatient(pt);
 
-  const billing = async()=>{if(!rid||!aptId)return;await save();const ba=Math.round(total*10*(patient?.burden||0.3));await supabase.from("billing").insert({appointment_id:aptId,patient_id:patient?.id,total_points:total,patient_burden:ba,status:"confirmed"});await supabase.from("medical_records").update({status:"confirmed",doctor_confirmed:true,soap_s:sS,soap_o:sO,soap_a:sA,soap_p:sP,tooth_chart:chart,structured_procedures:procs}).eq("id",rid);if(patient)await supabase.from("patients").update({current_tooth_chart:chart}).eq("id",patient.id);await supabase.from("appointments").update({status:"completed"}).eq("id",aptId);setStat("✅ 算定確定！会計へ");};
+      // カルテ取得
+      const { data: mr } = await supabase
+        .from("medical_records")
+        .select("*")
+        .eq("appointment_id", appointmentId)
+        .single();
 
-  const fmt=(s:number)=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
-  const tt=Object.keys(chart).filter(t=>chart[t]&&chart[t]!=="健全");
+      if (mr) {
+        setMedicalRecord(mr);
+        setToothChartDraft(mr.tooth_chart || pt?.current_tooth_chart || {});
 
-  const TR=({teeth}:{teeth:string[]})=>(<div style={{display:"flex",gap:1,justifyContent:"center"}}>{teeth.map(t=>{const st=chart[t];const hd=diags.some(d=>d.tooth===t);const ip=!isNew&&prevChart[t]&&st===prevChart[t];return(<div key={t} onClick={()=>{setSel(t);setPopup("tooth");}} style={{width:28,textAlign:"center",cursor:"pointer"}}><div style={{fontSize:8,fontWeight:700,height:14,color:hd?CL.wrn:ip?CL.sub:st?CL.acc:"transparent"}}>{st||"."}</div><div style={{height:26,borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,background:hd?CL.wrnL:st?(ip?"#F3F4F6":CL.priL):"#F8F9FA",border:`1.5px solid ${hd?CL.wrn+"50":st?(ip?"#D1D5DB":CL.pri+"30"):"#EAECEF"}`,color:hd?CL.wrn:st?(ip?CL.sub:CL.pri):"#D1D5DB"}}>{parseInt(t)%10}</div></div>);})}</div>);
+        // 予測傷病名があればバナー表示準備
+        if (mr.predicted_diagnoses?.length > 0) {
+          setDetectedDiagnoses(
+            mr.predicted_diagnoses.map((pd: PredictedDiagnosis) => ({
+              tooth: pd.tooth || "",
+              code: pd.code,
+              name: pd.name,
+              confidence: pd.confidence,
+              reason: "問診票より予測",
+            }))
+          );
+        }
+      }
 
-  if(!patient) return <div style={{padding:40,textAlign:"center",color:CL.sub}}>読み込み中...</div>;
+      // 過去カルテ取得
+      const { data: past } = await supabase
+        .from("medical_records")
+        .select("*")
+        .eq("patient_id", appt.patient_id)
+        .neq("appointment_id", appointmentId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      setPastRecords(past || []);
 
-  return(<div style={{minHeight:"100vh",background:CL.bg,fontFamily:"'Noto Sans JP',-apple-system,sans-serif"}}>
-    <header style={{background:CL.dk,color:"#FFF",padding:"0 16px",height:48,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}><span style={{fontSize:15}}>🏥</span><span style={{fontWeight:800,fontSize:14}}>{patient.name}</span><span style={{fontSize:11,opacity:.6}}>{patient.age}歳</span><span style={{fontSize:10,background:"rgba(255,255,255,.12)",padding:"2px 8px",borderRadius:3,fontWeight:700}}>{patient.insurance} {Math.round(patient.burden*10)}割</span><span style={{fontSize:10,background:isNew?"#3B82F6":"#16A34A",padding:"2px 8px",borderRadius:3,fontWeight:700}}>{isNew?"初診":"再診"}</span></div>
-      <div style={{display:"flex",alignItems:"center",gap:8}}>{stat&&<span style={{fontSize:11,opacity:.8}}>{stat}</span>}<span style={{fontSize:16,fontWeight:900,color:"#10B981"}}>{total}点</span><span style={{fontSize:11,opacity:.5}}>(¥{Math.round(total*10*patient.burden).toLocaleString()})</span></div>
-    </header>
+      // 傷病名マスタ取得
+      const { data: dm } = await supabase
+        .from("diagnosis_master")
+        .select("code, name, category")
+        .order("category");
+      setDiagnosisMaster(dm || []);
 
-    {banner&&(<div style={{background:"linear-gradient(135deg,#1E3A5F,#2563EB)",color:"#FFF",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:6}}><div style={{display:"flex",alignItems:"center",gap:8}}><span>{banner.icon}</span><span style={{fontSize:13,fontWeight:700}}>{banner.text}</span></div><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{banner.choices.map((c,i)=>(<button key={i} onClick={c.fn} style={{padding:"4px 12px",borderRadius:5,fontSize:11,fontWeight:700,border:"none",cursor:"pointer",background:c.primary?"#FFF":"rgba(255,255,255,.15)",color:c.primary?"#1E3A5F":"#FFF"}}>{c.label}</button>))}<button onClick={()=>setBanner(null)} style={{padding:"3px 8px",borderRadius:3,border:"none",cursor:"pointer",background:"rgba(255,255,255,.1)",color:"#FFF",fontSize:11}}>✕</button></div></div>)}
+      addLog("カルテを読み込みました");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    <div style={{display:"flex",height:`calc(100vh - 48px${banner?" - 38px":""})`}}>
-      <div style={{flex:1,overflow:"auto",padding:14}}>
-        {!isNew&&past.length>0&&(<div style={{marginBottom:10}}><button onClick={()=>setPastO(!pastO)} style={{background:"none",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,color:CL.sub}}>{pastO?"▼":"▶"} 過去カルテ ({past.length}件)</button>{pastO&&past.map((v,i)=>(<div key={i} style={{background:CL.sf,borderRadius:6,padding:"6px 10px",border:`1px solid ${CL.bdr}`,marginTop:4}}><span style={{fontSize:10,fontWeight:800,color:CL.sub}}>{v.date}</span>{v.entries.map((e,j)=><div key={j} style={{fontSize:11,marginTop:2}}>{e}</div>)}</div>))}</div>)}
+  // ==============================
+  // ログ追加
+  // ==============================
+  function addLog(msg: string) {
+    const time = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    setActivityLog((prev) => [`${time} ${msg}`, ...prev].slice(0, 50));
+  }
 
-        <div style={{background:CL.sf,borderRadius:10,border:`2px solid ${CL.pri}20`,overflow:"hidden"}}>
-          <div style={{background:CL.priL,padding:"7px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}><span style={{fontSize:12,fontWeight:800,color:CL.pri}}>📋 本日のカルテ</span><span style={{fontSize:9,background:CL.pri,color:"#FFF",padding:"2px 7px",borderRadius:3,fontWeight:700}}>{isNew?"初診":"再診"}</span></div>
-          <div style={{padding:12}}>
-            {!isNew&&Object.keys(prevChart).length>0&&(<div style={{marginBottom:8}}><span style={{fontSize:10,color:CL.sub,fontWeight:700}}>前回の歯式</span><div style={{background:"#F9FAFB",borderRadius:6,padding:6,border:`1px solid ${CL.bdr}`,opacity:.6}}><div style={{display:"flex",gap:1,justifyContent:"center"}}>{TU.map(t=><div key={t} style={{width:28,textAlign:"center",fontSize:8,color:CL.sub}}>{prevChart[t]||""}</div>)}</div><div style={{display:"flex",justifyContent:"center",margin:"1px 0"}}><div style={{width:TU.length*29,height:1,background:CL.sub}}/></div><div style={{display:"flex",gap:1,justifyContent:"center"}}>{TL.map(t=><div key={t} style={{width:28,textAlign:"center",fontSize:8,color:CL.sub}}>{prevChart[t]||""}</div>)}</div></div></div>)}
+  // ==============================
+  // 合計点数
+  // ==============================
+  const totalPoints = (medicalRecord?.structured_procedures || []).reduce(
+    (sum, p) => sum + (p.points || 0),
+    0
+  );
 
-            <div style={{marginBottom:14}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:10,fontWeight:800}}>🦷 {isNew?"歯式":"今回の歯式"}</span></div><div style={{background:"#FAFBFC",borderRadius:6,padding:6,border:`1px solid ${CL.bdr}`}}><TR teeth={TU}/><div style={{display:"flex",justifyContent:"center",margin:"2px 0"}}><div style={{width:TU.length*29,height:2,background:CL.txt}}/></div><TR teeth={TL}/></div></div>
+  // ==============================
+  // 音声録音
+  // ==============================
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.start(1000);
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+      addLog("🎙 録音開始");
+    } catch (err) {
+      alert("マイクへのアクセスが必要です");
+    }
+  }
 
-            {(diags.length>0||procs.length>0)&&(<div style={{marginBottom:14,border:`1px solid ${CL.bdr}`,borderRadius:6,overflow:"hidden"}}><div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"#F0FDF4",borderBottom:`1px solid ${CL.bdr}`}}><span style={{fontSize:11,fontWeight:700,color:CL.acc}}>{isNew?"初診":"再診"} 外安全1 外感染2 医DX6</span><span style={{fontSize:11,fontWeight:800}}>{isNew?267:56}点</span></div>{diags.map((d,i)=>{const ps=procs.filter(p=>p.tooth===d.tooth);return(<div key={i} style={{borderBottom:`1px solid ${CL.bdr}`}}><div style={{padding:"6px 10px",background:CL.wrnL}}><span style={{fontFamily:"monospace",fontWeight:800,fontSize:13}}>{S(d.tooth)}</span><span style={{color:CL.wrn,fontWeight:700,fontSize:12,marginLeft:6}}>{d.name}</span></div>{ps.map((p,j)=>(<div key={j}>{p.fee_items.map((fi,k)=>(<div key={k} style={{display:"flex",justifyContent:"space-between",padding:"3px 10px 3px 24px",fontSize:11}}><span>{S(p.tooth)} {fi.name}</span><span style={{fontWeight:700}}>{fi.points*fi.count}点</span></div>))}</div>))}</div>);})}<div style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:"#F9FAFB"}}><span style={{fontWeight:800,color:CL.acc}}>計</span><span style={{fontWeight:900,fontSize:16,color:CL.acc}}>{total}点</span></div></div>)}
+  async function stopRecording() {
+    if (!mediaRecorderRef.current) return;
+    mediaRecorderRef.current.stop();
+    mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    setIsRecording(false);
+    setVoiceLoading(true);
+    addLog("🎙 録音停止 → AI解析中...");
 
-            <div style={{marginBottom:14}}><div style={{fontSize:10,fontWeight:800,marginBottom:4,color:CL.sub}}>📝 SOAP</div>{[{k:"S",v:sS},{k:"O",v:sO},{k:"A",v:sA},{k:"P",v:sP}].map(({k,v})=>(<div key={k} style={{marginBottom:3}}><span style={{fontSize:10,fontWeight:800,color:CL.pri}}>{k}: </span><span style={{fontSize:11,color:v?CL.txt:CL.sub,whiteSpace:"pre-wrap"}}>{v||"（未記載）"}</span></div>))}</div>
+    // 少し待ってからチャンク収集
+    await new Promise((r) => setTimeout(r, 500));
 
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {isNew&&<B i="📸" l="写真" bg={CL.priL} c={CL.pri} b={CL.pri+"30"} o={()=>setPopup("photo")}/>}
-              <B i="🦷" l="歯式" bg={CL.priL} c={CL.pri} b={CL.pri+"30"} o={()=>setPopup("tooth")}/>
-              <B i="🔍" l="P検" bg="#F0FDFA" c="#0D9488" b="#0D948830" o={()=>setPopup("perio")}/>
-              <B i="🎙" l="録音" bg={CL.redL} c={CL.red} b={CL.red+"30"} o={()=>setPopup("record")}/>
-              <B i="💊" l="傷病名" bg={CL.wrnL} c={CL.wrn} b={CL.wrn+"30"} o={()=>setPopup("diagSelect")}/>
-              <B i="💰" l="算定" bg={CL.accL} c={CL.acc} b={CL.acc+"30"} o={()=>setPopup("billing")}/>
+    const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+    await analyzeVoice(blob);
+  }
+
+  async function analyzeVoice(blob: Blob) {
+    try {
+      // Whisperで文字起こし
+      const formData = new FormData();
+      formData.append("file", blob, "recording.webm");
+      formData.append("model", "whisper-1");
+      formData.append("language", "ja");
+
+      const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || ""}` },
+        body: formData,
+      });
+
+      let transcribedText = "";
+      if (whisperRes.ok) {
+        const wData = await whisperRes.json();
+        transcribedText = wData.text || "";
+      }
+
+      setTranscript(transcribedText);
+      addLog(`📝 文字起こし: "${transcribedText.slice(0, 30)}..."`);
+
+      // classify-and-draft APIで分類
+      const classifyRes = await fetch("/api/karte-agent/classify-and-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcript: transcribedText,
+          medical_record_id: medicalRecord?.id,
+          field_key: "s",
+          patient_id: patient?.id,
+        }),
+      });
+
+      if (classifyRes.ok) {
+        const classifyData = await classifyRes.json();
+        const detected = classifyData.detected_diagnoses || [];
+
+        if (detected.length > 0) {
+          setDetectedDiagnoses(detected);
+          addLog(`🦷 傷病名検出: ${detected[0].name}（信頼度${Math.round(detected[0].confidence * 100)}%）`);
+          setPopup(null); // 録音ポップアップを閉じてバナー表示
+        }
+
+        // SOAPのS更新
+        if (classifyData.classified?.s) {
+          await updateSoap("soap_s", classifyData.classified.s);
+        }
+      }
+    } catch (err) {
+      console.error("voice analysis error:", err);
+      addLog("⚠️ 音声解析に失敗しました");
+    } finally {
+      setVoiceLoading(false);
+    }
+  }
+
+  // ==============================
+  // SOAP更新
+  // ==============================
+  async function updateSoap(field: string, value: string) {
+    if (!medicalRecord) return;
+    await supabase
+      .from("medical_records")
+      .update({ [field]: value })
+      .eq("id", medicalRecord.id);
+    setMedicalRecord((prev) => prev ? { ...prev, [field]: value } : prev);
+  }
+
+  // ==============================
+  // 写真 → AI歯式
+  // ==============================
+  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoLoading(true);
+    addLog("📸 写真アップロード → AI解析中...");
+
+    try {
+      // 画像をbase64に変換
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.readAsDataURL(file);
+      });
+
+      // xray-analyze APIへ送信
+      const res = await fetch("/api/xray-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_base64: base64,
+          patient_id: patient?.id,
+          medical_record_id: medicalRecord?.id,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const findings = data.findings || [];
+        setAiToothFindings(findings);
+        addLog(`🦷 AI歯式解析完了: ${findings.length}件の所見`);
+
+        if (findings.length > 0) {
+          // 自動で歯式チャートに反映提案
+          setPopup("photo");
+        }
+      }
+    } catch (err) {
+      console.error("photo upload error:", err);
+      addLog("⚠️ 写真解析に失敗しました");
+    } finally {
+      setPhotoLoading(false);
+    }
+  }
+
+  async function applyAiFindings(findingIdx: number) {
+    const finding = aiToothFindings[findingIdx];
+    if (!finding) return;
+
+    const newChart = { ...toothChartDraft };
+    newChart[finding.tooth] = {
+      status: finding.finding.includes("う蝕") || finding.finding.includes("C") ? "caries" : "crown",
+      notes: finding.finding,
+    };
+    setToothChartDraft(newChart);
+    await saveToothChart(newChart);
+    addLog(`✅ AI所見を歯式に反映: ${finding.tooth}番 ${finding.finding}`);
+    setAiToothFindings((prev) => prev.filter((_, i) => i !== findingIdx));
+
+    // 全て反映したら次のステップへ
+    if (aiToothFindings.length <= 1) {
+      setPopup(null);
+      setFocusStep("perio");
+      addLog("→ 次: P検を行ってください");
+    }
+  }
+
+  async function applyAllAiFindings() {
+    const newChart = { ...toothChartDraft };
+    for (const finding of aiToothFindings) {
+      newChart[finding.tooth] = {
+        status: finding.finding.includes("う蝕") || finding.finding.includes("C") ? "caries" : "crown",
+        notes: finding.finding,
+      };
+    }
+    setToothChartDraft(newChart);
+    await saveToothChart(newChart);
+    addLog(`✅ AI所見を一括反映: ${aiToothFindings.length}件`);
+    setAiToothFindings([]);
+    setPopup(null);
+    setFocusStep("perio");
+  }
+
+  async function saveToothChart(chart: Record<string, ToothStatus>) {
+    if (!medicalRecord) return;
+    await supabase
+      .from("medical_records")
+      .update({ tooth_chart: chart })
+      .eq("id", medicalRecord.id);
+    setMedicalRecord((prev) => prev ? { ...prev, tooth_chart: chart } : prev);
+  }
+
+  // ==============================
+  // 傷病名確定
+  // ==============================
+  async function confirmDiagnosis(diag: DetectedDiagnosis) {
+    if (!patient || !medicalRecord) return;
+    setConfirmedDiagnosis(diag);
+    addLog(`✅ 傷病名確定: ${diag.tooth ? `${diag.tooth}番 ` : ""}${diag.name}`);
+
+    // patient_diagnosesに保存
+    await supabase.from("patient_diagnoses").insert({
+      patient_id: patient.id,
+      medical_record_id: medicalRecord.id,
+      tooth: diag.tooth || null,
+      diagnosis_code: diag.code,
+      diagnosis_name: diag.name,
+      status: "active",
+    });
+
+    // 治療パターン取得
+    setFocusStep("treatment");
+    await fetchTreatmentPatterns(diag.code);
+    setDetectedDiagnoses([]);
+  }
+
+  async function fetchTreatmentPatterns(diagnosisCode: string) {
+    try {
+      const res = await fetch("/api/suggest-treatment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diagnosis_code: diagnosisCode }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestedTreatments(data.procedures || []);
+        addLog(`💊 治療パターン${data.procedures?.length || 0}件を提案`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // ==============================
+  // 治療パターン選択 → structured_procedures追加
+  // ==============================
+  async function selectTreatment(proc: ProcedurePattern) {
+    if (!medicalRecord || !confirmedDiagnosis) return;
+
+    const newProc: StructuredProcedure = {
+      id: crypto.randomUUID(),
+      tooth: confirmedDiagnosis.tooth || "",
+      diagnosis_code: confirmedDiagnosis.code,
+      diagnosis_name: confirmedDiagnosis.name,
+      procedure_name: proc.procedure_name,
+      points: proc.points,
+      category: proc.category,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updated = [...(medicalRecord.structured_procedures || []), newProc];
+    await supabase
+      .from("medical_records")
+      .update({ structured_procedures: updated })
+      .eq("id", medicalRecord.id);
+    setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
+    addLog(`➕ 処置追加: ${proc.procedure_name}（${proc.points}点）`);
+
+    // SOAP P に自動記載
+    const soapP = `${confirmedDiagnosis.tooth ? `${confirmedDiagnosis.tooth}番 ` : ""}${confirmedDiagnosis.name}: ${proc.procedure_name}`;
+    await updateSoap("soap_p", soapP);
+
+    // 算定漏れチェック
+    await checkBillingMiss(updated);
+    setSuggestedTreatments([]);
+    setFocusStep("billing");
+  }
+
+  // ==============================
+  // 算定漏れチェック
+  // ==============================
+  async function checkBillingMiss(procedures: StructuredProcedure[]) {
+    const procedureNames = procedures.map((p) => p.procedure_name);
+    const misses: BillingMissItem[] = [];
+
+    // ルールベースチェック
+    const rules: Array<{
+      trigger: string;
+      missing: string;
+      reason: string;
+      points: number;
+      id: string;
+    }> = [
+      { trigger: "抜髄", missing: "浸麻", reason: "抜髄には浸麻が必要です", points: 45, id: "sinma" },
+      { trigger: "抜髄", missing: "ラバーダム", reason: "抜髄には感染防止のためラバーダムを検討してください", points: 25, id: "rubber" },
+      { trigger: "CR充填", missing: "歯科疾患管理料", reason: "CR充填時は歯科疾患管理料の算定が可能です", points: 102, id: "shikan" },
+      { trigger: "抜歯", missing: "浸麻", reason: "抜歯には浸麻が必要です", points: 45, id: "sinma2" },
+      { trigger: "スケーリング", missing: "歯科疾患管理料", reason: "歯周治療時は歯科疾患管理料の算定が可能です", points: 102, id: "shikan2" },
+      { trigger: "根管充填", missing: "根管貼薬", reason: "根管充填前に根管貼薬が必要です", points: 40, id: "konkan" },
+    ];
+
+    for (const rule of rules) {
+      const hasTrigger = procedureNames.some((n) => n.includes(rule.trigger));
+      const hasMissing = procedureNames.some((n) => n.includes(rule.missing));
+      if (hasTrigger && !hasMissing) {
+        misses.push({
+          procedure_name: rule.missing,
+          reason: rule.reason,
+          points: rule.points,
+          procedure_id: rule.id,
+        });
+      }
+    }
+
+    setBillingMissItems(misses);
+    if (misses.length > 0) {
+      addLog(`⚠️ 算定漏れ候補: ${misses.map((m) => m.procedure_name).join(", ")}`);
+    }
+  }
+
+  async function addMissingProcedure(miss: BillingMissItem) {
+    if (!medicalRecord || !confirmedDiagnosis) return;
+    const newProc: StructuredProcedure = {
+      id: crypto.randomUUID(),
+      tooth: confirmedDiagnosis?.tooth || "",
+      diagnosis_code: confirmedDiagnosis?.code || "",
+      diagnosis_name: confirmedDiagnosis?.name || "",
+      procedure_name: miss.procedure_name,
+      points: miss.points,
+      category: "basic",
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [...(medicalRecord.structured_procedures || []), newProc];
+    await supabase
+      .from("medical_records")
+      .update({ structured_procedures: updated })
+      .eq("id", medicalRecord.id);
+    setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
+    setBillingMissItems((prev) => prev.filter((m) => m.procedure_id !== miss.procedure_id));
+    addLog(`✅ ${miss.procedure_name} を追加しました`);
+  }
+
+  // ==============================
+  // P検
+  // ==============================
+  async function savePerioData() {
+    if (!medicalRecord) return;
+    const perioText = Object.entries(perioData)
+      .map(([tooth, depth]) => `${tooth}番: ${depth}mm`)
+      .join(", ");
+
+    await updateSoap("soap_o", `歯周ポケット: ${perioText}`);
+    addLog(`📊 P検記録保存: ${Object.keys(perioData).length}歯`);
+    setPopup(null);
+    setFocusStep("voice");
+    addLog("→ 次: 音声録音を行ってください");
+  }
+
+  // ==============================
+  // 歯式チャート クリック
+  // ==============================
+  function handleToothClick(toothNum: number) {
+    setEditingTooth(toothNum);
+  }
+
+  async function setToothStatus(toothNum: number, status: string) {
+    const newChart = { ...toothChartDraft, [String(toothNum)]: { status } };
+    setToothChartDraft(newChart);
+    await saveToothChart(newChart);
+    setEditingTooth(null);
+    addLog(`🦷 歯式更新: ${toothNum}番 → ${status}`);
+  }
+
+  // ==============================
+  // 算定確定
+  // ==============================
+  async function finalizeBilling() {
+    if (!medicalRecord || !appointment) return;
+    try {
+      // billing INSERT
+      const procs = medicalRecord.structured_procedures || [];
+      await supabase.from("billing").insert({
+        patient_id: appointment.patient_id,
+        appointment_id: appointment.id,
+        medical_record_id: medicalRecord.id,
+        procedures: procs,
+        total_points: totalPoints,
+        status: "pending",
+      });
+
+      // appointment完了
+      await supabase
+        .from("appointments")
+        .update({ status: "completed" })
+        .eq("id", appointment.id);
+
+      // patients.current_tooth_chart更新
+      await supabase
+        .from("patients")
+        .update({ current_tooth_chart: toothChartDraft })
+        .eq("id", appointment.patient_id);
+
+      addLog("💰 算定確定完了 → 会計へ");
+      router.push(`/billing?appointment_id=${appointment.id}`);
+    } catch (err) {
+      console.error(err);
+      addLog("⚠️ 算定確定に失敗しました");
+    }
+  }
+
+  // ==============================
+  // ローディング
+  // ==============================
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">カルテを読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!patient || !appointment || !medicalRecord) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center text-red-600">
+          <p className="text-xl">カルテが見つかりません</p>
+          <button
+            onClick={() => router.back()}
+            className="mt-4 px-4 py-2 bg-gray-600 text-white rounded"
+          >
+            戻る
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const age = calcAge(patient.birth_date);
+  const isFirstVisit = appointment.visit_type === "initial";
+
+  // ==============================
+  // レンダリング
+  // ==============================
+  return (
+    <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
+      {/* ===== ヘッダー ===== */}
+      <header className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
+            ←
+          </button>
+          <div>
+            <span className="font-bold text-lg">{patient.name}</span>
+            <span className="ml-2 text-sm text-gray-500">{age}歳</span>
+            <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+              {patient.insurance_type || "社保"}
+            </span>
+            <span
+              className={`ml-2 text-sm px-2 py-0.5 rounded ${
+                isFirstVisit ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+              }`}
+            >
+              {isFirstVisit ? "初診" : "再診"}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-2xl font-bold text-blue-700">{totalPoints}<span className="text-sm text-gray-500 ml-1">点</span></div>
+            <div className="text-xs text-gray-500">({Math.round(totalPoints * 10)}円)</div>
+          </div>
+          <button
+            onClick={finalizeBilling}
+            disabled={(medicalRecord.structured_procedures || []).length === 0}
+            className={`px-4 py-2 rounded-lg font-medium text-sm ${
+              focusStep === "billing" && (medicalRecord.structured_procedures || []).length > 0
+                ? "bg-blue-600 text-white animate-pulse shadow-lg"
+                : "bg-gray-200 text-gray-600"
+            }`}
+          >
+            算定確定 →
+          </button>
+        </div>
+      </header>
+
+      {/* ===== バナーエリア ===== */}
+      <div className="bg-white border-b px-4 py-1 space-y-1">
+        {/* 傷病名検出バナー */}
+        {detectedDiagnoses.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 flex items-center gap-3 flex-wrap">
+            <span className="text-yellow-700 font-medium text-sm">🦷 仮傷病名:</span>
+            {detectedDiagnoses.slice(0, 3).map((d, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <span className="text-sm">
+                  {d.tooth ? `${d.tooth}番 ` : ""}{d.name}
+                  <span className="text-xs text-gray-500 ml-1">({Math.round(d.confidence * 100)}%)</span>
+                </span>
+                <button
+                  onClick={() => confirmDiagnosis(d)}
+                  className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded hover:bg-yellow-600"
+                >
+                  決定
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => { setPopup("diagnosis"); }}
+              className="text-xs text-yellow-700 underline"
+            >
+              変更する
+            </button>
+            <button
+              onClick={() => setDetectedDiagnoses([])}
+              className="text-xs text-gray-400 ml-auto"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* 治療パターン提案バナー */}
+        {suggestedTreatments.length > 0 && confirmedDiagnosis && (
+          <div className="bg-blue-50 border border-blue-300 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-blue-700 font-medium text-sm">
+                💊 治療パターン（{confirmedDiagnosis.name}）:
+              </span>
+              <button
+                onClick={() => setSuggestedTreatments([])}
+                className="text-xs text-gray-400 ml-auto"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {suggestedTreatments.slice(0, 6).map((proc, i) => (
+                <button
+                  key={i}
+                  onClick={() => selectTreatment(proc)}
+                  className="bg-blue-600 text-white text-xs px-3 py-1 rounded-full hover:bg-blue-700"
+                >
+                  {proc.procedure_name} <span className="opacity-75">({proc.points}点)</span>
+                </button>
+              ))}
+              <button
+                onClick={() => setPopup("treatment")}
+                className="text-xs text-blue-600 underline"
+              >
+                全て見る
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 算定漏れチェックバナー */}
+        {billingMissItems.length > 0 && (
+          <div className="bg-red-50 border border-red-300 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-red-700 font-medium text-sm">⚠️ 算定漏れ候補:</span>
+              <button
+                onClick={() => setBillingMissItems([])}
+                className="text-xs text-gray-400 ml-auto"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {billingMissItems.map((miss, i) => (
+                <div key={i} className="flex items-center gap-1 bg-white border border-red-200 rounded px-2 py-1">
+                  <span className="text-xs text-red-700">{miss.procedure_name}（{miss.points}点）</span>
+                  <button
+                    onClick={() => addMissingProcedure(miss)}
+                    className="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded hover:bg-red-600"
+                  >
+                    追加
+                  </button>
+                  <button
+                    onClick={() => setBillingMissItems((prev) => prev.filter((_, j) => j !== i))}
+                    className="text-xs text-gray-400"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* AI写真所見バナー */}
+        {aiToothFindings.length > 0 && (
+          <div className="bg-purple-50 border border-purple-300 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-purple-700 font-medium text-sm">📸 AI歯式所見:</span>
+              <button
+                onClick={applyAllAiFindings}
+                className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded hover:bg-purple-700"
+              >
+                一括反映
+              </button>
+              <button
+                onClick={() => setAiToothFindings([])}
+                className="text-xs text-gray-400 ml-auto"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {aiToothFindings.map((f, i) => (
+                <div key={i} className="flex items-center gap-1 bg-white border border-purple-200 rounded px-2 py-1">
+                  <span className="text-xs">{f.tooth}番: {f.finding}</span>
+                  <span className="text-xs text-gray-400">({Math.round(f.confidence * 100)}%)</span>
+                  <button
+                    onClick={() => applyAiFindings(i)}
+                    className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded"
+                  >
+                    反映
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ===== メインエリア ===== */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* ===== カルテ左エリア ===== */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+          {/* 過去カルテ（折りたたみ） */}
+          {pastRecords.length > 0 && !isFirstVisit && (
+            <div className="bg-white rounded-lg border">
+              <button
+                onClick={() => setShowPastRecords(!showPastRecords)}
+                className="w-full px-4 py-3 text-left flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <span>📋 過去カルテ（{pastRecords.length}件）</span>
+                <span>{showPastRecords ? "▲" : "▼"}</span>
+              </button>
+              {showPastRecords && (
+                <div className="px-4 pb-3 space-y-2">
+                  {pastRecords.map((pr) => (
+                    <div key={pr.id} className="border-l-2 border-gray-200 pl-3 py-1">
+                      <div className="text-xs text-gray-500">{new Date(pr.soap_s || "").toLocaleDateString("ja-JP")}</div>
+                      <div className="text-sm">{pr.soap_s?.slice(0, 80) || "記録なし"}</div>
+                      {(pr.structured_procedures || []).slice(0, 3).map((p, i) => (
+                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-1 py-0.5 rounded mr-1">
+                          {p.procedure_name}
+                        </span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 歯式チャート */}
+          <div className="bg-white rounded-lg border p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium text-gray-700">🦷 歯式チャート</h3>
+              <span className="text-xs text-gray-400">タップして状態変更</span>
+            </div>
+
+            {/* 前回チャート（薄く） */}
+            {medicalRecord.previous_tooth_chart && (
+              <div className="mb-2">
+                <div className="text-xs text-gray-400 mb-1">前回</div>
+                <ToothChart
+                  chart={medicalRecord.previous_tooth_chart}
+                  dim
+                  onToothClick={() => {}}
+                  editingTooth={null}
+                  onSetStatus={() => {}}
+                />
+              </div>
+            )}
+
+            {/* 今回チャート */}
+            <div>
+              <div className="text-xs text-gray-500 mb-1">今回</div>
+              <ToothChart
+                chart={toothChartDraft}
+                dim={false}
+                onToothClick={handleToothClick}
+                editingTooth={editingTooth}
+                onSetStatus={setToothStatus}
+              />
+            </div>
+          </div>
+
+          {/* メインカルテ（Julea的） */}
+          <div className="bg-white rounded-lg border p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium text-gray-700">📋 処置記録</h3>
+              <button
+                onClick={() => setPopup("diagnosis")}
+                className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100"
+              >
+                + 傷病名追加
+              </button>
+            </div>
+
+            {(medicalRecord.structured_procedures || []).length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                <div className="text-3xl mb-2">📝</div>
+                <p className="text-sm">傷病名を確定すると処置記録が追加されます</p>
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-gray-500 border-b">
+                    <th className="text-left pb-2 w-12">歯番</th>
+                    <th className="text-left pb-2">傷病名</th>
+                    <th className="text-left pb-2">処置</th>
+                    <th className="text-right pb-2 w-16">点数</th>
+                    <th className="w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(medicalRecord.structured_procedures || []).map((proc, i) => (
+                    <tr key={proc.id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="py-2 font-medium">{proc.tooth || "-"}</td>
+                      <td className="py-2 text-gray-600">{proc.diagnosis_name}</td>
+                      <td className="py-2">{proc.procedure_name}</td>
+                      <td className="py-2 text-right font-medium text-blue-700">{proc.points}</td>
+                      <td className="py-2">
+                        <button
+                          onClick={async () => {
+                            const updated = (medicalRecord.structured_procedures || []).filter((_, j) => j !== i);
+                            await supabase
+                              .from("medical_records")
+                              .update({ structured_procedures: updated })
+                              .eq("id", medicalRecord.id);
+                            setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
+                          }}
+                          className="text-gray-300 hover:text-red-400 text-xs"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t">
+                    <td colSpan={3} className="pt-2 text-right text-sm text-gray-500">合計</td>
+                    <td className="pt-2 text-right font-bold text-lg text-blue-700">{totalPoints}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+
+          {/* SOAP（折りたたみ） */}
+          <div className="bg-white rounded-lg border">
+            <button
+              onClick={() => setShowSoap(!showSoap)}
+              className="w-full px-4 py-3 text-left flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <span>📄 SOAP（サブカルテ）</span>
+              <span>{showSoap ? "▲" : "▼"}</span>
+            </button>
+            {showSoap && (
+              <div className="px-4 pb-4 space-y-3">
+                {(["soap_s", "soap_o", "soap_a", "soap_p"] as const).map((field) => (
+                  <div key={field}>
+                    <label className="text-xs font-medium text-gray-500 uppercase">
+                      {field.replace("soap_", "")}
+                    </label>
+                    <textarea
+                      className="w-full mt-1 border rounded p-2 text-sm resize-none"
+                      rows={2}
+                      value={medicalRecord[field] || ""}
+                      onChange={(e) => setMedicalRecord((prev) => prev ? { ...prev, [field]: e.target.value } : prev)}
+                      onBlur={(e) => updateSoap(field, e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 記録ログ */}
+          <div className="bg-white rounded-lg border p-4">
+            <h3 className="font-medium text-gray-700 mb-2 text-sm">🕐 記録</h3>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {activityLog.length === 0 ? (
+                <p className="text-xs text-gray-400">記録はありません</p>
+              ) : (
+                activityLog.map((log, i) => (
+                  <div key={i} className="text-xs text-gray-600">{log}</div>
+                ))
+              )}
             </div>
           </div>
         </div>
-      </div>
 
-      {popup&&(<div style={{width:360,minWidth:360,background:CL.sf,borderLeft:`1px solid ${CL.bdr}`,display:"flex",flexDirection:"column",boxShadow:"-3px 0 16px rgba(0,0,0,.04)"}}>
-        <div style={{padding:"8px 12px",borderBottom:`1px solid ${CL.bdr}`,display:"flex",alignItems:"center",justifyContent:"space-between",background:"#FAFBFC"}}><span style={{fontSize:12,fontWeight:800}}>{{tooth:"🦷 歯式",perio:"🔍 P検",record:"🎙 録音",photo:"📸 写真",billing:"💰 算定",diagSelect:"💊 傷病名"}[popup]||""}</span><button onClick={()=>{setPopup(null);if(rec)stopRec();}} style={{width:24,height:24,borderRadius:4,border:`1px solid ${CL.bdr}`,background:"#FFF",cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>
-        <div style={{flex:1,overflow:"auto",padding:12}}>
-          {popup==="photo"&&<div><div style={{border:`2px dashed ${CL.bdr}`,borderRadius:10,padding:30,textAlign:"center",cursor:"pointer",background:"#FAFAFA"}}><div style={{fontSize:32}}>📸</div><div style={{fontSize:12,fontWeight:700,marginTop:4}}>タップしてアップロード</div><div style={{fontSize:10,color:CL.sub,marginTop:2}}>レントゲン / デンタル / 口腔内写真</div></div></div>}
-
-          {popup==="tooth"&&<div>{[TU,TL].map((row,ri)=>(<div key={ri}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{row.map(t=>(<button key={t} onClick={()=>setSel(t)} style={{width:36,height:32,borderRadius:4,fontSize:10,fontWeight:700,cursor:"pointer",border:sel===t?`2px solid ${CL.pri}`:`1px solid ${CL.bdr}`,background:chart[t]?CL.priL:"#FFF",color:chart[t]?CL.pri:CL.sub}}>{S(t)}</button>))}</div>{ri===0&&<div style={{height:2,background:CL.txt,margin:"3px 0"}}/>}</div>))}{sel&&<div style={{marginTop:10}}><div style={{fontSize:12,fontWeight:800,marginBottom:6}}>{S(sel)} #{sel}</div><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{STATUSES.map(st=>(<button key={st} onClick={()=>setTooth(sel,st)} style={{padding:"4px 8px",borderRadius:4,fontSize:10,fontWeight:700,cursor:"pointer",border:chart[sel]===st?`2px solid ${CL.acc}`:`1px solid ${CL.bdr}`,background:chart[sel]===st?CL.accL:"#FFF"}}>{st}</button>))}</div></div>}</div>}
-
-          {popup==="perio"&&<div><div style={{display:"flex",gap:4,marginBottom:8}}>{([6,4,1] as const).map(n=>(<button key={n} onClick={()=>setPP(n)} style={{padding:"4px 10px",borderRadius:4,fontSize:10,fontWeight:700,cursor:"pointer",border:`1px solid ${CL.pri}`,background:pp===n?CL.pri:"#FFF",color:pp===n?"#FFF":CL.pri}}>{n}点式</button>))}</div><div style={{background:"#F0F9FF",borderRadius:5,padding:6,marginBottom:8,fontSize:10,color:"#1E40AF"}}>📖 {pp===6?"6つ(MB,B,DB,ML,L,DL)":pp===4?"4つ":"1つ(最深部)"}の数値を読み上げ</div><button onClick={rec?stopRec:startRec} style={{width:"100%",padding:12,borderRadius:7,border:"none",cursor:"pointer",fontWeight:800,fontSize:12,background:rec?"#EF4444":CL.pri,color:"#FFF"}}>{rec?`⏹ 停止 ${fmt(recT)}`:"🎙 P検 音声入力"}</button></div>}
-
-          {popup==="record"&&<div style={{textAlign:"center"}}><div style={{fontSize:10,color:CL.sub,marginBottom:12,textAlign:"left"}}>患者さんへの説明時に録音開始</div><button onClick={rec?stopRec:startRec} style={{width:80,height:80,borderRadius:"50%",border:"none",cursor:"pointer",background:rec?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#1A56DB,#3B82F6)",color:"#FFF",fontSize:24}}>{rec?"⏹":"🎙"}</button><div style={{marginTop:6,fontSize:12,fontWeight:800,color:rec?"#EF4444":CL.pri}}>{rec?`録音中 ${fmt(recT)}`:"タップ"}</div><div style={{marginTop:10,fontSize:10,color:CL.sub,textAlign:"left"}}>停止でAI分析 → S/O＋傷病名＋A/P</div></div>}
-
-          {popup==="diagSelect"&&<div><div style={{fontSize:10,color:CL.sub,marginBottom:6}}>歯を選択 → 傷病名を選択</div>{preds.length>0&&<div style={{marginBottom:8,padding:8,background:CL.aiL,borderRadius:6}}><div style={{fontSize:10,fontWeight:800,color:CL.ai,marginBottom:4}}>🤖 問診票からの予測</div>{preds.map((p,i)=>(<button key={i} onClick={()=>{if(sel)confirmDiag(p.code,p.name,p.short,sel);}} style={{display:"block",width:"100%",padding:"4px 8px",marginBottom:2,borderRadius:4,border:`1px solid ${CL.ai}30`,background:"#FFF",cursor:"pointer",textAlign:"left",fontSize:11}}>{p.name} <span style={{color:CL.ai}}>({Math.round(p.probability*100)}%)</span></button>))}</div>}{tt.length>0?<div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:8}}>{tt.map(t=>(<button key={t} onClick={()=>setSel(t)} style={{padding:"4px 10px",borderRadius:5,cursor:"pointer",fontWeight:700,fontSize:10,border:sel===t?`2px solid ${CL.pri}`:`1px solid ${CL.bdr}`,background:sel===t?CL.priL:"#FFF"}}>{S(t)} {chart[t]}</button>))}</div>:<div style={{padding:10,textAlign:"center",color:CL.sub,fontSize:10}}>先に歯式を設定</div>}{sel&&<><input value={dSearch} onChange={e=>setDSearch(e.target.value)} placeholder="傷病名を検索..." style={{width:"100%",padding:"5px 8px",borderRadius:4,border:`1px solid ${CL.bdr}`,fontSize:11,marginBottom:6,boxSizing:"border-box"}}/><div style={{maxHeight:200,overflow:"auto"}}>{dMaster.filter(d=>!dSearch||d.name.includes(dSearch)||d.code.includes(dSearch)).slice(0,30).map(d=>(<button key={d.code} onClick={()=>{confirmDiag(d.code,d.name,d.name,sel);setPopup(null);}} style={{display:"block",width:"100%",padding:"6px 8px",marginBottom:2,borderRadius:4,border:`1px solid ${CL.bdr}`,background:"#FFF",cursor:"pointer",textAlign:"left"}}><div style={{fontSize:11,fontWeight:700}}>{d.name}</div><div style={{fontSize:9,color:CL.sub}}>{d.code} / {d.category}</div></button>))}</div></>}</div>}
-
-          {popup==="billing"&&<div><div style={{padding:10,background:"#F9FAFB",borderRadius:6,marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",paddingBottom:6,borderBottom:`1px solid ${CL.bdr}`,marginBottom:6}}><span style={{fontSize:10,color:CL.sub}}>初再診料</span><span style={{fontWeight:800}}>{isNew?267:56}点</span></div>{procs.map((p,i)=>(<div key={i} style={{marginBottom:4}}><div style={{fontSize:11,fontWeight:700}}>{S(p.tooth)} {p.procedure_name}</div>{p.fee_items.map((fi,j)=>(<div key={j} style={{display:"flex",justifyContent:"space-between",paddingLeft:12,fontSize:10}}><span>{fi.name}</span><span>{fi.points*fi.count}点</span></div>))}</div>))}<div style={{borderTop:`2px solid ${CL.txt}`,paddingTop:6,marginTop:8,display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:800,color:CL.acc}}>合計</span><span style={{fontWeight:900,fontSize:18,color:CL.acc}}>{total}点</span></div><div style={{textAlign:"right",fontSize:10,color:CL.sub}}>{Math.round(patient.burden*10)}割負担 ¥{Math.round(total*10*patient.burden).toLocaleString()}</div></div><button onClick={billing} style={{width:"100%",padding:12,borderRadius:7,border:"none",cursor:"pointer",fontWeight:800,fontSize:13,background:CL.acc,color:"#FFF"}}>💰 算定確定 → 会計へ</button></div>}
+        {/* ===== アクションボタン（縦） ===== */}
+        <div className="w-16 bg-white border-l flex flex-col items-center py-4 gap-3">
+          {[
+            { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
+            { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio" },
+            { type: "voice" as PopupType, icon: "🎙", label: "録音", step: "voice" },
+            { type: "diagnosis" as PopupType, icon: "🔍", label: "病名", step: "diagnosis" },
+            { type: "treatment" as PopupType, icon: "💊", label: "治療", step: "treatment" },
+            { type: "billing" as PopupType, icon: "💰", label: "算定", step: "billing" },
+          ].map((btn) => (
+            <button
+              key={btn.type}
+              onClick={() => setPopup(popup === btn.type ? null : btn.type)}
+              className={`flex flex-col items-center gap-0.5 w-12 h-12 rounded-lg border text-xs
+                ${focusStep === btn.step ? "ring-2 ring-blue-400 border-blue-400 bg-blue-50" : "hover:bg-gray-50"}
+                ${popup === btn.type ? "bg-blue-100 border-blue-400" : ""}
+              `}
+            >
+              <span className="text-lg">{btn.icon}</span>
+              <span className="text-gray-500" style={{ fontSize: 9 }}>{btn.label}</span>
+            </button>
+          ))}
         </div>
-      </div>)}
+
+        {/* ===== ポップアップパネル ===== */}
+        {popup && (
+          <div className="w-80 bg-white border-l shadow-lg overflow-y-auto">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <h3 className="font-medium text-gray-700">
+                {popup === "photo" && "📸 写真・レントゲン"}
+                {popup === "perio" && "🦷 歯周検査（P検）"}
+                {popup === "voice" && "🎙 音声録音"}
+                {popup === "diagnosis" && "🔍 傷病名選択"}
+                {popup === "treatment" && "💊 治療パターン"}
+                {popup === "billing" && "💰 算定プレビュー"}
+              </h3>
+              <button onClick={() => setPopup(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+
+            <div className="p-4">
+              {/* 写真アップ */}
+              {popup === "photo" && (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                    {photoLoading ? (
+                      <div>
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500">AI解析中...</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-4xl mb-2">📸</div>
+                        <p className="text-sm text-gray-600 mb-3">レントゲン・口腔内写真をアップロード</p>
+                        <label className="cursor-pointer bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700">
+                          ファイル選択
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handlePhotoUpload}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+
+                  {aiToothFindings.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-sm mb-2">AI所見</h4>
+                      <div className="space-y-2">
+                        {aiToothFindings.map((f, i) => (
+                          <div key={i} className="flex items-center justify-between border rounded p-2">
+                            <div>
+                              <span className="font-medium text-sm">{f.tooth}番</span>
+                              <span className="text-xs text-gray-600 ml-2">{f.finding}</span>
+                              <span className="text-xs text-gray-400 ml-1">({Math.round(f.confidence * 100)}%)</span>
+                            </div>
+                            <button
+                              onClick={() => applyAiFindings(i)}
+                              className="bg-purple-600 text-white text-xs px-2 py-1 rounded"
+                            >
+                              反映
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={applyAllAiFindings}
+                          className="w-full bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700"
+                        >
+                          一括反映
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* P検 */}
+              {popup === "perio" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-4 gap-2">
+                    {[16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36].map((tooth) => (
+                      <div key={tooth} className="text-center">
+                        <div className="text-xs text-gray-500 mb-1">{tooth}</div>
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          placeholder="mm"
+                          value={perioData[String(tooth)] || ""}
+                          onChange={(e) => setPerioData((prev) => ({
+                            ...prev,
+                            [String(tooth)]: Number(e.target.value),
+                          }))}
+                          className={`w-full border rounded text-center text-sm py-1 ${
+                            (perioData[String(tooth)] || 0) >= 4 ? "border-red-400 bg-red-50" : ""
+                          }`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="text-xs text-gray-500">
+                    {Object.values(perioData).filter((v) => v >= 4).length}箇所が4mm以上
+                  </div>
+
+                  <button
+                    onClick={savePerioData}
+                    disabled={Object.keys(perioData).length === 0}
+                    className="w-full bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
+                  >
+                    P検を保存 →
+                  </button>
+                </div>
+              )}
+
+              {/* 音声録音 */}
+              {popup === "voice" && (
+                <div className="space-y-4 text-center">
+                  {voiceLoading ? (
+                    <div className="py-8">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+                      <p className="text-gray-600">AI解析中...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center text-5xl cursor-pointer transition-all ${
+                          isRecording
+                            ? "bg-red-500 animate-pulse shadow-lg shadow-red-300"
+                            : "bg-gray-100 hover:bg-gray-200"
+                        }`}
+                        onClick={isRecording ? stopRecording : startRecording}
+                      >
+                        🎙
+                      </div>
+
+                      {isRecording && (
+                        <div className="text-red-600 font-medium">
+                          録音中... {Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:
+                          {(recordingSeconds % 60).toString().padStart(2, "0")}
+                        </div>
+                      )}
+
+                      <p className="text-sm text-gray-500">
+                        {isRecording ? "タップして停止" : "タップして録音開始"}
+                      </p>
+
+                      {transcript && (
+                        <div className="bg-gray-50 border rounded p-3 text-left">
+                          <p className="text-xs text-gray-500 mb-1">文字起こし</p>
+                          <p className="text-sm">{transcript}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* 傷病名選択 */}
+              {popup === "diagnosis" && (
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="歯番（例: 46）"
+                      value={selectedTooth}
+                      onChange={(e) => setSelectedTooth(e.target.value)}
+                      className="w-20 border rounded px-2 py-1.5 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="傷病名を検索..."
+                      value={diagnosisSearch}
+                      onChange={(e) => setDiagnosisSearch(e.target.value)}
+                      className="flex-1 border rounded px-3 py-1.5 text-sm"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="space-y-1 max-h-80 overflow-y-auto">
+                    {diagnosisMaster
+                      .filter((d) =>
+                        diagnosisSearch.length < 1
+                          ? false
+                          : d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase())
+                      )
+                      .slice(0, 20)
+                      .map((d) => (
+                        <button
+                          key={d.code}
+                          onClick={() => {
+                            const diag: DetectedDiagnosis = {
+                              tooth: selectedTooth,
+                              code: d.code,
+                              name: d.name,
+                              confidence: 1.0,
+                              reason: "手動選択",
+                            };
+                            confirmDiagnosis(diag);
+                            setPopup(null);
+                            setDiagnosisSearch("");
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 flex items-center justify-between"
+                        >
+                          <span>{d.name}</span>
+                          <span className="text-xs text-gray-400">{d.code} · {d.category}</span>
+                        </button>
+                      ))}
+
+                    {diagnosisSearch.length > 0 && diagnosisMaster.filter((d) =>
+                      d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase())
+                    ).length === 0 && (
+                      <p className="text-center text-gray-400 text-sm py-4">該当なし</p>
+                    )}
+
+                    {diagnosisSearch.length < 1 && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-400">よく使う傷病名</p>
+                        {["C2:う蝕(C2)", "C3:う蝕(C3)", "Pul:歯髄炎", "Per:根尖性歯周炎", "G:歯肉炎", "P2:歯周炎(P2)"].map((item) => {
+                          const [code, name] = item.split(":");
+                          return (
+                            <button
+                              key={code}
+                              onClick={() => {
+                                const diag: DetectedDiagnosis = {
+                                  tooth: selectedTooth,
+                                  code,
+                                  name,
+                                  confidence: 1.0,
+                                  reason: "手動選択",
+                                };
+                                confirmDiagnosis(diag);
+                                setPopup(null);
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50"
+                            >
+                              {name} <span className="text-xs text-gray-400">{code}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 治療パターン全一覧 */}
+              {popup === "treatment" && (
+                <div className="space-y-2">
+                  {suggestedTreatments.length === 0 ? (
+                    <p className="text-center text-gray-400 text-sm py-4">
+                      傷病名を確定すると治療パターンが表示されます
+                    </p>
+                  ) : (
+                    <>
+                      {["restoration", "endo", "perio", "surgery", "prosth", "denture", "basic"].map((cat) => {
+                        const catProcs = suggestedTreatments.filter((p) => p.category === cat);
+                        if (catProcs.length === 0) return null;
+                        return (
+                          <div key={cat}>
+                            <div className="text-xs text-gray-500 font-medium px-1 py-1 uppercase">{cat}</div>
+                            {catProcs.map((proc, i) => (
+                              <button
+                                key={i}
+                                onClick={() => {
+                                  selectTreatment(proc);
+                                  setPopup(null);
+                                }}
+                                className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 mb-1 flex justify-between"
+                              >
+                                <span>{proc.procedure_name}</span>
+                                <span className="text-blue-700 font-medium">{proc.points}点</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* 算定プレビュー */}
+              {popup === "billing" && (
+                <div className="space-y-3">
+                  {(medicalRecord.structured_procedures || []).length === 0 ? (
+                    <p className="text-center text-gray-400 text-sm py-4">処置記録がありません</p>
+                  ) : (
+                    <>
+                      {(medicalRecord.structured_procedures || []).map((proc, i) => (
+                        <div key={i} className="flex justify-between text-sm border-b pb-2">
+                          <div>
+                            <div className="font-medium">{proc.procedure_name}</div>
+                            <div className="text-xs text-gray-500">
+                              {proc.tooth ? `${proc.tooth}番 ` : ""}{proc.diagnosis_name}
+                            </div>
+                          </div>
+                          <div className="font-medium text-blue-700">{proc.points}点</div>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-bold text-lg border-t pt-2">
+                        <span>合計</span>
+                        <span className="text-blue-700">{totalPoints}点</span>
+                      </div>
+                      <div className="text-right text-sm text-gray-500">
+                        3割負担: {Math.round(totalPoints * 10 * 0.3).toLocaleString()}円
+                      </div>
+                      <button
+                        onClick={() => {
+                          setPopup(null);
+                          finalizeBilling();
+                        }}
+                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700"
+                      >
+                        算定確定 → 会計へ
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
-  </div>);
+  );
 }
 
-function B({i,l,bg,c,b,o}:{i:string;l:string;bg:string;c:string;b:string;o:()=>void}){return<button onClick={o} style={{padding:"7px 11px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",border:`1.5px solid ${b}`,background:bg,color:c,display:"flex",alignItems:"center",gap:4}}>{i} {l}</button>;}
+// ==============================
+// 歯式チャートコンポーネント
+// ==============================
+function ToothChart({
+  chart,
+  dim,
+  onToothClick,
+  editingTooth,
+  onSetStatus,
+}: {
+  chart: Record<string, ToothStatus>;
+  dim: boolean;
+  onToothClick: (tooth: number) => void;
+  editingTooth: number | null;
+  onSetStatus: (tooth: number, status: string) => void;
+}) {
+  const UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+  const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
-export default function Page(){return<Suspense fallback={<div style={{padding:40,textAlign:"center"}}>読み込み中...</div>}><Content /></Suspense>;}
+  const STATUS_OPTIONS = [
+    { value: "healthy", label: "正常", color: "bg-green-100" },
+    { value: "caries", label: "う蝕", color: "bg-red-400 text-white" },
+    { value: "missing", label: "欠損", color: "bg-gray-600 text-white" },
+    { value: "crown", label: "補綴", color: "bg-yellow-400" },
+    { value: "implant", label: "IMP", color: "bg-blue-400 text-white" },
+    { value: "rct", label: "RCT", color: "bg-purple-400 text-white" },
+    { value: "bridge", label: "BRG", color: "bg-orange-400" },
+  ];
+
+  return (
+    <div className={dim ? "opacity-40" : ""}>
+      {/* 上顎 */}
+      <div className="flex gap-0.5 mb-1">
+        {UPPER.map((tooth) => (
+          <div key={tooth} className="relative">
+            <button
+              onClick={() => !dim && onToothClick(tooth)}
+              className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border
+                ${toothStatusColor(chart[String(tooth)]?.status)}
+                ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""}
+                ${!dim ? "hover:opacity-80" : "cursor-default"}
+              `}
+            >
+              <span style={{ fontSize: 8 }}>{tooth}</span>
+              <span style={{ fontSize: 7 }} className="truncate">
+                {chart[String(tooth)]?.status?.slice(0, 3) || ""}
+              </span>
+            </button>
+            {editingTooth === tooth && !dim && (
+              <div className="absolute top-9 left-0 z-50 bg-white border rounded shadow-lg p-2 w-28">
+                {STATUS_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => onSetStatus(tooth, opt.value)}
+                    className={`w-full text-left px-2 py-1 text-xs rounded mb-0.5 ${opt.color} hover:opacity-80`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {/* 下顎 */}
+      <div className="flex gap-0.5">
+        {LOWER.map((tooth) => (
+          <div key={tooth} className="relative">
+            <button
+              onClick={() => !dim && onToothClick(tooth)}
+              className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border
+                ${toothStatusColor(chart[String(tooth)]?.status)}
+                ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""}
+                ${!dim ? "hover:opacity-80" : "cursor-default"}
+              `}
+            >
+              <span style={{ fontSize: 8 }}>{tooth}</span>
+              <span style={{ fontSize: 7 }} className="truncate">
+                {chart[String(tooth)]?.status?.slice(0, 3) || ""}
+              </span>
+            </button>
+            {editingTooth === tooth && !dim && (
+              <div className="absolute bottom-9 left-0 z-50 bg-white border rounded shadow-lg p-2 w-28">
+                {STATUS_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => onSetStatus(tooth, opt.value)}
+                    className={`w-full text-left px-2 py-1 text-xs rounded mb-0.5 ${opt.color} hover:opacity-80`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
