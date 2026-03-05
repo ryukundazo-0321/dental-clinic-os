@@ -276,7 +276,8 @@ function UnitContent() {
       },{onConflict:"appointment_id,chunk_index"}).then(()=>{});
       // 全文（前回分+今回分）でclassify
       const classifyRes=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({appointment_id:appointmentId,transcript:newTranscript})});
+        body:JSON.stringify({appointment_id:appointmentId,transcript:newTranscript,perio_points:perioPoints,perio_order:perioOrder})});
+
       if(classifyRes.ok){const r=await classifyRes.json();if(r.success){setStatus(`✅ ${r.fields_generated}フィールド生成完了！`);loadDrafts();}
         else setStatus("⚠️ "+(r.error||"振り分け問題"));}
       else setStatus("❌ AI振り分けエラー");
@@ -503,7 +504,7 @@ function UnitContent() {
 
     try{
       const classifyRes=await fetch("/api/karte-agent/classify-and-draft",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({appointment_id:appointmentId,transcript:newTranscript})});
+        body:JSON.stringify({appointment_id:appointmentId,transcript:newTranscript,perio_points:perioPoints,perio_order:perioOrder})});
       if(classifyRes.ok){const r=await classifyRes.json();if(r.success){setStatus(`✅ ${r.fields_generated}フィールド生成完了！`);loadDrafts();}
         else setStatus("⚠️ "+(r.error||"振り分け問題"));}
       else setStatus("❌ AI振り分けエラー");
@@ -995,6 +996,24 @@ function UnitContent() {
                     ))}
                   </div>
                 </div>
+
+                {/* 読み上げガイド */}
+                <div style={{background:"#F0F9FF",borderRadius:10,padding:"10px 14px",border:"1px solid #BAE6FD"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#0369A1",marginBottom:4}}>📖 読み上げ方ガイド</div>
+                  <div style={{fontSize:11,color:"#1E40AF",lineHeight:1.7}}>
+                    {perioPoints===1&&"各歯1つの数値（最深部）を読み上げてください。例：「右上7番、3、右上6番、4」"}
+                    {perioPoints===4&&"各歯4つの数値（頬側近心・頬側遠心・舌側近心・舌側遠心）を読み上げてください。例：「右上7番、3、3、2、2」"}
+                    {perioPoints===6&&"各歯6つの数値（MB・B・DB・ML・L・DL）を読み上げてください。例：「右上7番、3、3、2、3、3、2」"}
+                  </div>
+                  <div style={{fontSize:11,color:"#1E40AF",lineHeight:1.7,marginTop:4}}>
+                    {perioOrder==="konoji"&&"順序：右上8→右上1 → 左上1→左上8 → 左下8→左下1 → 右下1→右下8（コの字）"}
+                    {perioOrder==="z"&&"順序：右上8→左上8 → 右下8→左下8（Z型）"}
+                    {perioOrder==="s"&&"順序：右上8→左上8 → 左下8→右下8（S型）"}
+                    {perioOrder==="buccal-lingual"&&"順序：1歯ずつ頬側→舌側の順で記録"}
+                  </div>
+                  <div style={{fontSize:10,color:"#6B7280",marginTop:4}}>※ 歯番号を省略すると、上記の順序で次の歯として解釈されます</div>
+                </div>
+
 
                 <div style={{background:"#FFF",borderRadius:14,padding:20,border:"1px solid #E5E7EB"}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
