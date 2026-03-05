@@ -247,6 +247,31 @@ function QuestionnaireContent() {
     setPatientNumber_assigned(assignedPatientNumber);
     setPatientIdForSetup(apt.patient_id);
 
+    // ★ 傷病名予測: 問診票の回答からAI予測してmedical_recordsに保存
+    try {
+      const predRes = await fetch("/api/predict-diagnosis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chief_complaint: form.chief_complaint,
+          pain_types: form.pain_type.map(id => PAIN_TYPES.find(p => p.id === id)?.label).filter(Boolean),
+          pain_location: form.pain_location ? [form.pain_location] : [],
+          pain_level: form.pain_level,
+          symptom_onset: form.symptom_onset,
+        }),
+      });
+      if (predRes.ok) {
+        const predData = await predRes.json();
+        if (predData.predictions && predData.predictions.length > 0) {
+          await supabase.from("medical_records").update({
+            predicted_diagnoses: predData.predictions,
+          }).eq("appointment_id", appointmentId);
+        }
+      }
+    } catch (e) {
+      console.error("predict-diagnosis error:", e);
+    }
+
     setSaving(false);
     setStep("complete");
   }
