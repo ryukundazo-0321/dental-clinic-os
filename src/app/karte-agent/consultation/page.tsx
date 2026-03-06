@@ -317,9 +317,9 @@ export default function ConsultationPage() {
       // ==============================
       if (mr && (mr.structured_procedures || []).length === 0) {
         const isFirst = appt.visit_type === "initial" || (past || []).length === 0;
-        const feeProc = isFirst
-          ? { id: `fee-${Date.now()}`, diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }
-          : { id: `fee-${Date.now()}`, diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+        const feeProc: StructuredProcedure = isFirst
+          ? { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }
+          : { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
         const updated = [feeProc];
         await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", mr.id);
         setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
