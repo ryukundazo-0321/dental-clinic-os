@@ -218,7 +218,10 @@ export default function ConsultationPage() {
   const [integratedDiagnoses, setIntegratedDiagnoses] = useState<DetectedDiagnosis[]>([]);
 
   // P検
+  const perioRTCRef = useRef<RTCPeerConnection | null>(null);
+  const perioStreamRef = useRef<MediaStream | null>(null);
   const [perioRecording, setPerioRecording] = useState(false);
+  const [perioInterimText, setPerioInterimText] = useState("");
   const [perioData, setPerioData] = useState<Record<string, number>>({});
   const [perioBOP, setPerioBOP] = useState<Record<string, boolean>>({});
   const [perioMobility, setPerioMobility] = useState<Record<string, number>>({});
@@ -900,33 +903,115 @@ export default function ConsultationPage() {
     }
   }
 
-  function startPerioVoice() {
-    const SR = (window as unknown as Record<string, unknown>).SpeechRecognition
-      || (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-    if (!SR) { addLog("⚠️ 音声認識非対応"); return; }
-    setPerioRecording(true);
-    const recog = new (SR as new() => {
-      lang: string; continuous: boolean; interimResults: boolean;
-      onresult: (e: { results: { [k: number]: { [k: number]: { transcript: string } }; length: number } }) => void;
-      onerror: () => void; onend: () => void; start: () => void; stop: () => void;
-    })();
-    recog.lang = "ja-JP";
-    recog.continuous = true;
-    recog.interimResults = false;
-    recog.onresult = (e) => {
-      for (let i = 0; i < e.results.length; i++) parsePerioVoice(e.results[i][0].transcript);
-    };
-    recog.onerror = () => setPerioRecording(false);
-    recog.onend = () => setPerioRecording(false);
-    recog.start();
-    (window as unknown as Record<string, unknown>)._perioRecog = recog;
+  async function startPerioVoice() {
+    console.log("=== startPerioVoice called ===");
+    try {
+      // サーバーからephemeral tokenを取得（APIキーを隠蔽）
+      addLog("🔑 Realtime API接続中...");
+      console.log("🔑 Realtime API接続中...");
+      // Supabaseセッショントークンを取得してサーバーに送る（認証チェック用）
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log("session:", session ? "あり" : "なし");
+      if (!session) { addLog("⚠️ ログインが必要です"); console.error("session null"); return; }
+
+      const tokenRes = await fetch("/api/realtime-token", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      if (!tokenRes.ok) {
+        const err = await tokenRes.json();
+        addLog(`⚠️ トークン取得失敗: ${err.error || tokenRes.status}`);
+        return;
+      }
+      const { client_secret } = await tokenRes.json();
+
+      // マイク取得
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      perioStreamRef.current = stream;
+
+      // WebRTC接続
+      const pc = new RTCPeerConnection();
+      perioRTCRef.current = pc;
+
+      // 音声トラック追加
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      // DataChannel（テキスト受信用）
+      const dc = pc.createDataChannel("oai-events");
+      dc.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          // リアルタイム途中テキスト
+          if (msg.type === "conversation.item.input_audio_transcription.delta") {
+            setPerioInterimText(prev => prev + (msg.delta || ""));
+          }
+          // 確定テキスト
+          if (msg.type === "conversation.item.input_audio_transcription.completed") {
+            const text = msg.transcript || "";
+            setPerioInterimText("");
+            if (text.trim()) {
+              addLog(`✅ 認識: "${text}"`);
+              parsePerioVoice(text);
+            }
+          }
+        } catch { /* ignore */ }
+      };
+
+      // セッション設定（接続後に送信）
+      dc.onopen = () => {
+        dc.send(JSON.stringify({
+          type: "session.update",
+          session: {
+            modalities: ["text"],
+            input_audio_transcription: { model: "whisper-1" },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              silence_duration_ms: 800,
+            },
+          },
+        }));
+        setPerioRecording(true);
+        addLog("🎙 Realtime API接続完了 — 話してください");
+      };
+
+      // SDP交換
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const sdpRes = await fetch(
+        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${client_secret}`,
+            "Content-Type": "application/sdp",
+          },
+          body: offer.sdp,
+        }
+      );
+      const answerSdp = await sdpRes.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+
+    } catch (err) {
+      addLog("⚠️ Realtime API接続エラー");
+      console.error(err);
+      setPerioRecording(false);
+    }
   }
 
   function stopPerioVoice() {
+    perioRTCRef.current?.close();
+    perioRTCRef.current = null;
+    perioStreamRef.current?.getTracks().forEach(t => t.stop());
+    perioStreamRef.current = null;
     setPerioRecording(false);
-    const r = (window as unknown as Record<string, unknown>)._perioRecog as { stop: () => void } | undefined;
-    if (r) r.stop();
+    setPerioInterimText("");
+    addLog("🛑 音声入力終了");
   }
+
 
   async function savePerioData() {
     if (!medicalRecord) return;
@@ -1286,9 +1371,10 @@ export default function ConsultationPage() {
                 {perioStep === "mobility" && `0〜3の数字を言ってください — 現在: ${currentTooth ? `${currentTooth}番` : "完了"}`}
                 {perioStep === "recession" && `退縮量(mm)を言ってください — 現在: ${currentTooth ? `${currentTooth}番` : "完了"}`}
               </div>
-              {/* 進捗バー */}
-              <div className="text-xs text-gray-400">
-                {perioVoiceToothIdx}/{activTeeth.length}歯
+              {/* 進捗 & リアルタイムテキスト */}
+              <div className="flex flex-col items-end gap-1">
+                <div className="text-xs text-gray-400">{perioVoiceToothIdx}/{activTeeth.length}歯</div>
+                {perioInterimText && <div className="text-xs text-purple-600 animate-pulse max-w-[200px] truncate">🎙 {perioInterimText}</div>}
               </div>
             </div>
 
@@ -2177,4 +2263,3 @@ function ToothChart({
     </div>
   );
 }
-
