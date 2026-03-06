@@ -1827,7 +1827,31 @@ export default function ConsultationPage() {
           <div className="bg-white rounded-lg border p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-medium text-gray-700">📋 処置記録</h3>
-              <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100">+ 傷病名追加</button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    if (!medicalRecord) return;
+                    const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+                    const updated = [...(medicalRecord.structured_procedures || []), fee];
+                    await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
+                    setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev);
+                    addLog("💰 歯科初診料（267点）を追加");
+                  }}
+                  className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded hover:bg-green-100"
+                >＋初診料</button>
+                <button
+                  onClick={async () => {
+                    if (!medicalRecord) return;
+                    const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+                    const updated = [...(medicalRecord.structured_procedures || []), fee];
+                    await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
+                    setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev);
+                    addLog("💰 歯科再診料（58点）を追加");
+                  }}
+                  className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded hover:bg-gray-100"
+                >＋再診料</button>
+                <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100">+ 傷病名追加</button>
+              </div>
             </div>
             {(medicalRecord.structured_procedures || []).length === 0 ? (
               <div className="text-center py-8 text-gray-400">
