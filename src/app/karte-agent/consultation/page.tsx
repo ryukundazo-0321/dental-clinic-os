@@ -966,24 +966,7 @@ export default function ConsultationPage() {
               parsePerioVoice(text);
             }
           }
-          // AIテキスト返答（response.text.done）でも拾う
-          if (msg.type === "response.text.done") {
-            const text = msg.text || "";
-            setPerioInterimText("");
-            if (text.trim()) {
-              addLog(`✅ 認識: "${text}"`);
-              parsePerioVoice(text);
-            }
-          }
-          // response.audio_transcript.done でも拾う
-          if (msg.type === "response.audio_transcript.done") {
-            const text = msg.transcript || "";
-            setPerioInterimText("");
-            if (text.trim()) {
-              addLog(`✅ 認識: "${text}"`);
-              parsePerioVoice(text);
-            }
-          }
+          // ※ response.text.done は使わない（AIが数字を繰り返すため二重入力になる）
         } catch { /* ignore */ }
       };
 
@@ -993,7 +976,8 @@ export default function ConsultationPage() {
           type: "session.update",
           session: {
             modalities: ["text"],
-            instructions: "あなたは歯科の歯周検査アシスタントです。ユーザーが読み上げた数字をそのままテキストで返してください。余計な言葉は一切不要です。例: ユーザー「2 3 4」→ あなた「2 3 4」",
+            // AIの自動返答を無効化（文字起こしのみ使用）
+            instructions: "何も返答しないでください。文字起こしのみ行ってください。",
             input_audio_transcription: { model: "whisper-1" },
             turn_detection: {
               type: "server_vad",
