@@ -803,7 +803,7 @@ export default function ConsultationPage() {
 
     if (perioStep === "pocket") {
       // 「3 4 3」「近心3 中央4 遠心3」「3.4.3」などを抽出
-      const nums = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(?:mm)?(?:\s+|$)/g)]
+      const nums = Array.from(text.matchAll(/(\d+(?:\.\d+)?)\s*(?:mm)?(?:\s+|$)/g))
         .map(m => parseFloat(m[1]))
         .filter(n => n >= 0 && n <= 12);
       // 歯番の数字を除外
