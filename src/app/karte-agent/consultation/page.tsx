@@ -320,7 +320,6 @@ export default function ConsultationPage() {
 
       addLog("カルテを読み込みました");
     } catch (err) {
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -422,7 +421,6 @@ export default function ConsultationPage() {
         }
       }
     } catch (err) {
-      console.error("voice analysis error:", err);
       addLog("⚠️ 音声解析に失敗しました");
     } finally {
       setVoiceLoading(false);
@@ -508,10 +506,8 @@ export default function ConsultationPage() {
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData.error || `HTTP ${res.status}`;
         addLog(`⚠️ レントゲン解析エラー: ${errMsg}`);
-        console.error("xray-analyze error:", errMsg);
       }
     } catch (err) {
-      console.error("photo upload error:", err);
       addLog("⚠️ 写真解析に失敗しました");
     } finally {
       setPhotoLoading(false);
@@ -697,7 +693,6 @@ export default function ConsultationPage() {
         addLog(`💊 治療パターン${converted.length}件を提案`);
       }
     } catch (err) {
-      console.error(err);
     }
   }
 
@@ -913,15 +908,12 @@ export default function ConsultationPage() {
   }
 
   async function startPerioVoice() {
-    console.log("=== startPerioVoice called ===");
     try {
       // サーバーからephemeral tokenを取得（APIキーを隠蔽）
       addLog("🔑 Realtime API接続中...");
-      console.log("🔑 Realtime API接続中...");
       // Supabaseセッショントークンを取得してサーバーに送る（認証チェック用）
       const { data: { session } } = await supabase.auth.getSession();
-      console.log("session:", session ? "あり" : "なし");
-      if (!session) { addLog("⚠️ ログインが必要です"); console.error("session null"); return; }
+      if (!session) { addLog("⚠️ ログインが必要です"); return; }
 
       const tokenRes = await fetch("/api/realtime-token", {
         method: "POST",
@@ -1011,7 +1003,6 @@ export default function ConsultationPage() {
 
     } catch (err) {
       addLog("⚠️ Realtime API接続エラー");
-      console.error(err);
       setPerioRecording(false);
     }
   }
@@ -1156,7 +1147,6 @@ export default function ConsultationPage() {
       addLog("💰 算定確定完了 → 会計へ");
       router.push(`/billing?appointment_id=${appointment.id}`);
     } catch (err) {
-      console.error(err);
       addLog("⚠️ 算定確定に失敗しました");
     }
   }
