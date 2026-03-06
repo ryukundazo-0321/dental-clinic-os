@@ -80,6 +80,22 @@ interface DetectedDiagnosis {
   reason: string;
 }
 
+interface DiagnosisWithTooth {
+  tooth: string;
+  code: string;
+  name: string;
+  short?: string;
+  confidence: number;
+  reason: string;
+}
+
+interface TreatmentScheduleItem {
+  sessionNo: number; // 何回目
+  teeth: string[];   // その回でやる歯番
+  diagnoses: DiagnosisWithTooth[]; // その回でやる傷病
+  label: string;     // 例: "第1回: 16番 C2"
+}
+
 interface ProcedurePattern {
   id: string;
   procedure_name: string;
@@ -197,6 +213,15 @@ export default function ConsultationPage() {
   const [billingMissItems, setBillingMissItems] = useState<BillingMissItem[]>([]);
   const [suggestedTreatments, setSuggestedTreatments] = useState<ProcedurePattern[]>([]);
   const [confirmedDiagnosis, setConfirmedDiagnosis] = useState<DetectedDiagnosis | null>(null);
+  // 複数傷病名リスト（確定済み）
+  const [confirmedDiagnosesList, setConfirmedDiagnosesList] = useState<DiagnosisWithTooth[]>([]);
+  // 治療スケジュール
+  const [treatmentSchedule, setTreatmentSchedule] = useState<TreatmentScheduleItem[]>([]);
+  const [showSchedulePopup, setShowSchedulePopup] = useState(false);
+  const [scheduleDraft, setScheduleDraft] = useState<TreatmentScheduleItem[]>([]);
+  // 今日やる歯番リスト
+  const [todayTeeth, setTodayTeeth] = useState<string[]>([]);
+  const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
 
   // 音声録音
   const [isRecording, setIsRecording] = useState(false);
@@ -651,6 +676,14 @@ export default function ConsultationPage() {
   async function confirmDiagnosis(diag: DetectedDiagnosis) {
     if (!patient || !medicalRecord) return;
     setConfirmedDiagnosis(diag);
+
+    // 複数傷病リストに追加（重複チェック）
+    setConfirmedDiagnosesList(prev => {
+      const exists = prev.some(d => d.tooth === diag.tooth && d.code === diag.code);
+      if (exists) return prev;
+      return [...prev, { tooth: diag.tooth, code: diag.code, name: diag.name, short: diag.short, confidence: diag.confidence, reason: diag.reason }];
+    });
+
     addLog(`✅ 傷病名確定: ${diag.tooth ? `${diag.tooth}番 ` : ""}${diag.name}`);
 
     await supabase.from("patient_diagnoses").insert({
@@ -663,7 +696,6 @@ export default function ConsultationPage() {
     });
 
     setFocusStep("treatment");
-    // short があればそちら優先（"Pul", "C2" など）、なければ code を使用
     const shortCode = diag.short || diag.code;
     await fetchTreatmentPatterns(shortCode);
     setDetectedDiagnoses([]);
@@ -1732,6 +1764,82 @@ export default function ConsultationPage() {
           </div>
         )}
 
+        {/* 治療スケジュールポップアップ */}
+        {showSchedulePopup && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSchedulePopup(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 transition-all" onClick={e => e.stopPropagation()}>
+              <h2 className="text-lg font-bold text-gray-800 mb-1">📅 治療スケジュール</h2>
+              <p className="text-xs text-gray-500 mb-4">各回に治療する歯をドラッグで入れ替えられます。セッションの追加・削除も可能です。</p>
+
+              <div className="space-y-3 max-h-80 overflow-y-auto">
+                {scheduleDraft.map((session, si) => (
+                  <div key={si} className="border rounded-xl p-3 bg-gray-50">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-indigo-700">第{session.sessionNo}回</span>
+                      <button
+                        onClick={() => setScheduleDraft(prev => prev.filter((_, i) => i !== si).map((s, i) => ({ ...s, sessionNo: i + 1 })))}
+                        className="text-xs text-red-400 hover:text-red-600"
+                      >削除</button>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {session.diagnoses.map((d, di) => (
+                        <div key={di} className="flex items-center gap-1 bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full">
+                          <span>{d.tooth ? `${d.tooth}番 ` : ""}{d.name}</span>
+                          {/* 別セッションに移動 */}
+                          {scheduleDraft.length > 1 && (
+                            <select
+                              className="text-xs bg-transparent border-none outline-none cursor-pointer"
+                              value={si}
+                              onChange={e => {
+                                const targetSession = parseInt(e.target.value);
+                                setScheduleDraft(prev => {
+                                  const next = prev.map(s => ({ ...s, diagnoses: [...s.diagnoses] }));
+                                  next[si].diagnoses = next[si].diagnoses.filter((_, i) => i !== di);
+                                  next[si].teeth = next[si].diagnoses.map(x => x.tooth).filter(Boolean);
+                                  next[targetSession].diagnoses.push(d);
+                                  next[targetSession].teeth = next[targetSession].diagnoses.map(x => x.tooth).filter(Boolean);
+                                  return next.filter(s => s.diagnoses.length > 0).map((s, i) => ({ ...s, sessionNo: i + 1, label: `第${i + 1}回` }));
+                                });
+                              }}
+                            >
+                              {scheduleDraft.map((_, idx) => (
+                                <option key={idx} value={idx}>→ 第{idx + 1}回</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* セッション追加 */}
+              <button
+                onClick={() => setScheduleDraft(prev => [...prev, { sessionNo: prev.length + 1, teeth: [], diagnoses: [], label: `第${prev.length + 1}回` }])}
+                className="mt-3 w-full border-2 border-dashed border-gray-300 text-gray-400 text-sm py-2 rounded-xl hover:border-indigo-400 hover:text-indigo-500"
+              >＋ 回を追加</button>
+
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setShowSchedulePopup(false)} className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-xl text-sm">キャンセル</button>
+                <button
+                  onClick={() => {
+                    setTreatmentSchedule(scheduleDraft);
+                    // 第1回の歯を「今日やる歯」に設定
+                    const firstSession = scheduleDraft[0];
+                    const todayList = firstSession?.diagnoses.map(d => d.tooth).filter(Boolean) || [];
+                    setTodayTeeth(todayList);
+                    setScheduleConfirmed(true);
+                    setShowSchedulePopup(false);
+                    addLog(`📅 スケジュール確定: ${scheduleDraft.length}回に分けて治療（今日: ${todayList.join(", ")}番）`);
+                  }}
+                  className="flex-2 flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700"
+                >✅ 確定</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 算定漏れチェックバナー */}
         {billingMissItems.length > 0 && (
           <div className="bg-red-50 border border-red-300 rounded-lg px-3 py-2">
@@ -1822,6 +1930,69 @@ export default function ConsultationPage() {
               <ToothChart chart={toothChartDraft} dim={false} onToothClick={handleToothClick} editingTooth={editingTooth} onSetStatus={setToothStatus} />
             </div>
           </div>
+
+          {/* 傷病歯式チャート */}
+          {confirmedDiagnosesList.length > 0 && (
+            <div className="bg-white rounded-lg border p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-gray-700">🗺 傷病歯式チャート</h3>
+                <button
+                  onClick={() => {
+                    // スケジュール草案を自動生成（歯ごとに1セッション）
+                    const draft = confirmedDiagnosesList.map((d, i) => ({
+                      sessionNo: i + 1,
+                      teeth: [d.tooth].filter(Boolean),
+                      diagnoses: [d],
+                      label: `第${i + 1}回: ${d.tooth ? `${d.tooth}番 ` : ""}${d.name}`,
+                    }));
+                    setScheduleDraft(draft);
+                    setShowSchedulePopup(true);
+                  }}
+                  className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700"
+                >
+                  📅 治療スケジュールを組む
+                </button>
+              </div>
+              {/* 傷病歯式マップ */}
+              <DiagnosisToothChart diagnoses={confirmedDiagnosesList} todayTeeth={todayTeeth} scheduleConfirmed={scheduleConfirmed} />
+              {/* 傷病リスト */}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {confirmedDiagnosesList.map((d, i) => (
+                  <div key={i} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${todayTeeth.includes(d.tooth) ? "bg-indigo-100 border-indigo-400 text-indigo-800" : "bg-gray-50 border-gray-200 text-gray-600"}`}>
+                    <span>{d.tooth ? `${d.tooth}番` : ""} {d.name}</span>
+                    {todayTeeth.includes(d.tooth) && <span className="text-indigo-600 font-bold">今日</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* スケジュール確定後 → 今日やる歯ごとに治療パターン呼び出しボタン */}
+              {scheduleConfirmed && todayTeeth.length > 0 && (
+                <div className="mt-4 border-t pt-3">
+                  <p className="text-xs text-gray-500 mb-2">今日治療する歯をタップして治療パターンを選択してください：</p>
+                  <div className="flex flex-wrap gap-2">
+                    {confirmedDiagnosesList
+                      .filter(d => todayTeeth.includes(d.tooth))
+                      .map((d, i) => (
+                        <button
+                          key={i}
+                          onClick={async () => {
+                            setConfirmedDiagnosis(d as DetectedDiagnosis);
+                            const shortCode = d.short || d.code;
+                            await fetchTreatmentPatterns(shortCode);
+                            addLog(`🦷 ${d.tooth}番 ${d.name} の治療パターンを表示`);
+                          }}
+                          className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-sm flex items-center gap-2"
+                        >
+                          <span className="font-bold">{d.tooth}番</span>
+                          <span>{d.name}</span>
+                          <span className="text-indigo-200 text-xs">→ 治療パターン</span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 処置記録 */}
           <div className="bg-white rounded-lg border p-4">
@@ -2209,6 +2380,72 @@ export default function ConsultationPage() {
 // ==============================
 // 歯式チャートコンポーネント
 // ==============================
+// ==============================
+// 傷病歯式チャートコンポーネント
+// ==============================
+function DiagnosisToothChart({
+  diagnoses, todayTeeth, scheduleConfirmed,
+}: {
+  diagnoses: DiagnosisWithTooth[];
+  todayTeeth: string[];
+  scheduleConfirmed: boolean;
+}) {
+  const UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+  const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+
+  function getDiag(tooth: number) {
+    return diagnoses.find(d => d.tooth === String(tooth));
+  }
+
+  function getToothStyle(tooth: number) {
+    const d = getDiag(tooth);
+    if (!d) return "bg-white border border-gray-200 text-gray-300";
+    const isToday = todayTeeth.includes(String(tooth));
+    if (scheduleConfirmed) {
+      if (isToday) return "bg-indigo-500 text-white border-2 border-indigo-700 shadow-md ring-2 ring-indigo-300";
+      return "bg-gray-200 text-gray-400 border border-gray-300 opacity-50";
+    }
+    return "bg-red-400 text-white border-2 border-red-600 shadow-sm";
+  }
+
+  function ToothCell({ tooth }: { tooth: number }) {
+    const d = getDiag(tooth);
+    const isToday = todayTeeth.includes(String(tooth));
+    return (
+      <div className="relative group">
+        <div className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center transition-all ${getToothStyle(tooth)}`}>
+          <span style={{ fontSize: 8 }}>{tooth}</span>
+          {d && <span style={{ fontSize: 7 }} className="truncate font-bold">{d.short || d.code}</span>}
+        </div>
+        {d && (
+          <div className="absolute bottom-9 left-1/2 -translate-x-1/2 z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1 w-32 whitespace-normal pointer-events-none shadow-lg">
+            {tooth}番: {d.name}
+            {scheduleConfirmed && <span className="ml-1">{isToday ? "✅今日" : "⏳次回以降"}</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex gap-0.5 mb-1">
+        {UPPER.map(t => <ToothCell key={t} tooth={t} />)}
+      </div>
+      <div className="flex gap-0.5">
+        {LOWER.map(t => <ToothCell key={t} tooth={t} />)}
+      </div>
+      {scheduleConfirmed && (
+        <div className="flex gap-3 mt-2 text-xs text-gray-500">
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-indigo-500 inline-block"></span>今日治療</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-200 inline-block"></span>次回以降</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-white border border-gray-200 inline-block"></span>異常なし</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToothChart({
   chart, dim, onToothClick, editingTooth, onSetStatus,
 }: {
