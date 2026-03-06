@@ -229,8 +229,10 @@ export default function ConsultationPage() {
   const [perioMode, setPerioMode] = useState<1 | 3 | 6>(3);
   const [perioStep, setPerioStep] = useState<"pocket" | "bop" | "mobility" | "recession">("pocket");
   const [showPerioFull, setShowPerioFull] = useState(false);
-  const [perioVoiceToothIdx, setPerioVoiceToothIdx] = useState(0); // 現在入力中の歯インデックス
+  const [perioVoiceToothIdx, setPerioVoiceToothIdx] = useState(0); // 現在入力中の歯インデックス（表示用）
+  const perioVoiceToothIdxRef = useRef(0); // 実際の進捗（クロージャ対策）
   const [perioVoiceBuffer, setPerioVoiceBuffer] = useState<number[]>([]); // 入力バッファ
+  const perioVoiceBufferRef = useRef<number[]>([]); // バッファ（クロージャ対策）
   const [perioStepPopup, setPerioStepPopup] = useState<string>(""); // ステップ完了ポップアップ
 
   // 歯式編集
@@ -824,6 +826,8 @@ export default function ConsultationPage() {
       setTimeout(() => {
         setPerioStepPopup("");
         setPerioStep(nextStep);
+        perioVoiceToothIdxRef.current = 0;
+        perioVoiceBufferRef.current = [];
         setPerioVoiceToothIdx(0);
         setPerioVoiceBuffer([]);
       }, 1800);
@@ -838,9 +842,9 @@ export default function ConsultationPage() {
 
     if (perioStep === "pocket") {
       const ptsPerTooth = perioMode;
-      const newBuf = [...perioVoiceBuffer, ...nums];
+      const newBuf = [...perioVoiceBufferRef.current, ...nums];
       let buf = [...newBuf];
-      let idx = perioVoiceToothIdx;
+      let idx = perioVoiceToothIdxRef.current;
       while (buf.length >= ptsPerTooth && idx < activTeeth.length) {
         const tooth = activTeeth[idx];
         const vals = buf.splice(0, ptsPerTooth).filter(v => v >= 0 && v <= 12);
@@ -855,12 +859,14 @@ export default function ConsultationPage() {
         addLog(`✅ ${tooth}番 ${vals.join("/")}mm`);
         idx++;
       }
+      perioVoiceBufferRef.current = buf;
+      perioVoiceToothIdxRef.current = idx;
       setPerioVoiceBuffer(buf);
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("bop");
 
     } else if (perioStep === "bop") {
-      let idx = perioVoiceToothIdx;
+      let idx = perioVoiceToothIdxRef.current;
       const tokens = text.split(/[、,\s]+/);
       for (const token of tokens) {
         if (idx >= activTeeth.length) break;
@@ -872,11 +878,12 @@ export default function ConsultationPage() {
           setPerioBOP(prev => ({ ...prev, [`${tooth}`]: false })); idx++;
         }
       }
+      perioVoiceToothIdxRef.current = idx;
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("mobility");
 
     } else if (perioStep === "mobility") {
-      let idx = perioVoiceToothIdx;
+      let idx = perioVoiceToothIdxRef.current;
       for (const n of nums) {
         if (idx >= activTeeth.length) break;
         if (n >= 0 && n <= 3) {
@@ -885,11 +892,12 @@ export default function ConsultationPage() {
           addLog(`↔️ ${tooth}番 動揺${n}度`); idx++;
         }
       }
+      perioVoiceToothIdxRef.current = idx;
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("recession");
 
     } else if (perioStep === "recession") {
-      let idx = perioVoiceToothIdx;
+      let idx = perioVoiceToothIdxRef.current;
       for (const n of nums) {
         if (idx >= activTeeth.length) break;
         if (n >= 0 && n <= 10) {
@@ -898,6 +906,7 @@ export default function ConsultationPage() {
           addLog(`📉 ${tooth}番 退縮${n}mm`); idx++;
         }
       }
+      perioVoiceToothIdxRef.current = idx;
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("done");
     }
