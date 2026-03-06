@@ -219,7 +219,14 @@ export default function ConsultationPage() {
 
   // P検
   const [perioRecording, setPerioRecording] = useState(false);
+  // P検データ: キー = "歯番-点(b1/b2/b3/l1/l2/l3 or b/l or single)" 値 = mm
   const [perioData, setPerioData] = useState<Record<string, number>>({});
+  const [perioBOP, setPerioBOP] = useState<Record<string, boolean>>({}); // true=出血
+  const [perioMobility, setPerioMobility] = useState<Record<string, number>>({}); // 0-3
+  const [perioRecession, setPerioRecession] = useState<Record<string, number>>({}); // mm
+  const [perioMode, setPerioMode] = useState<1 | 3 | 6>(3); // 計測点数
+  const [perioStep, setPerioStep] = useState<"pocket" | "bop" | "mobility" | "recession">("pocket");
+  const [showPerioFull, setShowPerioFull] = useState(false); // フルスクリーン表示
 
   // 歯式編集
   const [editingTooth, setEditingTooth] = useState<number | null>(null);
@@ -786,15 +793,97 @@ export default function ConsultationPage() {
   // ==============================
   // P検
   // ==============================
+  // P検音声解析
+  function parsePerioVoice(text: string) {
+    addLog(`🎙 P検音声: "${text}"`);
+    // 歯番抽出
+    const toothMatch = text.match(/(\d{1,2})\s*番?/);
+    if (!toothMatch) { addLog("⚠️ 歯番が認識できませんでした"); return; }
+    const tooth = toothMatch[1];
+
+    if (perioStep === "pocket") {
+      // 「3 4 3」「近心3 中央4 遠心3」「3.4.3」などを抽出
+      const nums = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(?:mm)?(?:\s+|$)/g)]
+        .map(m => parseFloat(m[1]))
+        .filter(n => n >= 0 && n <= 12);
+      // 歯番の数字を除外
+      const filtered = nums.filter(n => n !== parseFloat(tooth));
+      if (filtered.length === 0) { addLog("⚠️ ポケット深さが認識できませんでした"); return; }
+      if (perioMode === 1) {
+        setPerioData(prev => ({ ...prev, [`${tooth}`]: filtered[0] }));
+      } else if (perioMode === 3) {
+        filtered.slice(0, 3).forEach((v, i) => {
+          setPerioData(prev => ({ ...prev, [`${tooth}-b${i+1}`]: v }));
+        });
+      } else {
+        filtered.slice(0, 6).forEach((v, i) => {
+          const side = i < 3 ? "b" : "l";
+          const pt = (i % 3) + 1;
+          setPerioData(prev => ({ ...prev, [`${tooth}-${side}${pt}`]: v }));
+        });
+      }
+      addLog(`✅ ${tooth}番 ポケット記録: ${filtered.join("/")}mm`);
+
+    } else if (perioStep === "bop") {
+      const hasBOP = /あり|出血|BOP|プラス|\+/.test(text);
+      const noBOP = /なし|なかった|ない|マイナス|-/.test(text);
+      if (hasBOP) { setPerioBOP(prev => ({ ...prev, [`${tooth}`]: true })); addLog(`✅ ${tooth}番 BOP: あり`); }
+      else if (noBOP) { setPerioBOP(prev => ({ ...prev, [`${tooth}`]: false })); addLog(`✅ ${tooth}番 BOP: なし`); }
+
+    } else if (perioStep === "mobility") {
+      const mobMatch = text.match(/([0-3])\s*度?/);
+      if (mobMatch) {
+        const v = parseInt(mobMatch[1]);
+        setPerioMobility(prev => ({ ...prev, [`${tooth}`]: v }));
+        addLog(`✅ ${tooth}番 動揺度: ${v}度`);
+      }
+
+    } else if (perioStep === "recession") {
+      const recMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:mm|ミリ)?/g);
+      const nums = (recMatch || []).map(s => parseFloat(s)).filter(n => n !== parseFloat(tooth) && n >= 0 && n <= 10);
+      if (nums.length > 0) {
+        setPerioRecession(prev => ({ ...prev, [`${tooth}`]: nums[0] }));
+        addLog(`✅ ${tooth}番 歯肉退縮: ${nums[0]}mm`);
+      }
+    }
+  }
+
   async function savePerioData() {
     if (!medicalRecord) return;
-    const perioText = Object.entries(perioData)
-      .map(([tooth, depth]) => `${tooth}番: ${depth}mm`)
-      .join(", ");
 
-    await updateSoap("soap_o", `歯周ポケット: ${perioText}`);
-    addLog(`📊 P検記録保存: ${Object.keys(perioData).length}歯`);
-    setPopup(null);
+    const TEETH = [18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28,
+                   48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38];
+
+    // ポケット深さのサマリー
+    const pocketEntries = TEETH.flatMap((t) => {
+      if (perioMode === 6) {
+        const pts = ["b1","b2","b3","l1","l2","l3"].map(p => perioData[`${t}-${p}`]).filter(Boolean);
+        return pts.length > 0 ? [`${t}(${pts.join("/")})`] : [];
+      } else if (perioMode === 3) {
+        const pts = ["b1","b2","b3"].map(p => perioData[`${t}-${p}`]).filter(Boolean);
+        return pts.length > 0 ? [`${t}(${pts.join("/")})`] : [];
+      } else {
+        return perioData[`${t}`] ? [`${t}(${perioData[`${t}`]})`] : [];
+      }
+    });
+
+    const bopTeeth = Object.entries(perioBOP).filter(([,v]) => v).map(([k]) => k).join(",");
+    const mobilityEntries = Object.entries(perioMobility).filter(([,v]) => v > 0).map(([k,v]) => `${k}:${v}度`).join(",");
+    const recessionEntries = Object.entries(perioRecession).filter(([,v]) => v > 0).map(([k,v]) => `${k}:${v}mm`).join(",");
+
+    const lines = [
+      pocketEntries.length > 0 && `【ポケット】${pocketEntries.join(" ")}`,
+      bopTeeth && `【BOP】${bopTeeth}`,
+      mobilityEntries && `【動揺度】${mobilityEntries}`,
+      recessionEntries && `【歯肉退縮】${recessionEntries}`,
+    ].filter(Boolean).join("\n");
+
+    await updateSoap("soap_o", lines || "P検データなし");
+
+    const totalPockets = pocketEntries.length;
+    const highPockets = Object.entries(perioData).filter(([,v]) => v >= 4).length;
+    addLog(`📊 P検保存: ${totalPockets}歯記録 / ${highPockets}箇所4mm以上 / BOP ${Object.values(perioBOP).filter(Boolean).length}箇所`);
+    setShowPerioFull(false);
     setFocusStep("voice");
     addLog("→ 次: 音声録音を行ってください");
   }
@@ -886,6 +975,117 @@ export default function ConsultationPage() {
   // ==============================
   return (
     <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
+
+      {/* ===== P検フルスクリーン ===== */}
+      {showPerioFull && (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col overflow-hidden">
+          <style>{`
+            .perio-cell { width: 28px; height: 28px; border: 1px solid #e5e7eb; border-radius: 4px; text-align: center; font-size: 12px; padding: 2px; }
+            .perio-cell.high { border-color: #f87171; background: #fef2f2; color: #dc2626; font-weight: bold; }
+            .perio-cell.mid { border-color: #fb923c; background: #fff7ed; }
+            .bop-cell { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #e5e7eb; cursor: pointer; }
+            .bop-cell.active { background: #ef4444; border-color: #dc2626; }
+          `}</style>
+
+          {/* ヘッダー */}
+          <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setShowPerioFull(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <h2 className="font-bold text-gray-900">🦷 歯周検査（P検）</h2>
+            </div>
+            {/* モード切替 */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">計測点数:</span>
+              {([1,3,6] as const).map(m => (
+                <button key={m} onClick={() => setPerioMode(m)}
+                  className={`px-2 py-1 rounded text-xs font-bold border ${perioMode === m ? "bg-blue-600 text-white border-blue-600" : "border-gray-300 text-gray-600"}`}>
+                  {m}点法
+                </button>
+              ))}
+            </div>
+            <button onClick={savePerioData} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700">
+              💾 保存して終了
+            </button>
+          </div>
+
+          {/* ステップタブ */}
+          <div className="flex border-b bg-gray-50">
+            {([
+              { key: "pocket", label: "① ポケット深さ", icon: "📏" },
+              { key: "bop", label: "② BOP（出血）", icon: "🩸" },
+              { key: "mobility", label: "③ 動揺度", icon: "↔️" },
+              { key: "recession", label: "④ 歯肉退縮", icon: "📉" },
+            ] as const).map(s => (
+              <button key={s.key} onClick={() => setPerioStep(s.key)}
+                className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${perioStep === s.key ? "border-blue-600 text-blue-600 bg-white" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+                {s.icon} {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 音声入力バー */}
+          <div className="px-4 py-2 bg-purple-50 border-b flex items-center gap-3">
+            <button
+              onClick={() => {
+                if (perioRecording) {
+                  setPerioRecording(false);
+                } else {
+                  setPerioRecording(true);
+                  // 音声認識開始
+                  const SpeechRecognition = (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }).SpeechRecognition || (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
+                  if (!SpeechRecognition) { addLog("⚠️ 音声認識非対応"); setPerioRecording(false); return; }
+                  const recog = new (SpeechRecognition as new() => { lang: string; continuous: boolean; interimResults: boolean; onresult: (e: { results: { [key: number]: { [key: number]: { transcript: string } } } }) => void; onerror: () => void; onend: () => void; start: () => void })();
+                  recog.lang = "ja-JP";
+                  recog.continuous = false;
+                  recog.interimResults = false;
+                  recog.onresult = (e) => {
+                    const text = e.results[0][0].transcript;
+                    parsePerioVoice(text);
+                  };
+                  recog.onerror = () => setPerioRecording(false);
+                  recog.onend = () => setPerioRecording(false);
+                  recog.start();
+                }
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold ${perioRecording ? "bg-red-500 text-white animate-pulse" : "bg-purple-600 text-white"}`}
+            >
+              🎙 {perioRecording ? "録音中..." : "音声入力"}
+            </button>
+            <span className="text-xs text-gray-500">
+              {perioStep === "pocket" && "例:「16番 3 4 3」または「16 近心3 中央4 遠心3」"}
+              {perioStep === "bop" && "例:「16番 BOP あり」または「16 出血」"}
+              {perioStep === "mobility" && "例:「16番 動揺1」または「36 2度」"}
+              {perioStep === "recession" && "例:「16番 退縮2」または「16 2ミリ」"}
+            </span>
+          </div>
+
+          {/* メインコンテンツ */}
+          <div className="flex-1 overflow-y-auto p-4">
+            <PerioChart
+              teeth={[18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28,
+                      48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38]}
+              mode={perioMode}
+              step={perioStep}
+              perioData={perioData}
+              perioBOP={perioBOP}
+              perioMobility={perioMobility}
+              perioRecession={perioRecession}
+              onPocketChange={(key, val) => setPerioData(prev => ({ ...prev, [key]: val }))}
+              onBOPChange={(key, val) => setPerioBOP(prev => ({ ...prev, [key]: val }))}
+              onMobilityChange={(key, val) => setPerioMobility(prev => ({ ...prev, [key]: val }))}
+              onRecessionChange={(key, val) => setPerioRecession(prev => ({ ...prev, [key]: val }))}
+            />
+          </div>
+
+          {/* フッター統計 */}
+          <div className="border-t px-4 py-2 bg-gray-50 flex items-center gap-6 text-xs text-gray-600">
+            <span>📏 記録済み: <b>{Object.keys(perioData).length}</b>点</span>
+            <span className="text-red-600">🔴 4mm以上: <b>{Object.values(perioData).filter(v => v >= 4).length}</b>箇所</span>
+            <span className="text-orange-600">🩸 BOP: <b>{Object.values(perioBOP).filter(Boolean).length}</b>箇所</span>
+            <span>↔️ 動揺あり: <b>{Object.values(perioMobility).filter(v => v > 0).length}</b>歯</span>
+          </div>
+        </div>
+      )}
 
       {/* ===== 統合診断「これかも！」ポップアップ ===== */}
       {showIntegratedDiagnosis && (
@@ -1373,7 +1573,7 @@ export default function ConsultationPage() {
         <div className="w-16 bg-white border-l flex flex-col items-center py-4 gap-3">
           {[
             { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
-            { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio" },
+            { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio", fullscreen: true },
             { type: "voice" as PopupType, icon: "🎙", label: "録音", step: "voice" },
             { type: "diagnosis" as PopupType, icon: "🔍", label: "病名", step: "diagnosis" },
             { type: "treatment" as PopupType, icon: "💊", label: "治療", step: "treatment" },
@@ -1381,7 +1581,14 @@ export default function ConsultationPage() {
           ].map((btn) => (
             <button
               key={btn.type}
-              onClick={() => setPopup(popup === btn.type ? null : btn.type)}
+              onClick={() => {
+                if ((btn as { fullscreen?: boolean }).fullscreen) {
+                  setShowPerioFull(true);
+                  setPerioStep("pocket");
+                } else {
+                  setPopup(popup === btn.type ? null : btn.type);
+                }
+              }}
               className={`flex flex-col items-center gap-0.5 w-12 h-12 rounded-lg border text-xs
                 ${focusStep === btn.step ? "ring-2 ring-blue-400 border-blue-400 bg-blue-50" : "hover:bg-gray-50"}
                 ${popup === btn.type ? "bg-blue-100 border-blue-400" : ""}
@@ -1722,6 +1929,163 @@ function ToothChart({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ==============================
+// 音声P検パーサー
+// ==============================
+// この関数はReactコンポーネント外で定義できないため、
+// コンポーネント内で useCallback なしで直接定義する
+// → page.tsx内に parsePerioVoice を inline で追加する（下記参照）
+
+// ==============================
+// P検チャートコンポーネント
+// ==============================
+function PerioChart({
+  teeth, mode, step, perioData, perioBOP, perioMobility, perioRecession,
+  onPocketChange, onBOPChange, onMobilityChange, onRecessionChange,
+}: {
+  teeth: number[];
+  mode: 1 | 3 | 6;
+  step: "pocket" | "bop" | "mobility" | "recession";
+  perioData: Record<string, number>;
+  perioBOP: Record<string, boolean>;
+  perioMobility: Record<string, number>;
+  perioRecession: Record<string, number>;
+  onPocketChange: (key: string, val: number) => void;
+  onBOPChange: (key: string, val: boolean) => void;
+  onMobilityChange: (key: string, val: number) => void;
+  onRecessionChange: (key: string, val: number) => void;
+}) {
+  const upper = teeth.slice(0, 16);
+  const lower = teeth.slice(16);
+
+  const points3 = ["近心", "中央", "遠心"];
+  const points6b = ["近心B", "中央B", "遠心B"];
+  const points6l = ["近心L", "中央L", "遠心L"];
+
+  const getPointKeys = (tooth: number): string[] => {
+    if (mode === 1) return [`${tooth}`];
+    if (mode === 3) return [`${tooth}-b1`, `${tooth}-b2`, `${tooth}-b3`];
+    return [`${tooth}-b1`, `${tooth}-b2`, `${tooth}-b3`, `${tooth}-l1`, `${tooth}-l2`, `${tooth}-l3`];
+  };
+
+  const getDepthColor = (val: number) => {
+    if (val >= 6) return "bg-red-600 text-white border-red-600";
+    if (val >= 4) return "bg-red-100 border-red-400 text-red-700 font-bold";
+    if (val === 3) return "bg-orange-50 border-orange-300";
+    return "";
+  };
+
+  const renderTooth = (tooth: number) => {
+    const keys = getPointKeys(tooth);
+
+    return (
+      <div key={tooth} className="flex flex-col items-center border border-gray-200 rounded-lg p-1 min-w-[52px] bg-white">
+        <div className="text-xs font-bold text-gray-500 mb-1">{tooth}</div>
+
+        {step === "pocket" && (
+          <div className={`flex gap-0.5 flex-wrap justify-center ${mode === 6 ? "w-full" : ""}`}>
+            {mode === 6 && <div className="w-full text-[9px] text-gray-400 text-center mb-0.5">頬側</div>}
+            {(mode === 6 ? points6b : mode === 3 ? points3 : ["中央"]).map((_, i) => {
+              const k = keys[i] || `${tooth}`;
+              const v = perioData[k] || 0;
+              return (
+                <input key={k} type="number" min={0} max={12}
+                  value={v || ""}
+                  placeholder="-"
+                  onChange={e => onPocketChange(k, Number(e.target.value))}
+                  className={`perio-cell ${v >= 4 ? "high" : v === 3 ? "mid" : ""}`}
+                />
+              );
+            })}
+            {mode === 6 && (
+              <>
+                <div className="w-full text-[9px] text-gray-400 text-center mt-1 mb-0.5">舌側</div>
+                {points6l.map((_, i) => {
+                  const k = keys[i + 3] || `${tooth}`;
+                  const v = perioData[k] || 0;
+                  return (
+                    <input key={k} type="number" min={0} max={12}
+                      value={v || ""}
+                      placeholder="-"
+                      onChange={e => onPocketChange(k, Number(e.target.value))}
+                      className={`perio-cell ${v >= 4 ? "high" : v === 3 ? "mid" : ""} mt-0.5`}
+                    />
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
+
+        {step === "bop" && (
+          <button
+            onClick={() => onBOPChange(`${tooth}`, !perioBOP[`${tooth}`])}
+            className={`bop-cell ${perioBOP[`${tooth}`] ? "active" : ""}`}
+            title={perioBOP[`${tooth}`] ? "出血あり" : "出血なし"}
+          />
+        )}
+
+        {step === "mobility" && (
+          <select
+            value={perioMobility[`${tooth}`] || 0}
+            onChange={e => onMobilityChange(`${tooth}`, Number(e.target.value))}
+            className={`text-xs border rounded px-1 py-0.5 w-full ${(perioMobility[`${tooth}`] || 0) > 0 ? "border-orange-400 bg-orange-50" : ""}`}
+          >
+            <option value={0}>0</option>
+            <option value={1}>1度</option>
+            <option value={2}>2度</option>
+            <option value={3}>3度</option>
+          </select>
+        )}
+
+        {step === "recession" && (
+          <input type="number" min={0} max={10}
+            value={perioRecession[`${tooth}`] || ""}
+            placeholder="-"
+            onChange={e => onRecessionChange(`${tooth}`, Number(e.target.value))}
+            className={`perio-cell ${(perioRecession[`${tooth}`] || 0) > 0 ? "bg-yellow-50 border-yellow-400" : ""}`}
+          />
+        )}
+
+        {/* ポケット深さの最大値表示バッジ */}
+        {step !== "pocket" && (() => {
+          const maxV = Math.max(...getPointKeys(tooth).map(k => perioData[k] || 0));
+          return maxV > 0 ? (
+            <div className={`text-[9px] mt-0.5 px-1 rounded ${getDepthColor(maxV)}`}>{maxV}mm</div>
+          ) : null;
+        })()}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 上顎 */}
+      <div>
+        <div className="text-xs font-bold text-gray-500 mb-2">上顎</div>
+        <div className="flex gap-1 flex-wrap">
+          {upper.map(t => renderTooth(t))}
+        </div>
+      </div>
+      {/* 下顎 */}
+      <div>
+        <div className="text-xs font-bold text-gray-500 mb-2">下顎</div>
+        <div className="flex gap-1 flex-wrap">
+          {lower.map(t => renderTooth(t))}
+        </div>
+      </div>
+      {/* 凡例 */}
+      {step === "pocket" && (
+        <div className="flex gap-4 text-xs text-gray-500 mt-2">
+          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-orange-50 border border-orange-300 rounded inline-block"/>3mm</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-100 border border-red-400 rounded inline-block"/>4-5mm</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-600 rounded inline-block"/>6mm以上</span>
+        </div>
+      )}
     </div>
   );
 }
