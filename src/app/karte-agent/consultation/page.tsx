@@ -941,6 +941,7 @@ export default function ConsultationPage() {
       // DataChannel（テキスト受信用）
       const dc = pc.createDataChannel("oai-events");
       dc.onmessage = (e) => {
+        console.log("📨 DC message:", e.data.slice(0, 200));
         try {
           const msg = JSON.parse(e.data);
           // リアルタイム途中テキスト
