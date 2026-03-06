@@ -941,15 +941,33 @@ export default function ConsultationPage() {
       // DataChannel（テキスト受信用）
       const dc = pc.createDataChannel("oai-events");
       dc.onmessage = (e) => {
-        console.log("📨 DC message:", e.data.slice(0, 200));
         try {
           const msg = JSON.parse(e.data);
-          // リアルタイム途中テキスト
+
+          // 音声文字起こし（途中）
           if (msg.type === "conversation.item.input_audio_transcription.delta") {
             setPerioInterimText(prev => prev + (msg.delta || ""));
           }
-          // 確定テキスト
+          // 音声文字起こし（確定）
           if (msg.type === "conversation.item.input_audio_transcription.completed") {
+            const text = msg.transcript || "";
+            setPerioInterimText("");
+            if (text.trim()) {
+              addLog(`✅ 認識: "${text}"`);
+              parsePerioVoice(text);
+            }
+          }
+          // AIテキスト返答（response.text.done）でも拾う
+          if (msg.type === "response.text.done") {
+            const text = msg.text || "";
+            setPerioInterimText("");
+            if (text.trim()) {
+              addLog(`✅ 認識: "${text}"`);
+              parsePerioVoice(text);
+            }
+          }
+          // response.audio_transcript.done でも拾う
+          if (msg.type === "response.audio_transcript.done") {
             const text = msg.transcript || "";
             setPerioInterimText("");
             if (text.trim()) {
@@ -966,11 +984,12 @@ export default function ConsultationPage() {
           type: "session.update",
           session: {
             modalities: ["text"],
+            instructions: "あなたは歯科の歯周検査アシスタントです。ユーザーが読み上げた数字をそのままテキストで返してください。余計な言葉は一切不要です。例: ユーザー「2 3 4」→ あなた「2 3 4」",
             input_audio_transcription: { model: "whisper-1" },
             turn_detection: {
               type: "server_vad",
-              threshold: 0.5,
-              silence_duration_ms: 800,
+              threshold: 0.4,
+              silence_duration_ms: 600,
             },
           },
         }));
