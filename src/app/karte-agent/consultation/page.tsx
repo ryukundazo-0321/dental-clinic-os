@@ -396,7 +396,7 @@ export default function ConsultationPage() {
 
         if (detected.length > 0) {
           setDetectedDiagnoses(detected);
-          addLog(`🦷 傷病名検出: ${detected[0].name}（信頼度${Math.round(detected[0].confidence * 100)}%）`);
+          addLog(`🦷 傷病名検出: ${detected[0].name}（信頼度${Math.round((detected[0].confidence || 0) * 100)}%）`);
           setPopup(null);
         }
 
@@ -485,10 +485,13 @@ export default function ConsultationPage() {
         setXraySummary(data.summary || "");
         setXrayNotableFindings(data.analysis?.notable_findings || []);
         addLog(`🦷 AI歯式解析完了: ${enrichedFindings.length}件の所見`);
-
-        if (enrichedFindings.length > 0) {
-          setPopup("photo");
-        }
+        // 0件でもポップアップ表示（内容確認のため）
+        setPopup("photo");
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || `HTTP ${res.status}`;
+        addLog(`⚠️ レントゲン解析エラー: ${errMsg}`);
+        console.error("xray-analyze error:", errMsg);
       }
     } catch (err) {
       console.error("photo upload error:", err);
@@ -929,7 +932,7 @@ export default function ConsultationPage() {
                         {/* 信頼度バー */}
                         <div className="w-1 h-10 rounded-full bg-gray-200 overflow-hidden">
                           <div className="w-full bg-green-500 rounded-full transition-all"
-                            style={{ height: `${Math.round(diag.confidence * 100)}%`, marginTop: `${100 - Math.round(diag.confidence * 100)}%` }} />
+                            style={{ height: `${Math.round((diag.confidence || 0) * 100)}%`, marginTop: `${100 - Math.round((diag.confidence || 0) * 100)}%` }} />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -947,7 +950,7 @@ export default function ConsultationPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-lg font-black text-green-600">{Math.round(diag.confidence * 100)}%</div>
+                        <div className="text-lg font-black text-green-600">{Math.round((diag.confidence || 0) * 100)}%</div>
                         <div className="text-xs text-gray-400 group-hover:text-green-600 font-medium">仮確定 →</div>
                       </div>
                     </div>
@@ -1032,7 +1035,7 @@ export default function ConsultationPage() {
                       {(medicalRecord?.predicted_diagnoses || []).slice(0, 5).map((pd: PredictedDiagnosis, i: number) => (
                         <div key={i} className="flex items-center gap-1 bg-yellow-50 border border-yellow-300 rounded-lg px-2 py-1">
                           <span className="text-xs font-bold text-yellow-800">{pd.name}</span>
-                          <span className="text-xs text-gray-400">({Math.round(pd.confidence * 100)}%)</span>
+                          <span className="text-xs text-gray-400">({Math.round((pd.confidence || 0) * 100)}%)</span>
                         </div>
                       ))}
                     </div>
@@ -1057,7 +1060,7 @@ export default function ConsultationPage() {
                       }`}>{f.tooth}番</span>
                       <div className="flex-1">
                         <span className="text-sm font-medium text-gray-800">{f.suggestedDiagnosis || f.finding}</span>
-                        <span className="text-xs text-gray-400 ml-2">{Math.round(f.confidence * 100)}%</span>
+                        <span className="text-xs text-gray-400 ml-2">{Math.round((f.confidence || 0) * 100)}%</span>
                         {f.detail && <p className="text-xs text-gray-500 mt-0.5">└ {f.detail}</p>}
                       </div>
                     </div>
@@ -1143,7 +1146,7 @@ export default function ConsultationPage() {
               <div key={i} className="flex items-center gap-1">
                 <span className="text-sm">
                   {d.tooth ? `${d.tooth}番 ` : ""}{d.name}
-                  <span className="text-xs text-gray-500 ml-1">({Math.round(d.confidence * 100)}%)</span>
+                  <span className="text-xs text-gray-500 ml-1">({Math.round((d.confidence || 0) * 100)}%)</span>
                 </span>
                 <button
                   onClick={() => confirmDiagnosis(d)}
@@ -1213,7 +1216,7 @@ export default function ConsultationPage() {
                 <div key={i} className="flex items-center gap-1 bg-white border border-purple-200 rounded px-2 py-1">
                   <span className="text-xs font-medium">{f.tooth}番</span>
                   <span className="text-xs text-purple-700">{f.suggestedDiagnosis || f.finding}</span>
-                  <span className="text-xs text-gray-400">({Math.round(f.confidence * 100)}%)</span>
+                  <span className="text-xs text-gray-400">({Math.round((f.confidence || 0) * 100)}%)</span>
                   <button onClick={() => applyAiFindings(i)} className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded">反映</button>
                 </div>
               ))}
@@ -1450,7 +1453,7 @@ export default function ConsultationPage() {
                               <div className="flex items-center gap-2">
                                 <span className="font-bold text-sm">{f.tooth}番</span>
                                 <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{f.suggestedDiagnosis || f.finding}</span>
-                                <span className="text-xs text-gray-400">{Math.round(f.confidence * 100)}%</span>
+                                <span className="text-xs text-gray-400">{Math.round((f.confidence || 0) * 100)}%</span>
                               </div>
                               <button onClick={() => applyAiFindings(i)} className="bg-purple-600 text-white text-xs px-2 py-1 rounded">反映</button>
                             </div>
