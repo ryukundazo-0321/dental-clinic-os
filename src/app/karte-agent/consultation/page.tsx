@@ -312,6 +312,20 @@ export default function ConsultationPage() {
         .limit(5);
       setPastRecords(past || []);
 
+      // ==============================
+      // 初診料・再診料の自動追加
+      // ==============================
+      if (mr && (mr.structured_procedures || []).length === 0) {
+        const isFirst = appt.visit_type === "initial" || (past || []).length === 0;
+        const feeProc = isFirst
+          ? { id: `fee-${Date.now()}`, diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }
+          : { id: `fee-${Date.now()}`, diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+        const updated = [feeProc];
+        await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", mr.id);
+        setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
+        addLog(`💰 ${feeProc.procedure_name}（${feeProc.points}点）を自動追加`);
+      }
+
       const { data: dm } = await supabase
         .from("diagnosis_master")
         .select("code, name, category")
@@ -1182,7 +1196,7 @@ export default function ConsultationPage() {
   }
 
   const age = calcAge(patient.birth_date);
-  const isFirstVisit = appointment.visit_type === "initial";
+  const isFirstVisit = appointment.visit_type === "initial" || pastRecords.length === 0;
 
   // ==============================
   // レンダリング
