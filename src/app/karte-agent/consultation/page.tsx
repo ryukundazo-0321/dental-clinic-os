@@ -116,15 +116,48 @@ const LOWER_TEETH = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37,
 
 function toothStatusColor(status?: string) {
   switch (status) {
-    case "caries": return "bg-red-400 text-white";
-    case "missing": return "bg-gray-600 text-white";
-    case "crown": return "bg-yellow-400";
-    case "implant": return "bg-blue-400 text-white";
+    // 健全
+    case "healthy": return "bg-white border border-gray-200";
+    case "c0": return "bg-yellow-100 border border-yellow-300";
+    // う蝕
+    case "c1": return "bg-red-200 text-red-800";
+    case "c2": return "bg-red-400 text-white";
+    case "c3": return "bg-red-600 text-white";
+    case "c4": return "bg-red-900 text-white";
+    case "caries": return "bg-red-400 text-white"; // 後方互換
+    // 処置歯
+    case "cr": return "bg-blue-200 text-blue-800";
+    case "inlay": return "bg-cyan-300 text-cyan-900";
+    // 補綴
+    case "crown": return "bg-yellow-400 text-yellow-900";
+    case "cr_crown": return "bg-yellow-300 text-yellow-900";
+    // ブリッジ
+    case "bridge": return "bg-orange-400 text-white";
+    case "bridge_missing": return "bg-orange-200 text-orange-800"; // Br欠（ポンティック）
+    // インプラント
+    case "implant": return "bg-blue-500 text-white";
+    // 根管治療
     case "rct": return "bg-purple-400 text-white";
-    case "bridge": return "bg-orange-400";
-    case "healthy": return "bg-green-100";
+    case "root_remain": return "bg-purple-700 text-white"; // 残根
+    case "in_treatment": return "bg-pink-400 text-white"; // 治療中
+    // 欠損
+    case "missing": return "bg-gray-600 text-white";
+    // 要注意
+    case "watch": return "bg-yellow-500 text-white";
     default: return "bg-white border border-gray-200";
   }
+}
+
+// ステータスの表示ラベル
+function toothStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    healthy: "", c0: "C0", c1: "C1", c2: "C2", c3: "C3", c4: "C4",
+    caries: "C", cr: "CR", inlay: "In", crown: "Cr", cr_crown: "Cr",
+    bridge: "Br", bridge_missing: "Br欠", implant: "IP",
+    rct: "RCT", root_remain: "残根", in_treatment: "治療",
+    missing: "欠", watch: "注意",
+  };
+  return labels[status || ""] ?? status?.slice(0, 3) ?? "";
 }
 
 function calcAge(birthDate: string): number {
@@ -179,6 +212,8 @@ export default function ConsultationPage() {
   const [xrayNotableFindings, setXrayNotableFindings] = useState<string[]>([]);
   const [showXrayConfirm, setShowXrayConfirm] = useState(false);
   const [xrayConfirmChart, setXrayConfirmChart] = useState<Record<string, ToothStatus>>({});
+  const [showIntegratedDiagnosis, setShowIntegratedDiagnosis] = useState(false);
+  const [integratedDiagnoses, setIntegratedDiagnoses] = useState<DetectedDiagnosis[]>([]);
 
   // P検
   const [perioRecording, setPerioRecording] = useState(false);
@@ -232,6 +267,7 @@ export default function ConsultationPage() {
         setMedicalRecord(mr);
         setToothChartDraft(mr.tooth_chart || pt?.current_tooth_chart || {});
 
+        // 問診票由来の傷病名があれば即バナー表示
         if (mr.predicted_diagnoses?.length > 0) {
           setDetectedDiagnoses(
             mr.predicted_diagnoses.map((pd: PredictedDiagnosis) => ({
@@ -242,6 +278,11 @@ export default function ConsultationPage() {
               reason: "問診票より予測",
             }))
           );
+          setFocusStep("photo");
+          // soap_sから主訴を取り出してログ表示
+          const mainComplaint = (mr.soap_s || "").split("\n").find((l: string) => l.includes("主訴"))?.replace("【主訴】", "") || "";
+          if (mainComplaint) addLog(`📋 主訴: ${mainComplaint}`);
+          addLog(`🦷 問診票から傷病名候補${mr.predicted_diagnoses.length}件を検出 → まずレントゲンをアップロードしてください`);
         }
       }
 
@@ -423,11 +464,12 @@ export default function ConsultationPage() {
 
         // APIステータス → 歯式チャートステータスのマッピング
         const statusToChart: Record<string, string> = {
-          caries: "caries", c1: "caries", c2: "caries", c3: "caries", c4: "caries", watch: "caries",
-          crown: "crown", treated: "crown", bridge: "bridge",
+          caries: "c2", c0: "c0", c1: "c1", c2: "c2", c3: "c3", c4: "c4", watch: "watch",
+          crown: "crown", treated: "cr", filled: "cr", cr: "cr", inlay: "inlay",
+          bridge: "bridge", bridge_missing: "bridge_missing",
           missing: "missing",
           implant: "implant",
-          rct: "rct", root_remain: "rct", in_treatment: "rct",
+          rct: "rct", root_remain: "root_remain", in_treatment: "in_treatment",
         };
 
         const enrichedFindings = rawFindings.map((f: { tooth: string; status: string; confidence: number; detail?: string }) => ({
@@ -494,13 +536,72 @@ export default function ConsultationPage() {
     setToothChartDraft(xrayConfirmChart);
     await saveToothChart(xrayConfirmChart);
     addLog(`✅ AI所見を一括反映: ${aiToothFindings.length}件`);
+
+    // 問診票＋レントゲンを統合して傷病名候補を生成
+    const integrated: DetectedDiagnosis[] = [];
+
+    // 問診票由来
+    const fromRecord = (medicalRecord?.predicted_diagnoses || []).map((pd: PredictedDiagnosis) => ({
+      tooth: pd.tooth || "",
+      code: pd.code,
+      name: pd.name,
+      confidence: pd.confidence,
+      reason: "問診票より予測",
+    }));
+
+    // レントゲン由来（う蝕・残根・治療中のみ傷病名候補に）
+    const xrayDiagMap: Record<string, { code: string; name: string }> = {
+      c1: { code: "C1", name: "う蝕(C1)" },
+      c2: { code: "C2", name: "う蝕(C2)" },
+      c3: { code: "C3", name: "う蝕(C3)" },
+      c4: { code: "C4", name: "う蝕(C4)" },
+      caries: { code: "C2", name: "う蝕(C2)" },
+      watch: { code: "C0", name: "要観察(C0)" },
+      root_remain: { code: "残根", name: "残根" },
+      in_treatment: { code: "Pul", name: "歯髄炎(治療中)" },
+      rct: { code: "Per", name: "根尖性歯周炎" },
+    };
+
+    for (const f of aiToothFindings) {
+      const mapped = xrayDiagMap[f.finding?.toLowerCase()];
+      if (mapped) {
+        integrated.push({
+          tooth: f.tooth,
+          code: mapped.code,
+          name: mapped.name,
+          confidence: f.confidence,
+          reason: `レントゲン: ${f.detail || f.finding}`,
+        });
+      }
+    }
+
+    // 問診票と統合（重複コードは信頼度を加算）
+    for (const rec of fromRecord) {
+      const existing = integrated.find(d => d.code === rec.code);
+      if (existing) {
+        existing.confidence = Math.min(existing.confidence + 0.2, 0.99);
+        existing.reason = "問診票＋レントゲン一致";
+      } else {
+        integrated.push(rec);
+      }
+    }
+
+    // 信頼度降順ソート
+    integrated.sort((a, b) => b.confidence - a.confidence);
+
     setAiToothFindings([]);
     setXraySummary("");
     setXrayNotableFindings([]);
     setShowXrayConfirm(false);
-    setPopup(null);
-    setFocusStep("perio");
-    addLog("→ 次: P検を行ってください");
+
+    if (integrated.length > 0) {
+      setIntegratedDiagnoses(integrated);
+      setShowIntegratedDiagnosis(true);
+    } else {
+      setPopup(null);
+      setFocusStep("perio");
+      addLog("→ 次: P検を行ってください");
+    }
   }
 
   async function saveToothChart(chart: Record<string, ToothStatus>) {
@@ -776,6 +877,112 @@ export default function ConsultationPage() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
 
+      {/* ===== 統合診断「これかも！」ポップアップ ===== */}
+      {showIntegratedDiagnosis && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+            style={{ animation: "slideUp 0.3s ease-out" }}>
+            <style>{`
+              @keyframes slideUp {
+                from { transform: translateY(40px); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
+              }
+              @keyframes pulse-ring {
+                0% { transform: scale(0.8); opacity: 1; }
+                100% { transform: scale(1.4); opacity: 0; }
+              }
+            `}</style>
+
+            {/* ヘッダー */}
+            <div className="bg-gradient-to-r from-green-500 to-blue-600 px-6 py-5 text-white relative overflow-hidden">
+              <div className="absolute inset-0 bg-white opacity-5 rounded-full w-64 h-64 -top-20 -right-20" />
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="w-14 h-14 bg-white bg-opacity-20 rounded-full flex items-center justify-center text-3xl">💡</div>
+                  <div className="absolute inset-0 rounded-full border-2 border-white border-opacity-50"
+                    style={{ animation: "pulse-ring 1.5s ease-out infinite" }} />
+                </div>
+                <div>
+                  <h3 className="font-black text-xl">これかも！</h3>
+                  <p className="text-sm text-green-100">問診票＋レントゲンの統合分析結果</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 傷病名候補リスト */}
+            <div className="px-6 py-4 max-h-80 overflow-y-auto">
+              <p className="text-sm text-gray-500 mb-3">以下の傷病名が疑われます。仮確定する傷病名を選んでください。</p>
+              <div className="space-y-2">
+                {integratedDiagnoses.slice(0, 6).map((diag, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      confirmDiagnosis(diag);
+                      setShowIntegratedDiagnosis(false);
+                      setPopup(null);
+                      addLog(`✅ 傷病名仮確定: ${diag.tooth ? `${diag.tooth}番 ` : ""}${diag.name}`);
+                    }}
+                    className="w-full text-left border-2 border-gray-100 hover:border-green-400 hover:bg-green-50 rounded-xl p-3 transition-all group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {/* 信頼度バー */}
+                        <div className="w-1 h-10 rounded-full bg-gray-200 overflow-hidden">
+                          <div className="w-full bg-green-500 rounded-full transition-all"
+                            style={{ height: `${Math.round(diag.confidence * 100)}%`, marginTop: `${100 - Math.round(diag.confidence * 100)}%` }} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            {diag.tooth && (
+                              <span className="bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded">{diag.tooth}番</span>
+                            )}
+                            <span className="font-bold text-gray-900">{diag.name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                              diag.reason.includes("一致") ? "bg-green-100 text-green-700" :
+                              diag.reason.includes("レントゲン") ? "bg-purple-100 text-purple-700" :
+                              "bg-blue-100 text-blue-700"
+                            }`}>{diag.reason.includes("一致") ? "🎯 問診票×レントゲン" : diag.reason.includes("レントゲン") ? "📸 レントゲン" : "📋 問診票"}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-0.5">{diag.reason}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-black text-green-600">{Math.round(diag.confidence * 100)}%</div>
+                        <div className="text-xs text-gray-400 group-hover:text-green-600 font-medium">仮確定 →</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ボタン */}
+            <div className="px-6 py-4 border-t flex gap-3">
+              <button
+                onClick={() => {
+                  setShowIntegratedDiagnosis(false);
+                  setDetectedDiagnoses(integratedDiagnoses);
+                  setPopup(null);
+                  setFocusStep("diagnosis");
+                }}
+                className="flex-1 py-3 rounded-xl border border-gray-300 text-gray-600 font-medium hover:bg-gray-50 text-sm"
+              >
+                後で選ぶ
+              </button>
+              <button
+                onClick={() => {
+                  setShowIntegratedDiagnosis(false);
+                  setPopup("diagnosis");
+                }}
+                className="flex-1 py-3 rounded-xl border border-blue-300 text-blue-600 font-medium hover:bg-blue-50 text-sm"
+              >
+                🔍 手動で選択
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ===== AI歯式確認ポップアップ ===== */}
       {showXrayConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 animate-fade-in">
@@ -808,31 +1015,67 @@ export default function ConsultationPage() {
             </div>
 
             {/* 所見リスト */}
-            <div className="px-6 py-4 max-h-72 overflow-y-auto">
-              <p className="text-sm font-medium text-gray-700 mb-3">この内容で歯式チャートに反映しますか？</p>
-              <div className="space-y-2">
-                {aiToothFindings.map((f, i) => (
-                  <div key={i} className="flex items-start gap-3 p-2 bg-gray-50 rounded-lg">
-                    <span className={`text-xs px-2 py-1 rounded font-bold min-w-12 text-center ${
-                      f.finding === "missing" ? "bg-gray-600 text-white" :
-                      f.finding === "caries" || f.finding === "watch" ? "bg-red-400 text-white" :
-                      f.finding === "rct" || f.finding === "root_remain" ? "bg-purple-400 text-white" :
-                      f.finding === "implant" ? "bg-blue-400 text-white" :
-                      f.finding === "bridge" ? "bg-orange-400 text-white" :
-                      "bg-yellow-400 text-gray-800"
-                    }`}>{f.tooth}番</span>
-                    <div className="flex-1">
-                      <span className="text-sm font-medium text-gray-800">{f.suggestedDiagnosis || f.finding}</span>
-                      <span className="text-xs text-gray-400 ml-2">{Math.round(f.confidence * 100)}%</span>
-                      {f.detail && <p className="text-xs text-gray-500 mt-0.5">└ {f.detail}</p>}
+            <div className="px-6 py-4 max-h-96 overflow-y-auto space-y-4">
+
+              {/* ① 問診票由来の傷病名候補 */}
+              {(medicalRecord?.predicted_diagnoses?.length > 0 || medicalRecord?.soap_s) && (
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📋 問診票からの傷病名候補</p>
+                  {medicalRecord?.soap_s && (
+                    <div className="bg-sky-50 border border-sky-200 rounded-lg p-2 mb-2">
+                      <p className="text-xs text-gray-500 font-medium mb-0.5">主訴</p>
+                      <p className="text-xs text-gray-700">{medicalRecord.soap_s.split("\n").find(l => l.includes("主訴"))?.replace("【主訴】", "") || medicalRecord.soap_s.slice(0, 60)}</p>
                     </div>
+                  )}
+                  {(medicalRecord?.predicted_diagnoses || []).length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {(medicalRecord?.predicted_diagnoses || []).slice(0, 5).map((pd: PredictedDiagnosis, i: number) => (
+                        <div key={i} className="flex items-center gap-1 bg-yellow-50 border border-yellow-300 rounded-lg px-2 py-1">
+                          <span className="text-xs font-bold text-yellow-800">{pd.name}</span>
+                          <span className="text-xs text-gray-400">({Math.round(pd.confidence * 100)}%)</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ② レントゲンAI歯式所見 */}
+              <div>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">🦷 レントゲン所見（{aiToothFindings.length}件）</p>
+                <p className="text-sm text-gray-600 mb-2">この内容で歯式チャートに反映しますか？</p>
+                <div className="space-y-2">
+                  {aiToothFindings.map((f, i) => (
+                    <div key={i} className="flex items-start gap-3 p-2 bg-gray-50 rounded-lg">
+                      <span className={`text-xs px-2 py-1 rounded font-bold min-w-12 text-center ${
+                        f.finding === "missing" ? "bg-gray-600 text-white" :
+                        f.finding === "caries" || f.finding === "watch" ? "bg-red-400 text-white" :
+                        f.finding === "rct" || f.finding === "root_remain" ? "bg-purple-400 text-white" :
+                        f.finding === "implant" ? "bg-blue-400 text-white" :
+                        f.finding === "bridge" ? "bg-orange-400 text-white" :
+                        "bg-yellow-400 text-gray-800"
+                      }`}>{f.tooth}番</span>
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-800">{f.suggestedDiagnosis || f.finding}</span>
+                        <span className="text-xs text-gray-400 ml-2">{Math.round(f.confidence * 100)}%</span>
+                        {f.detail && <p className="text-xs text-gray-500 mt-0.5">└ {f.detail}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {xraySummary && (
+                  <div className="mt-2 p-3 bg-purple-50 rounded-lg">
+                    <p className="text-xs font-medium text-purple-700 mb-1">📋 全体所見</p>
+                    <p className="text-xs text-gray-600">{xraySummary}</p>
                   </div>
-                ))}
+                )}
               </div>
-              {xraySummary && (
-                <div className="mt-3 p-3 bg-purple-50 rounded-lg">
-                  <p className="text-xs font-medium text-purple-700 mb-1">📋 全体所見</p>
-                  <p className="text-xs text-gray-600">{xraySummary}</p>
+
+              {/* ③ 組み合わせ提案（問診票 OR レントゲン所見のどちらかがあれば表示） */}
+              {((medicalRecord?.predicted_diagnoses?.length > 0) || aiToothFindings.length > 0) && (
+                <div className="bg-green-50 border border-green-300 rounded-lg p-3">
+                  <p className="text-xs font-bold text-green-700 mb-1">💡 傷病名の確定を推奨</p>
+                  <p className="text-xs text-gray-600">問診票の症状とレントゲン所見が一致しています。歯式反映後に傷病名を確定してください。</p>
                 </div>
               )}
             </div>
@@ -1396,13 +1639,30 @@ function ToothChart({
   const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
   const STATUS_OPTIONS = [
-    { value: "healthy", label: "正常", color: "bg-green-100" },
-    { value: "caries", label: "う蝕", color: "bg-red-400 text-white" },
-    { value: "missing", label: "欠損", color: "bg-gray-600 text-white" },
-    { value: "crown", label: "補綴", color: "bg-yellow-400" },
-    { value: "implant", label: "IMP", color: "bg-blue-400 text-white" },
-    { value: "rct", label: "RCT", color: "bg-purple-400 text-white" },
-    { value: "bridge", label: "BRG", color: "bg-orange-400" },
+    // 健全・要観察
+    { value: "healthy", label: "健全",    color: "bg-white border border-gray-300" },
+    { value: "c0",      label: "C0",      color: "bg-yellow-100 border border-yellow-300 text-yellow-800" },
+    // う蝕
+    { value: "c1",      label: "C1",      color: "bg-red-200 text-red-800" },
+    { value: "c2",      label: "C2",      color: "bg-red-400 text-white" },
+    { value: "c3",      label: "C3",      color: "bg-red-600 text-white" },
+    { value: "c4",      label: "C4",      color: "bg-red-900 text-white" },
+    // 治療中
+    { value: "in_treatment", label: "治療中", color: "bg-pink-400 text-white" },
+    // 処置歯
+    { value: "cr",      label: "CR",      color: "bg-blue-200 text-blue-800" },
+    { value: "inlay",   label: "In",      color: "bg-cyan-300 text-cyan-900" },
+    { value: "crown",   label: "Cr",      color: "bg-yellow-400 text-yellow-900" },
+    // 欠損・ブリッジ
+    { value: "missing",        label: "欠損",  color: "bg-gray-600 text-white" },
+    { value: "implant",        label: "IP",    color: "bg-blue-500 text-white" },
+    { value: "bridge",         label: "Br",    color: "bg-orange-400 text-white" },
+    { value: "bridge_missing", label: "Br欠",  color: "bg-orange-200 text-orange-800" },
+    { value: "root_remain",    label: "残根",  color: "bg-purple-700 text-white" },
+    // 根管治療
+    { value: "rct",     label: "RCT",     color: "bg-purple-400 text-white" },
+    // 要注意
+    { value: "watch",   label: "要注意",  color: "bg-yellow-500 text-white" },
   ];
 
   return (
@@ -1415,7 +1675,7 @@ function ToothChart({
               className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border ${toothStatusColor(chart[String(tooth)]?.status)} ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""} ${!dim ? "hover:opacity-80" : "cursor-default"}`}
             >
               <span style={{ fontSize: 8 }}>{tooth}</span>
-              <span style={{ fontSize: 7 }} className="truncate">{chart[String(tooth)]?.status?.slice(0, 3) || ""}</span>
+              <span style={{ fontSize: 7 }} className="truncate">{toothStatusLabel(chart[String(tooth)]?.status)}</span>
             </button>
             {/* tooltip */}
             {chart[String(tooth)]?.notes && !dim && (
@@ -1441,7 +1701,7 @@ function ToothChart({
               className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border ${toothStatusColor(chart[String(tooth)]?.status)} ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""} ${!dim ? "hover:opacity-80" : "cursor-default"}`}
             >
               <span style={{ fontSize: 8 }}>{tooth}</span>
-              <span style={{ fontSize: 7 }} className="truncate">{chart[String(tooth)]?.status?.slice(0, 3) || ""}</span>
+              <span style={{ fontSize: 7 }} className="truncate">{toothStatusLabel(chart[String(tooth)]?.status)}</span>
             </button>
             {/* tooltip */}
             {chart[String(tooth)]?.notes && !dim && (
