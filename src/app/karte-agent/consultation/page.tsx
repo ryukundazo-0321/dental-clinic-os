@@ -46,7 +46,7 @@ interface MedicalRecord {
 }
 
 interface ToothStatus {
-  status: string; // healthy/caries/missing/crown/implant/rct/bridge
+  status: string;
   treatment?: string;
   notes?: string;
 }
@@ -203,7 +203,6 @@ export default function ConsultationPage() {
   async function fetchAll() {
     setLoading(true);
     try {
-      // 予約取得
       const { data: appt } = await supabase
         .from("appointments")
         .select("*")
@@ -212,7 +211,6 @@ export default function ConsultationPage() {
       if (!appt) throw new Error("appointment not found");
       setAppointment(appt);
 
-      // 患者取得
       const { data: pt } = await supabase
         .from("patients")
         .select("*")
@@ -220,7 +218,6 @@ export default function ConsultationPage() {
         .single();
       setPatient(pt);
 
-      // カルテ取得
       const { data: mr } = await supabase
         .from("medical_records")
         .select("*")
@@ -231,7 +228,6 @@ export default function ConsultationPage() {
         setMedicalRecord(mr);
         setToothChartDraft(mr.tooth_chart || pt?.current_tooth_chart || {});
 
-        // 予測傷病名があればバナー表示準備
         if (mr.predicted_diagnoses?.length > 0) {
           setDetectedDiagnoses(
             mr.predicted_diagnoses.map((pd: PredictedDiagnosis) => ({
@@ -245,7 +241,6 @@ export default function ConsultationPage() {
         }
       }
 
-      // 過去カルテ取得
       const { data: past } = await supabase
         .from("medical_records")
         .select("*")
@@ -255,7 +250,6 @@ export default function ConsultationPage() {
         .limit(5);
       setPastRecords(past || []);
 
-      // 傷病名マスタ取得
       const { data: dm } = await supabase
         .from("diagnosis_master")
         .select("code, name, category")
@@ -270,17 +264,11 @@ export default function ConsultationPage() {
     }
   }
 
-  // ==============================
-  // ログ追加
-  // ==============================
   function addLog(msg: string) {
     const time = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
     setActivityLog((prev) => [`${time} ${msg}`, ...prev].slice(0, 50));
   }
 
-  // ==============================
-  // 合計点数
-  // ==============================
   const totalPoints = (medicalRecord?.structured_procedures || []).reduce(
     (sum, p) => sum + (p.points || 0),
     0
@@ -319,16 +307,13 @@ export default function ConsultationPage() {
     setVoiceLoading(true);
     addLog("🎙 録音停止 → AI解析中...");
 
-    // 少し待ってからチャンク収集
     await new Promise((r) => setTimeout(r, 500));
-
     const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
     await analyzeVoice(blob);
   }
 
   async function analyzeVoice(blob: Blob) {
     try {
-      // Whisperで文字起こし
       const formData = new FormData();
       formData.append("file", blob, "recording.webm");
       formData.append("model", "whisper-1");
@@ -349,7 +334,6 @@ export default function ConsultationPage() {
       setTranscript(transcribedText);
       addLog(`📝 文字起こし: "${transcribedText.slice(0, 30)}..."`);
 
-      // classify-and-draft APIで分類
       const classifyRes = await fetch("/api/karte-agent/classify-and-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -368,10 +352,9 @@ export default function ConsultationPage() {
         if (detected.length > 0) {
           setDetectedDiagnoses(detected);
           addLog(`🦷 傷病名検出: ${detected[0].name}（信頼度${Math.round(detected[0].confidence * 100)}%）`);
-          setPopup(null); // 録音ポップアップを閉じてバナー表示
+          setPopup(null);
         }
 
-        // SOAPのS更新
         if (classifyData.classified?.s) {
           await updateSoap("soap_s", classifyData.classified.s);
         }
@@ -406,14 +389,12 @@ export default function ConsultationPage() {
     addLog("📸 写真アップロード → AI解析中...");
 
     try {
-      // 画像をbase64に変換
       const base64 = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve((reader.result as string).split(",")[1]);
         reader.readAsDataURL(file);
       });
 
-      // xray-analyze APIへ送信
       const res = await fetch("/api/xray-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -431,7 +412,6 @@ export default function ConsultationPage() {
         addLog(`🦷 AI歯式解析完了: ${findings.length}件の所見`);
 
         if (findings.length > 0) {
-          // 自動で歯式チャートに反映提案
           setPopup("photo");
         }
       }
@@ -457,7 +437,6 @@ export default function ConsultationPage() {
     addLog(`✅ AI所見を歯式に反映: ${finding.tooth}番 ${finding.finding}`);
     setAiToothFindings((prev) => prev.filter((_, i) => i !== findingIdx));
 
-    // 全て反映したら次のステップへ
     if (aiToothFindings.length <= 1) {
       setPopup(null);
       setFocusStep("perio");
@@ -498,7 +477,6 @@ export default function ConsultationPage() {
     setConfirmedDiagnosis(diag);
     addLog(`✅ 傷病名確定: ${diag.tooth ? `${diag.tooth}番 ` : ""}${diag.name}`);
 
-    // patient_diagnosesに保存
     await supabase.from("patient_diagnoses").insert({
       patient_id: patient.id,
       medical_record_id: medicalRecord.id,
@@ -508,23 +486,46 @@ export default function ConsultationPage() {
       status: "active",
     });
 
-    // 治療パターン取得
     setFocusStep("treatment");
     await fetchTreatmentPatterns(diag.code);
     setDetectedDiagnoses([]);
   }
 
+  // ==============================
+  // ★ 修正: fetchTreatmentPatterns
+  // APIは diagnosis_short を要求し、treatments を返す
+  // ==============================
   async function fetchTreatmentPatterns(diagnosisCode: string) {
     try {
       const res = await fetch("/api/suggest-treatment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ diagnosis_code: diagnosisCode }),
+        body: JSON.stringify({
+          diagnosis_code: diagnosisCode,
+          diagnosis_short: diagnosisCode, // ← APIはこちらを参照
+        }),
       });
       if (res.ok) {
         const data = await res.json();
-        setSuggestedTreatments(data.procedures || []);
-        addLog(`💊 治療パターン${data.procedures?.length || 0}件を提案`);
+        // APIは treatments を返す（procedures ではない）
+        const treatments = data.treatments || [];
+        const converted: ProcedurePattern[] = treatments.map((t: {
+          procedure_id: string;
+          procedure_name: string;
+          category: string;
+          fee_items: { code: string; name: string; points: number; count: number }[];
+          total_points: number;
+          is_default: boolean;
+        }) => ({
+          id: t.procedure_id,
+          procedure_name: t.procedure_name,
+          category: t.category,
+          points: t.total_points,
+          fee_items: t.fee_items.map((f) => f.name),
+          applicable_diagnoses: [diagnosisCode],
+        }));
+        setSuggestedTreatments(converted);
+        addLog(`💊 治療パターン${converted.length}件を提案`);
       }
     } catch (err) {
       console.error(err);
@@ -532,7 +533,7 @@ export default function ConsultationPage() {
   }
 
   // ==============================
-  // 治療パターン選択 → structured_procedures追加
+  // 治療パターン選択
   // ==============================
   async function selectTreatment(proc: ProcedurePattern) {
     if (!medicalRecord || !confirmedDiagnosis) return;
@@ -556,11 +557,9 @@ export default function ConsultationPage() {
     setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
     addLog(`➕ 処置追加: ${proc.procedure_name}（${proc.points}点）`);
 
-    // SOAP P に自動記載
     const soapP = `${confirmedDiagnosis.tooth ? `${confirmedDiagnosis.tooth}番 ` : ""}${confirmedDiagnosis.name}: ${proc.procedure_name}`;
     await updateSoap("soap_p", soapP);
 
-    // 算定漏れチェック
     await checkBillingMiss(updated);
     setSuggestedTreatments([]);
     setFocusStep("billing");
@@ -573,7 +572,6 @@ export default function ConsultationPage() {
     const procedureNames = procedures.map((p) => p.procedure_name);
     const misses: BillingMissItem[] = [];
 
-    // ルールベースチェック
     const rules: Array<{
       trigger: string;
       missing: string;
@@ -667,7 +665,6 @@ export default function ConsultationPage() {
   async function finalizeBilling() {
     if (!medicalRecord || !appointment) return;
     try {
-      // billing INSERT
       const procs = medicalRecord.structured_procedures || [];
       await supabase.from("billing").insert({
         patient_id: appointment.patient_id,
@@ -678,13 +675,11 @@ export default function ConsultationPage() {
         status: "pending",
       });
 
-      // appointment完了
       await supabase
         .from("appointments")
         .update({ status: "completed" })
         .eq("id", appointment.id);
 
-      // patients.current_tooth_chart更新
       await supabase
         .from("patients")
         .update({ current_tooth_chart: toothChartDraft })
@@ -736,23 +731,17 @@ export default function ConsultationPage() {
   // ==============================
   return (
     <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
-      {/* ===== ヘッダー ===== */}
+      {/* ヘッダー */}
       <header className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
-          <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-            ←
-          </button>
+          <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">←</button>
           <div>
             <span className="font-bold text-lg">{patient.name}</span>
             <span className="ml-2 text-sm text-gray-500">{age}歳</span>
             <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
               {patient.insurance_type || "社保"}
             </span>
-            <span
-              className={`ml-2 text-sm px-2 py-0.5 rounded ${
-                isFirstVisit ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
-              }`}
-            >
+            <span className={`ml-2 text-sm px-2 py-0.5 rounded ${isFirstVisit ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
               {isFirstVisit ? "初診" : "再診"}
             </span>
           </div>
@@ -776,7 +765,7 @@ export default function ConsultationPage() {
         </div>
       </header>
 
-      {/* ===== バナーエリア ===== */}
+      {/* バナーエリア */}
       <div className="bg-white border-b px-4 py-1 space-y-1">
         {/* 傷病名検出バナー */}
         {detectedDiagnoses.length > 0 && (
@@ -796,18 +785,8 @@ export default function ConsultationPage() {
                 </button>
               </div>
             ))}
-            <button
-              onClick={() => { setPopup("diagnosis"); }}
-              className="text-xs text-yellow-700 underline"
-            >
-              変更する
-            </button>
-            <button
-              onClick={() => setDetectedDiagnoses([])}
-              className="text-xs text-gray-400 ml-auto"
-            >
-              ✕
-            </button>
+            <button onClick={() => setPopup("diagnosis")} className="text-xs text-yellow-700 underline">変更する</button>
+            <button onClick={() => setDetectedDiagnoses([])} className="text-xs text-gray-400 ml-auto">✕</button>
           </div>
         )}
 
@@ -815,15 +794,8 @@ export default function ConsultationPage() {
         {suggestedTreatments.length > 0 && confirmedDiagnosis && (
           <div className="bg-blue-50 border border-blue-300 rounded-lg px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-blue-700 font-medium text-sm">
-                💊 治療パターン（{confirmedDiagnosis.name}）:
-              </span>
-              <button
-                onClick={() => setSuggestedTreatments([])}
-                className="text-xs text-gray-400 ml-auto"
-              >
-                ✕
-              </button>
+              <span className="text-blue-700 font-medium text-sm">💊 治療パターン（{confirmedDiagnosis.name}）:</span>
+              <button onClick={() => setSuggestedTreatments([])} className="text-xs text-gray-400 ml-auto">✕</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {suggestedTreatments.slice(0, 6).map((proc, i) => (
@@ -835,12 +807,7 @@ export default function ConsultationPage() {
                   {proc.procedure_name} <span className="opacity-75">({proc.points}点)</span>
                 </button>
               ))}
-              <button
-                onClick={() => setPopup("treatment")}
-                className="text-xs text-blue-600 underline"
-              >
-                全て見る
-              </button>
+              <button onClick={() => setPopup("treatment")} className="text-xs text-blue-600 underline">全て見る</button>
             </div>
           </div>
         )}
@@ -850,29 +817,14 @@ export default function ConsultationPage() {
           <div className="bg-red-50 border border-red-300 rounded-lg px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-red-700 font-medium text-sm">⚠️ 算定漏れ候補:</span>
-              <button
-                onClick={() => setBillingMissItems([])}
-                className="text-xs text-gray-400 ml-auto"
-              >
-                ✕
-              </button>
+              <button onClick={() => setBillingMissItems([])} className="text-xs text-gray-400 ml-auto">✕</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {billingMissItems.map((miss, i) => (
                 <div key={i} className="flex items-center gap-1 bg-white border border-red-200 rounded px-2 py-1">
                   <span className="text-xs text-red-700">{miss.procedure_name}（{miss.points}点）</span>
-                  <button
-                    onClick={() => addMissingProcedure(miss)}
-                    className="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded hover:bg-red-600"
-                  >
-                    追加
-                  </button>
-                  <button
-                    onClick={() => setBillingMissItems((prev) => prev.filter((_, j) => j !== i))}
-                    className="text-xs text-gray-400"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => addMissingProcedure(miss)} className="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded hover:bg-red-600">追加</button>
+                  <button onClick={() => setBillingMissItems((prev) => prev.filter((_, j) => j !== i))} className="text-xs text-gray-400">✕</button>
                 </div>
               ))}
             </div>
@@ -884,30 +836,15 @@ export default function ConsultationPage() {
           <div className="bg-purple-50 border border-purple-300 rounded-lg px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-purple-700 font-medium text-sm">📸 AI歯式所見:</span>
-              <button
-                onClick={applyAllAiFindings}
-                className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded hover:bg-purple-700"
-              >
-                一括反映
-              </button>
-              <button
-                onClick={() => setAiToothFindings([])}
-                className="text-xs text-gray-400 ml-auto"
-              >
-                ✕
-              </button>
+              <button onClick={applyAllAiFindings} className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded hover:bg-purple-700">一括反映</button>
+              <button onClick={() => setAiToothFindings([])} className="text-xs text-gray-400 ml-auto">✕</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {aiToothFindings.map((f, i) => (
                 <div key={i} className="flex items-center gap-1 bg-white border border-purple-200 rounded px-2 py-1">
                   <span className="text-xs">{f.tooth}番: {f.finding}</span>
                   <span className="text-xs text-gray-400">({Math.round(f.confidence * 100)}%)</span>
-                  <button
-                    onClick={() => applyAiFindings(i)}
-                    className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded"
-                  >
-                    反映
-                  </button>
+                  <button onClick={() => applyAiFindings(i)} className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded">反映</button>
                 </div>
               ))}
             </div>
@@ -915,12 +852,12 @@ export default function ConsultationPage() {
         )}
       </div>
 
-      {/* ===== メインエリア ===== */}
+      {/* メインエリア */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ===== カルテ左エリア ===== */}
+        {/* カルテ左エリア */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
-          {/* 過去カルテ（折りたたみ） */}
+          {/* 過去カルテ */}
           {pastRecords.length > 0 && !isFirstVisit && (
             <div className="bg-white rounded-lg border">
               <button
@@ -937,9 +874,7 @@ export default function ConsultationPage() {
                       <div className="text-xs text-gray-500">{new Date(pr.soap_s || "").toLocaleDateString("ja-JP")}</div>
                       <div className="text-sm">{pr.soap_s?.slice(0, 80) || "記録なし"}</div>
                       {(pr.structured_procedures || []).slice(0, 3).map((p, i) => (
-                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-1 py-0.5 rounded mr-1">
-                          {p.procedure_name}
-                        </span>
+                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-1 py-0.5 rounded mr-1">{p.procedure_name}</span>
                       ))}
                     </div>
                   ))}
@@ -954,46 +889,24 @@ export default function ConsultationPage() {
               <h3 className="font-medium text-gray-700">🦷 歯式チャート</h3>
               <span className="text-xs text-gray-400">タップして状態変更</span>
             </div>
-
-            {/* 前回チャート（薄く） */}
             {medicalRecord.previous_tooth_chart && (
               <div className="mb-2">
                 <div className="text-xs text-gray-400 mb-1">前回</div>
-                <ToothChart
-                  chart={medicalRecord.previous_tooth_chart}
-                  dim
-                  onToothClick={() => {}}
-                  editingTooth={null}
-                  onSetStatus={() => {}}
-                />
+                <ToothChart chart={medicalRecord.previous_tooth_chart} dim onToothClick={() => {}} editingTooth={null} onSetStatus={() => {}} />
               </div>
             )}
-
-            {/* 今回チャート */}
             <div>
               <div className="text-xs text-gray-500 mb-1">今回</div>
-              <ToothChart
-                chart={toothChartDraft}
-                dim={false}
-                onToothClick={handleToothClick}
-                editingTooth={editingTooth}
-                onSetStatus={setToothStatus}
-              />
+              <ToothChart chart={toothChartDraft} dim={false} onToothClick={handleToothClick} editingTooth={editingTooth} onSetStatus={setToothStatus} />
             </div>
           </div>
 
-          {/* メインカルテ（Julea的） */}
+          {/* 処置記録 */}
           <div className="bg-white rounded-lg border p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-medium text-gray-700">📋 処置記録</h3>
-              <button
-                onClick={() => setPopup("diagnosis")}
-                className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100"
-              >
-                + 傷病名追加
-              </button>
+              <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100">+ 傷病名追加</button>
             </div>
-
             {(medicalRecord.structured_procedures || []).length === 0 ? (
               <div className="text-center py-8 text-gray-400">
                 <div className="text-3xl mb-2">📝</div>
@@ -1021,16 +934,11 @@ export default function ConsultationPage() {
                         <button
                           onClick={async () => {
                             const updated = (medicalRecord.structured_procedures || []).filter((_, j) => j !== i);
-                            await supabase
-                              .from("medical_records")
-                              .update({ structured_procedures: updated })
-                              .eq("id", medicalRecord.id);
+                            await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
                             setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
                           }}
                           className="text-gray-300 hover:text-red-400 text-xs"
-                        >
-                          ✕
-                        </button>
+                        >✕</button>
                       </td>
                     </tr>
                   ))}
@@ -1046,7 +954,7 @@ export default function ConsultationPage() {
             )}
           </div>
 
-          {/* SOAP（折りたたみ） */}
+          {/* SOAP */}
           <div className="bg-white rounded-lg border">
             <button
               onClick={() => setShowSoap(!showSoap)}
@@ -1059,9 +967,7 @@ export default function ConsultationPage() {
               <div className="px-4 pb-4 space-y-3">
                 {(["soap_s", "soap_o", "soap_a", "soap_p"] as const).map((field) => (
                   <div key={field}>
-                    <label className="text-xs font-medium text-gray-500 uppercase">
-                      {field.replace("soap_", "")}
-                    </label>
+                    <label className="text-xs font-medium text-gray-500 uppercase">{field.replace("soap_", "")}</label>
                     <textarea
                       className="w-full mt-1 border rounded p-2 text-sm resize-none"
                       rows={2}
@@ -1090,7 +996,7 @@ export default function ConsultationPage() {
           </div>
         </div>
 
-        {/* ===== アクションボタン（縦） ===== */}
+        {/* アクションボタン */}
         <div className="w-16 bg-white border-l flex flex-col items-center py-4 gap-3">
           {[
             { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
@@ -1114,7 +1020,7 @@ export default function ConsultationPage() {
           ))}
         </div>
 
-        {/* ===== ポップアップパネル ===== */}
+        {/* ポップアップパネル */}
         {popup && (
           <div className="w-80 bg-white border-l shadow-lg overflow-y-auto">
             <div className="flex items-center justify-between px-4 py-3 border-b">
@@ -1130,7 +1036,7 @@ export default function ConsultationPage() {
             </div>
 
             <div className="p-4">
-              {/* 写真アップ */}
+              {/* 写真 */}
               {popup === "photo" && (
                 <div className="space-y-4">
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
@@ -1145,17 +1051,11 @@ export default function ConsultationPage() {
                         <p className="text-sm text-gray-600 mb-3">レントゲン・口腔内写真をアップロード</p>
                         <label className="cursor-pointer bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700">
                           ファイル選択
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handlePhotoUpload}
-                          />
+                          <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
                         </label>
                       </>
                     )}
                   </div>
-
                   {aiToothFindings.length > 0 && (
                     <div>
                       <h4 className="font-medium text-sm mb-2">AI所見</h4>
@@ -1167,20 +1067,10 @@ export default function ConsultationPage() {
                               <span className="text-xs text-gray-600 ml-2">{f.finding}</span>
                               <span className="text-xs text-gray-400 ml-1">({Math.round(f.confidence * 100)}%)</span>
                             </div>
-                            <button
-                              onClick={() => applyAiFindings(i)}
-                              className="bg-purple-600 text-white text-xs px-2 py-1 rounded"
-                            >
-                              反映
-                            </button>
+                            <button onClick={() => applyAiFindings(i)} className="bg-purple-600 text-white text-xs px-2 py-1 rounded">反映</button>
                           </div>
                         ))}
-                        <button
-                          onClick={applyAllAiFindings}
-                          className="w-full bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700"
-                        >
-                          一括反映
-                        </button>
+                        <button onClick={applyAllAiFindings} className="w-full bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700">一括反映</button>
                       </div>
                     </div>
                   )}
@@ -1200,29 +1090,14 @@ export default function ConsultationPage() {
                           max={12}
                           placeholder="mm"
                           value={perioData[String(tooth)] || ""}
-                          onChange={(e) => setPerioData((prev) => ({
-                            ...prev,
-                            [String(tooth)]: Number(e.target.value),
-                          }))}
-                          className={`w-full border rounded text-center text-sm py-1 ${
-                            (perioData[String(tooth)] || 0) >= 4 ? "border-red-400 bg-red-50" : ""
-                          }`}
+                          onChange={(e) => setPerioData((prev) => ({ ...prev, [String(tooth)]: Number(e.target.value) }))}
+                          className={`w-full border rounded text-center text-sm py-1 ${(perioData[String(tooth)] || 0) >= 4 ? "border-red-400 bg-red-50" : ""}`}
                         />
                       </div>
                     ))}
                   </div>
-
-                  <div className="text-xs text-gray-500">
-                    {Object.values(perioData).filter((v) => v >= 4).length}箇所が4mm以上
-                  </div>
-
-                  <button
-                    onClick={savePerioData}
-                    disabled={Object.keys(perioData).length === 0}
-                    className="w-full bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
-                  >
-                    P検を保存 →
-                  </button>
+                  <div className="text-xs text-gray-500">{Object.values(perioData).filter((v) => v >= 4).length}箇所が4mm以上</div>
+                  <button onClick={savePerioData} disabled={Object.keys(perioData).length === 0} className="w-full bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">P検を保存 →</button>
                 </div>
               )}
 
@@ -1237,27 +1112,15 @@ export default function ConsultationPage() {
                   ) : (
                     <>
                       <div
-                        className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center text-5xl cursor-pointer transition-all ${
-                          isRecording
-                            ? "bg-red-500 animate-pulse shadow-lg shadow-red-300"
-                            : "bg-gray-100 hover:bg-gray-200"
-                        }`}
+                        className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center text-5xl cursor-pointer transition-all ${isRecording ? "bg-red-500 animate-pulse shadow-lg shadow-red-300" : "bg-gray-100 hover:bg-gray-200"}`}
                         onClick={isRecording ? stopRecording : startRecording}
-                      >
-                        🎙
-                      </div>
-
+                      >🎙</div>
                       {isRecording && (
                         <div className="text-red-600 font-medium">
-                          録音中... {Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:
-                          {(recordingSeconds % 60).toString().padStart(2, "0")}
+                          録音中... {Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:{(recordingSeconds % 60).toString().padStart(2, "0")}
                         </div>
                       )}
-
-                      <p className="text-sm text-gray-500">
-                        {isRecording ? "タップして停止" : "タップして録音開始"}
-                      </p>
-
+                      <p className="text-sm text-gray-500">{isRecording ? "タップして停止" : "タップして録音開始"}</p>
                       {transcript && (
                         <div className="bg-gray-50 border rounded p-3 text-left">
                           <p className="text-xs text-gray-500 mb-1">文字起こし</p>
@@ -1273,80 +1136,33 @@ export default function ConsultationPage() {
               {popup === "diagnosis" && (
                 <div className="space-y-3">
                   <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="歯番（例: 46）"
-                      value={selectedTooth}
-                      onChange={(e) => setSelectedTooth(e.target.value)}
-                      className="w-20 border rounded px-2 py-1.5 text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="傷病名を検索..."
-                      value={diagnosisSearch}
-                      onChange={(e) => setDiagnosisSearch(e.target.value)}
-                      className="flex-1 border rounded px-3 py-1.5 text-sm"
-                      autoFocus
-                    />
+                    <input type="text" placeholder="歯番（例: 46）" value={selectedTooth} onChange={(e) => setSelectedTooth(e.target.value)} className="w-20 border rounded px-2 py-1.5 text-sm" />
+                    <input type="text" placeholder="傷病名を検索..." value={diagnosisSearch} onChange={(e) => setDiagnosisSearch(e.target.value)} className="flex-1 border rounded px-3 py-1.5 text-sm" autoFocus />
                   </div>
-
                   <div className="space-y-1 max-h-80 overflow-y-auto">
                     {diagnosisMaster
-                      .filter((d) =>
-                        diagnosisSearch.length < 1
-                          ? false
-                          : d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase())
-                      )
+                      .filter((d) => diagnosisSearch.length < 1 ? false : d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase()))
                       .slice(0, 20)
                       .map((d) => (
                         <button
                           key={d.code}
-                          onClick={() => {
-                            const diag: DetectedDiagnosis = {
-                              tooth: selectedTooth,
-                              code: d.code,
-                              name: d.name,
-                              confidence: 1.0,
-                              reason: "手動選択",
-                            };
-                            confirmDiagnosis(diag);
-                            setPopup(null);
-                            setDiagnosisSearch("");
-                          }}
+                          onClick={() => { confirmDiagnosis({ tooth: selectedTooth, code: d.code, name: d.name, confidence: 1.0, reason: "手動選択" }); setPopup(null); setDiagnosisSearch(""); }}
                           className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 flex items-center justify-between"
                         >
                           <span>{d.name}</span>
                           <span className="text-xs text-gray-400">{d.code} · {d.category}</span>
                         </button>
                       ))}
-
-                    {diagnosisSearch.length > 0 && diagnosisMaster.filter((d) =>
-                      d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase())
-                    ).length === 0 && (
+                    {diagnosisSearch.length > 0 && diagnosisMaster.filter((d) => d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase())).length === 0 && (
                       <p className="text-center text-gray-400 text-sm py-4">該当なし</p>
                     )}
-
                     {diagnosisSearch.length < 1 && (
                       <div className="space-y-2">
                         <p className="text-xs text-gray-400">よく使う傷病名</p>
                         {["C2:う蝕(C2)", "C3:う蝕(C3)", "Pul:歯髄炎", "Per:根尖性歯周炎", "G:歯肉炎", "P2:歯周炎(P2)"].map((item) => {
                           const [code, name] = item.split(":");
                           return (
-                            <button
-                              key={code}
-                              onClick={() => {
-                                const diag: DetectedDiagnosis = {
-                                  tooth: selectedTooth,
-                                  code,
-                                  name,
-                                  confidence: 1.0,
-                                  reason: "手動選択",
-                                };
-                                confirmDiagnosis(diag);
-                                setPopup(null);
-                              }}
-                              className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50"
-                            >
+                            <button key={code} onClick={() => { confirmDiagnosis({ tooth: selectedTooth, code, name, confidence: 1.0, reason: "手動選択" }); setPopup(null); }} className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50">
                               {name} <span className="text-xs text-gray-400">{code}</span>
                             </button>
                           );
@@ -1357,13 +1173,11 @@ export default function ConsultationPage() {
                 </div>
               )}
 
-              {/* 治療パターン全一覧 */}
+              {/* 治療パターン */}
               {popup === "treatment" && (
                 <div className="space-y-2">
                   {suggestedTreatments.length === 0 ? (
-                    <p className="text-center text-gray-400 text-sm py-4">
-                      傷病名を確定すると治療パターンが表示されます
-                    </p>
+                    <p className="text-center text-gray-400 text-sm py-4">傷病名を確定すると治療パターンが表示されます</p>
                   ) : (
                     <>
                       {["restoration", "endo", "perio", "surgery", "prosth", "denture", "basic"].map((cat) => {
@@ -1373,14 +1187,7 @@ export default function ConsultationPage() {
                           <div key={cat}>
                             <div className="text-xs text-gray-500 font-medium px-1 py-1 uppercase">{cat}</div>
                             {catProcs.map((proc, i) => (
-                              <button
-                                key={i}
-                                onClick={() => {
-                                  selectTreatment(proc);
-                                  setPopup(null);
-                                }}
-                                className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 mb-1 flex justify-between"
-                              >
+                              <button key={i} onClick={() => { selectTreatment(proc); setPopup(null); }} className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 mb-1 flex justify-between">
                                 <span>{proc.procedure_name}</span>
                                 <span className="text-blue-700 font-medium">{proc.points}点</span>
                               </button>
@@ -1404,9 +1211,7 @@ export default function ConsultationPage() {
                         <div key={i} className="flex justify-between text-sm border-b pb-2">
                           <div>
                             <div className="font-medium">{proc.procedure_name}</div>
-                            <div className="text-xs text-gray-500">
-                              {proc.tooth ? `${proc.tooth}番 ` : ""}{proc.diagnosis_name}
-                            </div>
+                            <div className="text-xs text-gray-500">{proc.tooth ? `${proc.tooth}番 ` : ""}{proc.diagnosis_name}</div>
                           </div>
                           <div className="font-medium text-blue-700">{proc.points}点</div>
                         </div>
@@ -1415,18 +1220,8 @@ export default function ConsultationPage() {
                         <span>合計</span>
                         <span className="text-blue-700">{totalPoints}点</span>
                       </div>
-                      <div className="text-right text-sm text-gray-500">
-                        3割負担: {Math.round(totalPoints * 10 * 0.3).toLocaleString()}円
-                      </div>
-                      <button
-                        onClick={() => {
-                          setPopup(null);
-                          finalizeBilling();
-                        }}
-                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700"
-                      >
-                        算定確定 → 会計へ
-                      </button>
+                      <div className="text-right text-sm text-gray-500">3割負担: {Math.round(totalPoints * 10 * 0.3).toLocaleString()}円</div>
+                      <button onClick={() => { setPopup(null); finalizeBilling(); }} className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">算定確定 → 会計へ</button>
                     </>
                   )}
                 </div>
@@ -1443,11 +1238,7 @@ export default function ConsultationPage() {
 // 歯式チャートコンポーネント
 // ==============================
 function ToothChart({
-  chart,
-  dim,
-  onToothClick,
-  editingTooth,
-  onSetStatus,
+  chart, dim, onToothClick, editingTooth, onSetStatus,
 }: {
   chart: Record<string, ToothStatus>;
   dim: boolean;
@@ -1470,66 +1261,40 @@ function ToothChart({
 
   return (
     <div className={dim ? "opacity-40" : ""}>
-      {/* 上顎 */}
       <div className="flex gap-0.5 mb-1">
         {UPPER.map((tooth) => (
           <div key={tooth} className="relative">
             <button
               onClick={() => !dim && onToothClick(tooth)}
-              className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border
-                ${toothStatusColor(chart[String(tooth)]?.status)}
-                ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""}
-                ${!dim ? "hover:opacity-80" : "cursor-default"}
-              `}
+              className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border ${toothStatusColor(chart[String(tooth)]?.status)} ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""} ${!dim ? "hover:opacity-80" : "cursor-default"}`}
             >
               <span style={{ fontSize: 8 }}>{tooth}</span>
-              <span style={{ fontSize: 7 }} className="truncate">
-                {chart[String(tooth)]?.status?.slice(0, 3) || ""}
-              </span>
+              <span style={{ fontSize: 7 }} className="truncate">{chart[String(tooth)]?.status?.slice(0, 3) || ""}</span>
             </button>
             {editingTooth === tooth && !dim && (
               <div className="absolute top-9 left-0 z-50 bg-white border rounded shadow-lg p-2 w-28">
                 {STATUS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => onSetStatus(tooth, opt.value)}
-                    className={`w-full text-left px-2 py-1 text-xs rounded mb-0.5 ${opt.color} hover:opacity-80`}
-                  >
-                    {opt.label}
-                  </button>
+                  <button key={opt.value} onClick={() => onSetStatus(tooth, opt.value)} className={`w-full text-left px-2 py-1 text-xs rounded mb-0.5 ${opt.color} hover:opacity-80`}>{opt.label}</button>
                 ))}
               </div>
             )}
           </div>
         ))}
       </div>
-      {/* 下顎 */}
       <div className="flex gap-0.5">
         {LOWER.map((tooth) => (
           <div key={tooth} className="relative">
             <button
               onClick={() => !dim && onToothClick(tooth)}
-              className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border
-                ${toothStatusColor(chart[String(tooth)]?.status)}
-                ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""}
-                ${!dim ? "hover:opacity-80" : "cursor-default"}
-              `}
+              className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border ${toothStatusColor(chart[String(tooth)]?.status)} ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""} ${!dim ? "hover:opacity-80" : "cursor-default"}`}
             >
               <span style={{ fontSize: 8 }}>{tooth}</span>
-              <span style={{ fontSize: 7 }} className="truncate">
-                {chart[String(tooth)]?.status?.slice(0, 3) || ""}
-              </span>
+              <span style={{ fontSize: 7 }} className="truncate">{chart[String(tooth)]?.status?.slice(0, 3) || ""}</span>
             </button>
             {editingTooth === tooth && !dim && (
               <div className="absolute bottom-9 left-0 z-50 bg-white border rounded shadow-lg p-2 w-28">
                 {STATUS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => onSetStatus(tooth, opt.value)}
-                    className={`w-full text-left px-2 py-1 text-xs rounded mb-0.5 ${opt.color} hover:opacity-80`}
-                  >
-                    {opt.label}
-                  </button>
+                  <button key={opt.value} onClick={() => onSetStatus(tooth, opt.value)} className={`w-full text-left px-2 py-1 text-xs rounded mb-0.5 ${opt.color} hover:opacity-80`}>{opt.label}</button>
                 ))}
               </div>
             )}
