@@ -174,7 +174,9 @@ export default function ConsultationPage() {
 
   // 写真
   const [photoLoading, setPhotoLoading] = useState(false);
-  const [aiToothFindings, setAiToothFindings] = useState<Array<{ tooth: string; finding: string; confidence: number }>>([]);
+  const [aiToothFindings, setAiToothFindings] = useState<Array<{ tooth: string; finding: string; confidence: number; detail?: string; suggestedDiagnosis?: string }>>([]);
+  const [xraySummary, setXraySummary] = useState<string>("");
+  const [xrayNotableFindings, setXrayNotableFindings] = useState<string[]>([]);
 
   // P検
   const [perioRecording, setPerioRecording] = useState(false);
@@ -407,11 +409,30 @@ export default function ConsultationPage() {
 
       if (res.ok) {
         const data = await res.json();
-        const findings = data.findings || [];
-        setAiToothFindings(findings);
-        addLog(`🦷 AI歯式解析完了: ${findings.length}件の所見`);
+        const rawFindings = data.findings || [];
 
-        if (findings.length > 0) {
+        // APIが返すdetailと傷病名候補をマッピング
+        const statusToDiagnosis: Record<string, string> = {
+          caries: "う蝕", c0: "CO", c1: "C1", c2: "C2", c3: "C3", c4: "C4",
+          crown: "補綴(クラウン)", missing: "欠損", implant: "インプラント",
+          bridge: "ブリッジ", root_remain: "残根", in_treatment: "治療中",
+          treated: "処置歯(CR/インレー)", watch: "要観察",
+        };
+
+        const enrichedFindings = rawFindings.map((f: { tooth: string; status: string; confidence: number; detail?: string }) => ({
+          tooth: f.tooth,
+          finding: f.status,
+          confidence: f.confidence,
+          detail: f.detail || "",
+          suggestedDiagnosis: statusToDiagnosis[f.status?.toLowerCase()] || f.status,
+        }));
+
+        setAiToothFindings(enrichedFindings);
+        setXraySummary(data.summary || "");
+        setXrayNotableFindings(data.analysis?.notable_findings || []);
+        addLog(`🦷 AI歯式解析完了: ${enrichedFindings.length}件の所見`);
+
+        if (enrichedFindings.length > 0) {
           setPopup("photo");
         }
       }
@@ -428,13 +449,14 @@ export default function ConsultationPage() {
     if (!finding) return;
 
     const newChart = { ...toothChartDraft };
+    const isCaries = ["caries","c1","c2","c3","c4"].includes(finding.finding?.toLowerCase());
     newChart[finding.tooth] = {
-      status: finding.finding.includes("う蝕") || finding.finding.includes("C") ? "caries" : "crown",
-      notes: finding.finding,
+      status: isCaries ? "caries" : finding.finding === "missing" ? "missing" : finding.finding === "implant" ? "implant" : "crown",
+      notes: finding.detail || finding.finding,
     };
     setToothChartDraft(newChart);
     await saveToothChart(newChart);
-    addLog(`✅ AI所見を歯式に反映: ${finding.tooth}番 ${finding.finding}`);
+    addLog(`✅ AI所見を歯式に反映: ${finding.tooth}番 ${finding.suggestedDiagnosis || finding.finding}`);
     setAiToothFindings((prev) => prev.filter((_, i) => i !== findingIdx));
 
     if (aiToothFindings.length <= 1) {
@@ -447,15 +469,18 @@ export default function ConsultationPage() {
   async function applyAllAiFindings() {
     const newChart = { ...toothChartDraft };
     for (const finding of aiToothFindings) {
+      const isCaries = ["caries","c1","c2","c3","c4"].includes(finding.finding?.toLowerCase());
       newChart[finding.tooth] = {
-        status: finding.finding.includes("う蝕") || finding.finding.includes("C") ? "caries" : "crown",
-        notes: finding.finding,
+        status: isCaries ? "caries" : finding.finding === "missing" ? "missing" : finding.finding === "implant" ? "implant" : "crown",
+        notes: finding.detail || finding.finding,
       };
     }
     setToothChartDraft(newChart);
     await saveToothChart(newChart);
     addLog(`✅ AI所見を一括反映: ${aiToothFindings.length}件`);
     setAiToothFindings([]);
+    setXraySummary("");
+    setXrayNotableFindings([]);
     setPopup(null);
     setFocusStep("perio");
   }
@@ -524,6 +549,7 @@ export default function ConsultationPage() {
           fee_items: t.fee_items.map((f) => f.name),
           applicable_diagnoses: [diagnosisCode],
         }));
+        // display_orderはAPIが既にソート済みなので順序をそのまま維持
         setSuggestedTreatments(converted);
         addLog(`💊 治療パターン${converted.length}件を提案`);
       }
@@ -837,12 +863,14 @@ export default function ConsultationPage() {
             <div className="flex items-center gap-2 mb-1">
               <span className="text-purple-700 font-medium text-sm">📸 AI歯式所見:</span>
               <button onClick={applyAllAiFindings} className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded hover:bg-purple-700">一括反映</button>
+              <button onClick={() => setPopup("photo")} className="text-xs text-purple-600 underline">詳細を見る</button>
               <button onClick={() => setAiToothFindings([])} className="text-xs text-gray-400 ml-auto">✕</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {aiToothFindings.map((f, i) => (
                 <div key={i} className="flex items-center gap-1 bg-white border border-purple-200 rounded px-2 py-1">
-                  <span className="text-xs">{f.tooth}番: {f.finding}</span>
+                  <span className="text-xs font-medium">{f.tooth}番</span>
+                  <span className="text-xs text-purple-700">{f.suggestedDiagnosis || f.finding}</span>
                   <span className="text-xs text-gray-400">({Math.round(f.confidence * 100)}%)</span>
                   <button onClick={() => applyAiFindings(i)} className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded">反映</button>
                 </div>
@@ -1056,18 +1084,37 @@ export default function ConsultationPage() {
                       </>
                     )}
                   </div>
+                  {xraySummary && (
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                      <p className="text-xs font-medium text-purple-700 mb-1">📋 全体所見</p>
+                      <p className="text-xs text-gray-700">{xraySummary}</p>
+                    </div>
+                  )}
+                  {xrayNotableFindings.length > 0 && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                      <p className="text-xs font-medium text-orange-700 mb-1">⚠️ 重要所見</p>
+                      {xrayNotableFindings.map((nf, i) => (
+                        <p key={i} className="text-xs text-gray-700">・{nf}</p>
+                      ))}
+                    </div>
+                  )}
                   {aiToothFindings.length > 0 && (
                     <div>
-                      <h4 className="font-medium text-sm mb-2">AI所見</h4>
+                      <h4 className="font-medium text-sm mb-2">歯別AI所見</h4>
                       <div className="space-y-2">
                         {aiToothFindings.map((f, i) => (
-                          <div key={i} className="flex items-center justify-between border rounded p-2">
-                            <div>
-                              <span className="font-medium text-sm">{f.tooth}番</span>
-                              <span className="text-xs text-gray-600 ml-2">{f.finding}</span>
-                              <span className="text-xs text-gray-400 ml-1">({Math.round(f.confidence * 100)}%)</span>
+                          <div key={i} className="border rounded p-2 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm">{f.tooth}番</span>
+                                <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{f.suggestedDiagnosis || f.finding}</span>
+                                <span className="text-xs text-gray-400">{Math.round(f.confidence * 100)}%</span>
+                              </div>
+                              <button onClick={() => applyAiFindings(i)} className="bg-purple-600 text-white text-xs px-2 py-1 rounded">反映</button>
                             </div>
-                            <button onClick={() => applyAiFindings(i)} className="bg-purple-600 text-white text-xs px-2 py-1 rounded">反映</button>
+                            {f.detail && (
+                              <p className="text-xs text-gray-600 pl-1">└ {f.detail}</p>
+                            )}
                           </div>
                         ))}
                         <button onClick={applyAllAiFindings} className="w-full bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700">一括反映</button>
