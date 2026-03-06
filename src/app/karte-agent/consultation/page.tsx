@@ -1012,10 +1012,6 @@ export default function ConsultationPage() {
     setFocusStep("voice");
     addLog("→ 次: 音声録音を行ってください");
   }
-    setShowPerioFull(false);
-    setFocusStep("voice");
-    addLog("→ 次: 音声録音を行ってください");
-  }
 
   // ==============================
   // 歯式チャート クリック
