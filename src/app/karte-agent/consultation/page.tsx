@@ -177,6 +177,8 @@ export default function ConsultationPage() {
   const [aiToothFindings, setAiToothFindings] = useState<Array<{ tooth: string; finding: string; confidence: number; detail?: string; suggestedDiagnosis?: string }>>([]);
   const [xraySummary, setXraySummary] = useState<string>("");
   const [xrayNotableFindings, setXrayNotableFindings] = useState<string[]>([]);
+  const [showXrayConfirm, setShowXrayConfirm] = useState(false);
+  const [xrayConfirmChart, setXrayConfirmChart] = useState<Record<string, ToothStatus>>({});
 
   // P検
   const [perioRecording, setPerioRecording] = useState(false);
@@ -416,7 +418,16 @@ export default function ConsultationPage() {
           caries: "う蝕", c0: "CO", c1: "C1", c2: "C2", c3: "C3", c4: "C4",
           crown: "補綴(クラウン)", missing: "欠損", implant: "インプラント",
           bridge: "ブリッジ", root_remain: "残根", in_treatment: "治療中",
-          treated: "処置歯(CR/インレー)", watch: "要観察",
+          treated: "処置歯(CR/インレー)", watch: "要観察", rct: "根管治療済",
+        };
+
+        // APIステータス → 歯式チャートステータスのマッピング
+        const statusToChart: Record<string, string> = {
+          caries: "caries", c1: "caries", c2: "caries", c3: "caries", c4: "caries", watch: "caries",
+          crown: "crown", treated: "crown", bridge: "bridge",
+          missing: "missing",
+          implant: "implant",
+          rct: "rct", root_remain: "rct", in_treatment: "rct",
         };
 
         const enrichedFindings = rawFindings.map((f: { tooth: string; status: string; confidence: number; detail?: string }) => ({
@@ -425,6 +436,7 @@ export default function ConsultationPage() {
           confidence: f.confidence,
           detail: f.detail || "",
           suggestedDiagnosis: statusToDiagnosis[f.status?.toLowerCase()] || f.status,
+          chartStatus: statusToChart[f.status?.toLowerCase()] || "crown",
         }));
 
         setAiToothFindings(enrichedFindings);
@@ -449,9 +461,8 @@ export default function ConsultationPage() {
     if (!finding) return;
 
     const newChart = { ...toothChartDraft };
-    const isCaries = ["caries","c1","c2","c3","c4"].includes(finding.finding?.toLowerCase());
     newChart[finding.tooth] = {
-      status: isCaries ? "caries" : finding.finding === "missing" ? "missing" : finding.finding === "implant" ? "implant" : "crown",
+      status: (finding as { chartStatus?: string }).chartStatus || "crown",
       notes: finding.detail || finding.finding,
     };
     setToothChartDraft(newChart);
@@ -469,20 +480,27 @@ export default function ConsultationPage() {
   async function applyAllAiFindings() {
     const newChart = { ...toothChartDraft };
     for (const finding of aiToothFindings) {
-      const isCaries = ["caries","c1","c2","c3","c4"].includes(finding.finding?.toLowerCase());
       newChart[finding.tooth] = {
-        status: isCaries ? "caries" : finding.finding === "missing" ? "missing" : finding.finding === "implant" ? "implant" : "crown",
+        status: (finding as { chartStatus?: string }).chartStatus || "crown",
         notes: finding.detail || finding.finding,
       };
     }
-    setToothChartDraft(newChart);
-    await saveToothChart(newChart);
+    // 確認ポップアップ表示（まだ保存しない）
+    setXrayConfirmChart(newChart);
+    setShowXrayConfirm(true);
+  }
+
+  async function confirmApplyAll() {
+    setToothChartDraft(xrayConfirmChart);
+    await saveToothChart(xrayConfirmChart);
     addLog(`✅ AI所見を一括反映: ${aiToothFindings.length}件`);
     setAiToothFindings([]);
     setXraySummary("");
     setXrayNotableFindings([]);
+    setShowXrayConfirm(false);
     setPopup(null);
     setFocusStep("perio");
+    addLog("→ 次: P検を行ってください");
   }
 
   async function saveToothChart(chart: Record<string, ToothStatus>) {
@@ -757,6 +775,87 @@ export default function ConsultationPage() {
   // ==============================
   return (
     <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
+
+      {/* ===== AI歯式確認ポップアップ ===== */}
+      {showXrayConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+            style={{ animation: "slideUp 0.3s ease-out" }}>
+            <style>{`
+              @keyframes slideUp {
+                from { transform: translateY(40px); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
+              }
+              @keyframes checkPop {
+                0% { transform: scale(0); opacity: 0; }
+                60% { transform: scale(1.2); }
+                100% { transform: scale(1); opacity: 1; }
+              }
+            `}</style>
+
+            {/* ヘッダー */}
+            <div className="bg-gradient-to-r from-purple-600 to-blue-600 px-6 py-4 text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white bg-opacity-20 rounded-full flex items-center justify-center text-xl"
+                  style={{ animation: "checkPop 0.4s ease-out 0.2s both" }}>
+                  🦷
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">AI歯式解析完了</h3>
+                  <p className="text-sm text-purple-100">{aiToothFindings.length}件の所見を検出しました</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 所見リスト */}
+            <div className="px-6 py-4 max-h-72 overflow-y-auto">
+              <p className="text-sm font-medium text-gray-700 mb-3">この内容で歯式チャートに反映しますか？</p>
+              <div className="space-y-2">
+                {aiToothFindings.map((f, i) => (
+                  <div key={i} className="flex items-start gap-3 p-2 bg-gray-50 rounded-lg">
+                    <span className={`text-xs px-2 py-1 rounded font-bold min-w-12 text-center ${
+                      f.finding === "missing" ? "bg-gray-600 text-white" :
+                      f.finding === "caries" || f.finding === "watch" ? "bg-red-400 text-white" :
+                      f.finding === "rct" || f.finding === "root_remain" ? "bg-purple-400 text-white" :
+                      f.finding === "implant" ? "bg-blue-400 text-white" :
+                      f.finding === "bridge" ? "bg-orange-400 text-white" :
+                      "bg-yellow-400 text-gray-800"
+                    }`}>{f.tooth}番</span>
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-gray-800">{f.suggestedDiagnosis || f.finding}</span>
+                      <span className="text-xs text-gray-400 ml-2">{Math.round(f.confidence * 100)}%</span>
+                      {f.detail && <p className="text-xs text-gray-500 mt-0.5">└ {f.detail}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {xraySummary && (
+                <div className="mt-3 p-3 bg-purple-50 rounded-lg">
+                  <p className="text-xs font-medium text-purple-700 mb-1">📋 全体所見</p>
+                  <p className="text-xs text-gray-600">{xraySummary}</p>
+                </div>
+              )}
+            </div>
+
+            {/* ボタン */}
+            <div className="px-6 py-4 border-t flex gap-3">
+              <button
+                onClick={() => setShowXrayConfirm(false)}
+                className="flex-1 py-3 rounded-xl border border-gray-300 text-gray-600 font-medium hover:bg-gray-50"
+              >
+                修正する
+              </button>
+              <button
+                onClick={confirmApplyAll}
+                className="flex-2 px-8 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold hover:opacity-90 shadow-lg"
+              >
+                ✅ この内容で反映する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ヘッダー */}
       <header className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
@@ -1310,7 +1409,7 @@ function ToothChart({
     <div className={dim ? "opacity-40" : ""}>
       <div className="flex gap-0.5 mb-1">
         {UPPER.map((tooth) => (
-          <div key={tooth} className="relative">
+          <div key={tooth} className="relative group">
             <button
               onClick={() => !dim && onToothClick(tooth)}
               className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border ${toothStatusColor(chart[String(tooth)]?.status)} ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""} ${!dim ? "hover:opacity-80" : "cursor-default"}`}
@@ -1318,6 +1417,12 @@ function ToothChart({
               <span style={{ fontSize: 8 }}>{tooth}</span>
               <span style={{ fontSize: 7 }} className="truncate">{chart[String(tooth)]?.status?.slice(0, 3) || ""}</span>
             </button>
+            {/* tooltip */}
+            {chart[String(tooth)]?.notes && !dim && (
+              <div className="absolute bottom-9 left-1/2 -translate-x-1/2 z-50 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 w-40 whitespace-normal pointer-events-none shadow-lg">
+                {chart[String(tooth)]?.notes}
+              </div>
+            )}
             {editingTooth === tooth && !dim && (
               <div className="absolute top-9 left-0 z-50 bg-white border rounded shadow-lg p-2 w-28">
                 {STATUS_OPTIONS.map((opt) => (
@@ -1330,7 +1435,7 @@ function ToothChart({
       </div>
       <div className="flex gap-0.5">
         {LOWER.map((tooth) => (
-          <div key={tooth} className="relative">
+          <div key={tooth} className="relative group">
             <button
               onClick={() => !dim && onToothClick(tooth)}
               className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center border ${toothStatusColor(chart[String(tooth)]?.status)} ${editingTooth === tooth ? "ring-2 ring-blue-500" : ""} ${!dim ? "hover:opacity-80" : "cursor-default"}`}
@@ -1338,6 +1443,12 @@ function ToothChart({
               <span style={{ fontSize: 8 }}>{tooth}</span>
               <span style={{ fontSize: 7 }} className="truncate">{chart[String(tooth)]?.status?.slice(0, 3) || ""}</span>
             </button>
+            {/* tooltip */}
+            {chart[String(tooth)]?.notes && !dim && (
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 w-40 whitespace-normal pointer-events-none shadow-lg">
+                {chart[String(tooth)]?.notes}
+              </div>
+            )}
             {editingTooth === tooth && !dim && (
               <div className="absolute bottom-9 left-0 z-50 bg-white border rounded shadow-lg p-2 w-28">
                 {STATUS_OPTIONS.map((opt) => (
