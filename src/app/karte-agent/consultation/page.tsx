@@ -66,6 +66,7 @@ interface PredictedDiagnosis {
   tooth?: string;
   code: string;
   name: string;
+  short?: string;
   confidence: number;
   source?: string;
 }
@@ -74,6 +75,7 @@ interface DetectedDiagnosis {
   tooth: string;
   code: string;
   name: string;
+  short?: string;
   confidence: number;
   reason: string;
 }
@@ -274,6 +276,7 @@ export default function ConsultationPage() {
               tooth: pd.tooth || "",
               code: pd.code,
               name: pd.name,
+              short: pd.short || pd.code,
               confidence: pd.confidence,
               reason: "問診票より予測",
             }))
@@ -548,21 +551,22 @@ export default function ConsultationPage() {
       tooth: pd.tooth || "",
       code: pd.code,
       name: pd.name,
+      short: pd.short || pd.code,
       confidence: pd.confidence,
       reason: "問診票より予測",
     }));
 
     // レントゲン由来（う蝕・残根・治療中のみ傷病名候補に）
-    const xrayDiagMap: Record<string, { code: string; name: string }> = {
-      c1: { code: "C1", name: "う蝕(C1)" },
-      c2: { code: "C2", name: "う蝕(C2)" },
-      c3: { code: "C3", name: "う蝕(C3)" },
-      c4: { code: "C4", name: "う蝕(C4)" },
-      caries: { code: "C2", name: "う蝕(C2)" },
-      watch: { code: "C0", name: "要観察(C0)" },
-      root_remain: { code: "残根", name: "残根" },
-      in_treatment: { code: "Pul", name: "歯髄炎(治療中)" },
-      rct: { code: "Per", name: "根尖性歯周炎" },
+    const xrayDiagMap: Record<string, { code: string; name: string; short: string }> = {
+      c1: { code: "C1", name: "う蝕(C1)", short: "C1" },
+      c2: { code: "C2", name: "う蝕(C2)", short: "C2" },
+      c3: { code: "C3", name: "う蝕(C3)", short: "C3" },
+      c4: { code: "C4", name: "う蝕(C4)", short: "C4" },
+      caries: { code: "C2", name: "う蝕(C2)", short: "C2" },
+      watch: { code: "C0", name: "要観察(C0)", short: "C0" },
+      root_remain: { code: "残根", name: "残根", short: "残根" },
+      in_treatment: { code: "Pul", name: "歯髄炎(治療中)", short: "Pul" },
+      rct: { code: "Per", name: "根尖性歯周炎", short: "Per" },
     };
 
     for (const f of aiToothFindings) {
@@ -572,6 +576,7 @@ export default function ConsultationPage() {
           tooth: f.tooth,
           code: mapped.code,
           name: mapped.name,
+          short: mapped.short,
           confidence: f.confidence,
           reason: `レントゲン: ${f.detail || f.finding}`,
         });
@@ -634,7 +639,9 @@ export default function ConsultationPage() {
     });
 
     setFocusStep("treatment");
-    await fetchTreatmentPatterns(diag.code);
+    // short があればそちら優先（"Pul", "C2" など）、なければ code を使用
+    const shortCode = diag.short || diag.code;
+    await fetchTreatmentPatterns(shortCode);
     setDetectedDiagnoses([]);
   }
 
@@ -1035,7 +1042,7 @@ export default function ConsultationPage() {
                       {(medicalRecord?.predicted_diagnoses || []).slice(0, 5).map((pd: PredictedDiagnosis, i: number) => (
                         <div key={i} className="flex items-center gap-1 bg-yellow-50 border border-yellow-300 rounded-lg px-2 py-1">
                           <span className="text-xs font-bold text-yellow-800">{pd.name}</span>
-                          <span className="text-xs text-gray-400">({Math.round((pd.confidence || 0) * 100)}%)</span>
+                          {(pd.confidence > 0) && <span className="text-xs text-gray-400">({Math.round(pd.confidence * 100)}%)</span>}
                         </div>
                       ))}
                     </div>
@@ -1074,13 +1081,6 @@ export default function ConsultationPage() {
                 )}
               </div>
 
-              {/* ③ 組み合わせ提案（問診票 OR レントゲン所見のどちらかがあれば表示） */}
-              {((medicalRecord?.predicted_diagnoses?.length > 0) || aiToothFindings.length > 0) && (
-                <div className="bg-green-50 border border-green-300 rounded-lg p-3">
-                  <p className="text-xs font-bold text-green-700 mb-1">💡 傷病名の確定を推奨</p>
-                  <p className="text-xs text-gray-600">問診票の症状とレントゲン所見が一致しています。歯式反映後に傷病名を確定してください。</p>
-                </div>
-              )}
             </div>
 
             {/* ボタン */}
@@ -1146,7 +1146,7 @@ export default function ConsultationPage() {
               <div key={i} className="flex items-center gap-1">
                 <span className="text-sm">
                   {d.tooth ? `${d.tooth}番 ` : ""}{d.name}
-                  <span className="text-xs text-gray-500 ml-1">({Math.round((d.confidence || 0) * 100)}%)</span>
+                  {(d.confidence > 0) && <span className="text-xs text-gray-500 ml-1">({Math.round(d.confidence * 100)}%)</span>}
                 </span>
                 <button
                   onClick={() => confirmDiagnosis(d)}
@@ -1216,7 +1216,7 @@ export default function ConsultationPage() {
                 <div key={i} className="flex items-center gap-1 bg-white border border-purple-200 rounded px-2 py-1">
                   <span className="text-xs font-medium">{f.tooth}番</span>
                   <span className="text-xs text-purple-700">{f.suggestedDiagnosis || f.finding}</span>
-                  <span className="text-xs text-gray-400">({Math.round((f.confidence || 0) * 100)}%)</span>
+                  {(f.confidence > 0) && <span className="text-xs text-gray-400">({Math.round(f.confidence * 100)}%)</span>}
                   <button onClick={() => applyAiFindings(i)} className="bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded">反映</button>
                 </div>
               ))}
