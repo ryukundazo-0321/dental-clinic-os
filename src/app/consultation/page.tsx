@@ -89,7 +89,6 @@ export default function ConsultationPage() {
     return () => { supabase.removeChannel(channel); };
   }, [selectedDate, fetchAppointments]);
 
-  // === ユーティリティ ===
   function parseHM(apt: Appointment): [number, number] {
     const m = apt.scheduled_at.match(/(\d{2}):(\d{2}):\d{2}/);
     return m ? [parseInt(m[1]), parseInt(m[2])] : [0, 0];
@@ -101,7 +100,6 @@ export default function ConsultationPage() {
   function goPrev() { const d=new Date(selectedDate+"T12:00:00"); d.setDate(d.getDate()-1); setSelectedDate(d.toISOString().split("T")[0]); }
   function goNext() { const d=new Date(selectedDate+"T12:00:00"); d.setDate(d.getDate()+1); setSelectedDate(d.toISOString().split("T")[0]); }
 
-  // === ダブルブッキングチェック ===
   function hasConflict(aptId: string, unitId: string|null, startMin: number, durMin: number): boolean {
     if (!unitId) return false;
     const endMin = startMin + durMin;
@@ -112,7 +110,6 @@ export default function ConsultationPage() {
     });
   }
 
-  // === DB更新 ===
   async function updateStatus(apt: Appointment, newStatus: string) {
     await supabase.from("appointments").update({ status: newStatus }).eq("id", apt.id);
     if (newStatus==="in_consultation") await supabase.from("queue").update({ status:"in_room", called_at:new Date().toISOString() }).eq("appointment_id", apt.id);
@@ -159,10 +156,8 @@ export default function ConsultationPage() {
     setSelectedApt(null);
   }
 
-  // selectedApt同期
   useEffect(() => { if(selectedApt){ setEditTime(fmtTime(selectedApt)); setEditDuration(selectedApt.duration_min||30); setEditDate(selectedApt.scheduled_at.split("T")[0]); } }, [selectedApt?.id]); // eslint-disable-line
 
-  // === リサイズ ===
   useEffect(() => {
     function onMove(e: MouseEvent) {
       if (!resizeRef.current) return;
@@ -184,7 +179,6 @@ export default function ConsultationPage() {
     return ()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
   }, [appointments]); // eslint-disable-line
 
-  // === Memos ===
   const columns = useMemo(() => {
     const c:{id:string;label:string}[]=[];
     if (viewMode==="doctor") doctors.forEach(d=>c.push({id:d.id,label:d.name}));
@@ -215,7 +209,6 @@ export default function ConsultationPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex">
       <div className="flex-1 flex flex-col min-w-0">
-        {/* ヘッダー */}
         <header className="bg-white border-b border-gray-200 shadow-sm px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← 戻る</Link>
@@ -243,7 +236,6 @@ export default function ConsultationPage() {
           <button onClick={()=>setViewMode("chair")} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${viewMode==="chair"?"bg-emerald-500 text-white shadow-sm":"bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>🪥 チェア別</button>
         </div>
 
-        {/* タイムテーブル */}
         <div className="flex-1 overflow-auto">
           <div className="min-w-[700px]">
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200 flex shadow-sm">
@@ -319,7 +311,6 @@ export default function ConsultationPage() {
                                 </div>
                               )}
                             </div>
-                            {/* リサイズハンドル */}
                             <div onMouseDown={e=>{e.stopPropagation();e.preventDefault();resizeRef.current={aptId:apt.id,startY:e.clientY,origDur:dur};document.body.style.cursor="ns-resize";document.body.style.userSelect="none";}}
                               className="absolute bottom-0 left-0 right-0 h-2.5 cursor-ns-resize group" style={{touchAction:"none"}}>
                               <div className="mx-auto w-8 h-1 rounded-full bg-gray-300 group-hover:bg-gray-500 mt-1" />
@@ -392,7 +383,6 @@ export default function ConsultationPage() {
                 <div><p className="font-bold text-gray-900 text-sm">{selectedApt.patients?.name_kanji||"未登録"}</p><p className="text-[10px] text-gray-400">{selectedApt.patients?.name_kana}</p></div>
               </div>
 
-              {/* 日時編集 */}
               <div className="border border-gray-200 rounded-lg p-2.5 space-y-2">
                 <p className="text-[10px] text-gray-400 font-bold">📅 日時変更</p>
                 <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-400" />
@@ -438,14 +428,17 @@ export default function ConsultationPage() {
 
               <div className="border-t border-gray-100 pt-3 space-y-2">
                 {selectedApt.status==="reserved"&&<button onClick={()=>updateStatus(selectedApt,"checked_in")} className="w-full py-2.5 rounded-lg text-sm font-bold bg-green-500 text-white hover:bg-green-600 shadow-lg shadow-green-200">📱 来院済にする</button>}
-                {selectedApt.status==="checked_in"&&<button onClick={async()=>{await updateStatus(selectedApt,"in_consultation");window.location.href=`/consultation/hub?appointment_id=${selectedApt.id}`;}} className="w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 呼び出し（診察開始）→</button>}
+
+                {/* ★ 修正: 呼び出しボタン → hubではなく直接新診察ページへ */}
+                {selectedApt.status==="checked_in"&&<button onClick={async()=>{await updateStatus(selectedApt,"in_consultation");window.location.href=`/karte-agent/consultation?appointment_id=${selectedApt.id}`;}} className="w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 呼び出し（診察開始）→</button>}
+
                 {selectedApt.status==="in_consultation"&&(<>
-                  <a href={`/consultation/hub?appointment_id=${selectedApt.id}`} className="block w-full py-3 rounded-lg text-sm font-bold bg-sky-500 text-white hover:bg-sky-600 text-center shadow-lg shadow-sky-200">📋 診察画面を開く →</a>
+                  {/* ★ 修正: 診察画面を開くボタン → hubではなく直接新診察ページへ */}
+                  <a href={`/karte-agent/consultation?appointment_id=${selectedApt.id}`} className="block w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 診察画面を開く →</a>
                   <a href={`/karte-agent/unit?appointment_id=${selectedApt.id}`} className="block w-full py-3 rounded-lg text-sm font-bold bg-gray-900 text-white hover:bg-gray-800 text-center">🤖 カルテエージェントで開く →</a>
-                  {/* ★ 追加: 新診察ページで開く */}
-                  <a href={`/karte-agent/consultation?appointment_id=${selectedApt.id}`} className="block w-full py-3 rounded-lg text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 text-center">🦷 新診察ページで開く →</a>
                   <button onClick={()=>updateStatus(selectedApt,"completed")} className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
                 </>)}
+
                 {selectedApt.status==="completed"&&<button onClick={()=>updateStatus(selectedApt,"billing_done")} className="w-full py-2.5 rounded-lg text-sm font-bold bg-gray-200 text-gray-700 hover:bg-gray-300">💰 会計済にする</button>}
                 {selectedApt.patients?.id&&<Link href={`/patients/${selectedApt.patients.id}`} className="block w-full py-2 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 hover:bg-sky-100 text-center">📋 カルテを開く</Link>}
                 {["reserved","checked_in"].includes(selectedApt.status)&&<button onClick={()=>cancelApt(selectedApt)} className="w-full py-2 rounded-lg text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200">❌ 予約キャンセル</button>}
