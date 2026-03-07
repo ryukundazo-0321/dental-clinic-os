@@ -471,12 +471,10 @@ export default function ConsultationPage() {
     try {
       const formData = new FormData();
       formData.append("file", blob, "recording.webm");
-      formData.append("model", "whisper-1");
-      formData.append("language", "ja");
 
-      const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      // サーバー経由でWhisper呼び出し（APIキーをブラウザに露出しない）
+      const whisperRes = await fetch("/api/karte-agent/whisper", {
         method: "POST",
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY || ""}` },
         body: formData,
       });
 
@@ -484,6 +482,9 @@ export default function ConsultationPage() {
       if (whisperRes.ok) {
         const wData = await whisperRes.json();
         transcribedText = wData.text || "";
+      } else {
+        const errData = await whisperRes.json().catch(() => ({}));
+        addLog(`⚠️ 文字起こし失敗: ${errData.error || whisperRes.status}`);
       }
 
       setTranscript(transcribedText);
