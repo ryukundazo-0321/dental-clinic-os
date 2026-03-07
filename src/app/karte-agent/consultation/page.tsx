@@ -2051,6 +2051,7 @@ export default function ConsultationPage() {
                 todayTeeth={todayTeeth}
                 scheduleConfirmed={scheduleConfirmed}
                 onStatusChange={updateDiagnosisStatus}
+                toothChart={toothChartDraft}
               />
               {/* 傷病リスト */}
               <div className="mt-3 flex flex-wrap gap-2">
@@ -2482,14 +2483,15 @@ export default function ConsultationPage() {
 // ==============================
 function DiagnosisToothChart({
   patientDiagnoses, pastDiagnoses, predictedDiagnoses, todayTeeth, scheduleConfirmed,
-  onStatusChange,
+  onStatusChange, toothChart,
 }: {
-  patientDiagnoses: PatientDiagnosis[];       // 今回確定済み
-  pastDiagnoses: PatientDiagnosis[];           // 前回以前
-  predictedDiagnoses: DiagnosisWithTooth[];   // 問診票予測（未確定）
+  patientDiagnoses: PatientDiagnosis[];
+  pastDiagnoses: PatientDiagnosis[];
+  predictedDiagnoses: DiagnosisWithTooth[];
   todayTeeth: string[];
   scheduleConfirmed: boolean;
   onStatusChange?: (diagId: string, status: PatientDiagnosis["status"]) => void;
+  toothChart?: Record<string, ToothStatus>;
 }) {
   const UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
   const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
@@ -2499,6 +2501,11 @@ function DiagnosisToothChart({
     in_treatment: { label: "治療中",   bg: "bg-orange-400", text: "text-white",   border: "border-orange-600" },
     completed:    { label: "治療済",   bg: "bg-green-500",  text: "text-white",   border: "border-green-700" },
     watching:     { label: "経過観",   bg: "bg-yellow-400", text: "text-gray-900",border: "border-yellow-600" },
+  };
+
+  const isMissing = (tooth: number) => {
+    const s = toothChart?.[String(tooth)]?.status;
+    return s === "missing" || s === "bridge_missing";
   };
 
   function getCurrentDiag(tooth: number) {
@@ -2512,13 +2519,25 @@ function DiagnosisToothChart({
   }
 
   function ToothCell({ tooth }: { tooth: number }) {
+    const missing = isMissing(tooth);
     const cur = getCurrentDiag(tooth);
     const past = getPastDiag(tooth);
     const pred = getPredicted(tooth);
     const isToday = todayTeeth.includes(String(tooth));
 
-    let style = "bg-white border border-gray-200 text-gray-300";
-    let labelText = "";
+    // 欠損歯
+    if (missing) {
+      return (
+        <div className="w-10 h-12 rounded border border-gray-300 bg-gray-100 flex flex-col items-center justify-center text-gray-400">
+          <span style={{ fontSize: 9 }}>{tooth}</span>
+          <span className="text-gray-400 font-bold" style={{ fontSize: 11 }}>×</span>
+        </div>
+      );
+    }
+
+    let style = "bg-white border border-gray-200 text-gray-400";
+    let diagCode = "";
+    let diagName = "";
 
     if (cur) {
       const cfg = STATUS_CONFIG[cur.status] || STATUS_CONFIG.planned;
@@ -2529,14 +2548,17 @@ function DiagnosisToothChart({
       } else {
         style = `${cfg.bg} ${cfg.text} border-2 ${cfg.border}`;
       }
-      labelText = cur.diagnosis_code;
+      diagCode = cur.diagnosis_code;
+      diagName = cur.diagnosis_name;
     } else if (pred) {
-      style = "bg-red-100 text-red-500 border border-red-300 border-dashed";
-      labelText = pred.short || pred.code;
+      style = "bg-red-100 text-red-600 border border-red-300 border-dashed";
+      diagCode = pred.short || pred.code;
+      diagName = pred.name;
     } else if (past) {
       const cfg = STATUS_CONFIG[past.status] || STATUS_CONFIG.completed;
       style = `${cfg.bg} ${cfg.text} border ${cfg.border} opacity-40`;
-      labelText = past.diagnosis_code;
+      diagCode = past.diagnosis_code;
+      diagName = past.diagnosis_name;
     }
 
     const tooltipLines = [
@@ -2548,23 +2570,28 @@ function DiagnosisToothChart({
 
     return (
       <div className="relative group">
-        <div className={`w-7 h-8 rounded text-xs flex flex-col items-center justify-center transition-all cursor-pointer ${style}`}>
-          <span style={{ fontSize: 8 }}>{tooth}</span>
-          {labelText && <span style={{ fontSize: 7 }} className="truncate font-bold">{labelText}</span>}
-          {/* 複数回進捗インジケーター */}
+        {/* セル本体 - 大きめ */}
+        <div className={`w-10 h-12 rounded text-xs flex flex-col items-center justify-center transition-all cursor-pointer gap-0.5 px-0.5 ${style}`}>
+          <span className="font-medium" style={{ fontSize: 9 }}>{tooth}</span>
+          {diagCode && (
+            <span className="font-bold leading-none text-center" style={{ fontSize: 8 }}>{diagCode}</span>
+          )}
+          {diagName && (
+            <span className="leading-none text-center truncate w-full text-center" style={{ fontSize: 7 }}>{diagName.length > 5 ? diagName.slice(0, 5) + "…" : diagName}</span>
+          )}
           {cur?.session_total && cur.session_total > 1 && (
-            <span style={{ fontSize: 6 }} className="opacity-80">{cur.session_current}/{cur.session_total}</span>
+            <span className="opacity-80" style={{ fontSize: 6 }}>{cur.session_current || 1}/{cur.session_total}</span>
           )}
         </div>
         {/* ホバーツールチップ */}
         {tooltipLines.length > 0 && (
-          <div className="absolute bottom-9 left-1/2 -translate-x-1/2 z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1.5 w-36 whitespace-normal pointer-events-none shadow-xl">
+          <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded px-2 py-1.5 w-40 whitespace-normal pointer-events-none shadow-xl">
             {tooltipLines.map((l, i) => <div key={i}>{l}</div>)}
           </div>
         )}
-        {/* 右クリック風ステータス変更メニュー（確定済み傷病のみ） */}
+        {/* ステータス変更メニュー */}
         {cur && onStatusChange && (
-          <div className="absolute top-9 left-0 z-50 hidden group-hover:block bg-white border rounded-lg shadow-lg p-1 w-24">
+          <div className="absolute top-13 left-0 z-50 hidden group-hover:block bg-white border rounded-lg shadow-lg p-1 w-24">
             {(Object.entries(STATUS_CONFIG) as [PatientDiagnosis["status"], typeof STATUS_CONFIG.planned][]).map(([key, cfg]) => (
               <button
                 key={key}
@@ -2582,20 +2609,19 @@ function DiagnosisToothChart({
 
   return (
     <div>
-      <div className="flex gap-0.5 mb-1">
+      <div className="flex gap-1 mb-1 flex-wrap">
         {UPPER.map(t => <ToothCell key={t} tooth={t} />)}
       </div>
-      <div className="flex gap-0.5">
+      <div className="flex gap-1 flex-wrap">
         {LOWER.map(t => <ToothCell key={t} tooth={t} />)}
       </div>
-      {/* 凡例 */}
       <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-500">
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-400 inline-block"></span>計画中</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400 inline-block"></span>治療中</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500 inline-block"></span>治療済み</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-400 inline-block"></span>経過観察</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-dashed border-red-300 inline-block"></span>予測（未確定）</span>
-        {pastDiagnoses.length > 0 && <span className="flex items-center gap-1 opacity-60"><span className="w-3 h-3 rounded bg-green-500 inline-block opacity-40"></span>前回</span>}
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-300 inline-block text-center text-gray-400 font-bold" style={{fontSize:8}}>×</span>欠損</span>
       </div>
       {!hasDiagnoses && <p className="text-xs text-gray-400 mt-2">傷病名がまだありません</p>}
     </div>
