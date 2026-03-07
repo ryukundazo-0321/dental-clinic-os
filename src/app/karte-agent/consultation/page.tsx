@@ -224,6 +224,8 @@ export default function ConsultationPage() {
   // バナー状態
   const [detectedDiagnoses, setDetectedDiagnoses] = useState<DetectedDiagnosis[]>([]);
   const [billingMissItems, setBillingMissItems] = useState<BillingMissItem[]>([]);
+  const [voiceConfirmList, setVoiceConfirmList] = useState<DetectedDiagnosis[]>([]);
+  const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
   const [suggestedTreatments, setSuggestedTreatments] = useState<ProcedurePattern[]>([]);
   const [confirmedDiagnosis, setConfirmedDiagnosis] = useState<DetectedDiagnosis | null>(null);
   // patient_diagnosesテーブルのデータ
@@ -503,8 +505,10 @@ export default function ConsultationPage() {
         const detected = classifyData.detected_diagnoses || [];
 
         if (detected.length > 0) {
-          setDetectedDiagnoses(detected);
-          addLog(`🦷 傷病名検出: ${detected[0].name}（信頼度${Math.round((detected[0].confidence || 0) * 100)}%）`);
+          // 確認リストに入れてポップアップ表示
+          setVoiceConfirmList(detected);
+          setShowVoiceConfirm(true);
+          addLog(`🦷 傷病名${detected.length}件検出 → 確認してください`);
           setPopup(null);
         }
 
@@ -1866,6 +1870,47 @@ export default function ConsultationPage() {
                 </button>
               ))}
               <button onClick={() => setPopup("treatment")} className="text-xs text-blue-600 underline">全て見る</button>
+            </div>
+          </div>
+        )}
+
+        {/* 音声解析 確認ポップアップ */}
+        {showVoiceConfirm && voiceConfirmList.length > 0 && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowVoiceConfirm(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+              <h2 className="text-lg font-bold text-gray-800 mb-1">🦷 以下を確定しますか？</h2>
+              <p className="text-xs text-gray-400 mb-4">不要な項目は✕で除外できます</p>
+              <div className="space-y-2 mb-5">
+                {voiceConfirmList.map((d, i) => (
+                  <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                    <div>
+                      {d.tooth && <span className="font-bold text-gray-800 mr-2">{d.tooth}番</span>}
+                      <span className="text-sm text-gray-700">{d.name}</span>
+                      <span className="text-xs text-gray-400 ml-2">({Math.round((d.confidence || 0) * 100)}%)</span>
+                    </div>
+                    <button
+                      onClick={() => setVoiceConfirmList(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-gray-300 hover:text-red-400 text-lg leading-none ml-2"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setShowVoiceConfirm(false); setVoiceConfirmList([]); }}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-500 text-sm hover:bg-gray-50"
+                >キャンセル</button>
+                <button
+                  onClick={async () => {
+                    for (const d of voiceConfirmList) {
+                      await confirmDiagnosis(d);
+                    }
+                    setShowVoiceConfirm(false);
+                    setVoiceConfirmList([]);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700"
+                >✅ まとめてOK</button>
+              </div>
             </div>
           </div>
         )}
