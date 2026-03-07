@@ -1000,6 +1000,75 @@ export default function ConsultationPage() {
     }
   }
 
+  // ★ deltaリアルタイム処理：数字1個ずつ即反映
+  function parsePerioVoiceDelta(nums: number[]) {
+    const activTeeth = getActivePeriTeeth();
+
+    if (perioStep === "pocket") {
+      const ptsPerTooth = perioMode;
+      const newBuf = [...perioVoiceBufferRef.current, ...nums];
+      let buf = [...newBuf];
+      let idx = perioVoiceToothIdxRef.current;
+
+      const patch: Record<string, number> = {};
+      while (buf.length >= ptsPerTooth && idx < activTeeth.length) {
+        const tooth = activTeeth[idx];
+        const vals = buf.splice(0, ptsPerTooth).filter(v => v >= 0 && v <= 12);
+        if (perioMode === 1) {
+          patch[`${tooth}`] = vals[0];
+        } else if (perioMode === 3) {
+          vals.forEach((v, i) => { patch[`${tooth}-b${i+1}`] = v; });
+        } else {
+          vals.slice(0, 3).forEach((v, i) => { patch[`${tooth}-b${i+1}`] = v; });
+          vals.slice(3, 6).forEach((v, i) => { patch[`${tooth}-l${i+1}`] = v; });
+        }
+        addLog(`⚡ ${tooth}番 ${vals.join("/")}mm`);
+        idx++;
+      }
+      if (Object.keys(patch).length > 0) {
+        setPerioData(prev => ({ ...prev, ...patch }));
+      }
+      perioVoiceBufferRef.current = buf;
+      perioVoiceToothIdxRef.current = idx;
+      setPerioVoiceBuffer([...buf]);
+      setPerioVoiceToothIdx(idx);
+      if (idx >= activTeeth.length) perioAdvanceStep("bop");
+
+    } else if (perioStep === "mobility") {
+      let idx = perioVoiceToothIdxRef.current;
+      const patch: Record<string, number> = {};
+      for (const n of nums) {
+        if (idx >= activTeeth.length) break;
+        if (n >= 0 && n <= 3) {
+          const tooth = activTeeth[idx];
+          patch[`${tooth}`] = n;
+          addLog(`⚡ ${tooth}番 動揺${n}度`); idx++;
+        }
+      }
+      if (Object.keys(patch).length > 0) setPerioMobility(prev => ({ ...prev, ...patch }));
+      perioVoiceToothIdxRef.current = idx;
+      setPerioVoiceToothIdx(idx);
+      if (idx >= activTeeth.length) perioAdvanceStep("recession");
+
+    } else if (perioStep === "recession") {
+      let idx = perioVoiceToothIdxRef.current;
+      const patch: Record<string, number> = {};
+      for (const n of nums) {
+        if (idx >= activTeeth.length) break;
+        if (n >= 0 && n <= 10) {
+          const tooth = activTeeth[idx];
+          patch[`${tooth}`] = n;
+          addLog(`⚡ ${tooth}番 退縮${n}mm`); idx++;
+        }
+      }
+      if (Object.keys(patch).length > 0) setPerioRecession(prev => ({ ...prev, ...patch }));
+      perioVoiceToothIdxRef.current = idx;
+      setPerioVoiceToothIdx(idx);
+      if (idx >= activTeeth.length) perioAdvanceStep("done");
+    }
+    // BOPはdeltaでは処理しない（「あり/なし」の言葉判定が必要なため、completedで処理）
+  }
+
   function parsePerioVoice(text: string) {
     addLog(`🎙 P検: "${text}"`);
     const activTeeth = getActivePeriTeeth();
@@ -1011,20 +1080,27 @@ export default function ConsultationPage() {
       const newBuf = [...perioVoiceBufferRef.current, ...nums];
       let buf = [...newBuf];
       let idx = perioVoiceToothIdxRef.current;
+
+      // ★ バッチ更新: ループ内でsetStateせず差分をまとめて1回だけ更新
+      const patch: Record<string, number> = {};
       while (buf.length >= ptsPerTooth && idx < activTeeth.length) {
         const tooth = activTeeth[idx];
         const vals = buf.splice(0, ptsPerTooth).filter(v => v >= 0 && v <= 12);
         if (perioMode === 1) {
-          setPerioData(prev => ({ ...prev, [`${tooth}`]: vals[0] }));
+          patch[`${tooth}`] = vals[0];
         } else if (perioMode === 3) {
-          vals.forEach((v, i) => setPerioData(prev => ({ ...prev, [`${tooth}-b${i+1}`]: v })));
+          vals.forEach((v, i) => { patch[`${tooth}-b${i+1}`] = v; });
         } else {
-          vals.slice(0,3).forEach((v, i) => setPerioData(prev => ({ ...prev, [`${tooth}-b${i+1}`]: v })));
-          vals.slice(3,6).forEach((v, i) => setPerioData(prev => ({ ...prev, [`${tooth}-l${i+1}`]: v })));
+          vals.slice(0, 3).forEach((v, i) => { patch[`${tooth}-b${i+1}`] = v; });
+          vals.slice(3, 6).forEach((v, i) => { patch[`${tooth}-l${i+1}`] = v; });
         }
         addLog(`✅ ${tooth}番 ${vals.join("/")}mm`);
         idx++;
       }
+      if (Object.keys(patch).length > 0) {
+        setPerioData(prev => ({ ...prev, ...patch }));
+      }
+
       perioVoiceBufferRef.current = buf;
       perioVoiceToothIdxRef.current = idx;
       setPerioVoiceBuffer(buf);
@@ -1034,44 +1110,65 @@ export default function ConsultationPage() {
     } else if (perioStep === "bop") {
       let idx = perioVoiceToothIdxRef.current;
       const tokens = text.split(/[、,\s]+/);
+
+      // ★ バッチ更新
+      const patch: Record<string, boolean> = {};
       for (const token of tokens) {
         if (idx >= activTeeth.length) break;
         const tooth = activTeeth[idx];
         if (/あり|出血|プラス|\+|BOP/.test(token)) {
-          setPerioBOP(prev => ({ ...prev, [`${tooth}`]: true }));
+          patch[`${tooth}`] = true;
           addLog(`🩸 ${tooth}番 BOP+`); idx++;
         } else if (/なし|マイナス|-/.test(token)) {
-          setPerioBOP(prev => ({ ...prev, [`${tooth}`]: false })); idx++;
+          patch[`${tooth}`] = false; idx++;
         }
       }
+      if (Object.keys(patch).length > 0) {
+        setPerioBOP(prev => ({ ...prev, ...patch }));
+      }
+
       perioVoiceToothIdxRef.current = idx;
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("mobility");
 
     } else if (perioStep === "mobility") {
       let idx = perioVoiceToothIdxRef.current;
+
+      // ★ バッチ更新
+      const patch: Record<string, number> = {};
       for (const n of nums) {
         if (idx >= activTeeth.length) break;
         if (n >= 0 && n <= 3) {
           const tooth = activTeeth[idx];
-          setPerioMobility(prev => ({ ...prev, [`${tooth}`]: n }));
+          patch[`${tooth}`] = n;
           addLog(`↔️ ${tooth}番 動揺${n}度`); idx++;
         }
       }
+      if (Object.keys(patch).length > 0) {
+        setPerioMobility(prev => ({ ...prev, ...patch }));
+      }
+
       perioVoiceToothIdxRef.current = idx;
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("recession");
 
     } else if (perioStep === "recession") {
       let idx = perioVoiceToothIdxRef.current;
+
+      // ★ バッチ更新
+      const patch: Record<string, number> = {};
       for (const n of nums) {
         if (idx >= activTeeth.length) break;
         if (n >= 0 && n <= 10) {
           const tooth = activTeeth[idx];
-          setPerioRecession(prev => ({ ...prev, [`${tooth}`]: n }));
+          patch[`${tooth}`] = n;
           addLog(`📉 ${tooth}番 退縮${n}mm`); idx++;
         }
       }
+      if (Object.keys(patch).length > 0) {
+        setPerioRecession(prev => ({ ...prev, ...patch }));
+      }
+
       perioVoiceToothIdxRef.current = idx;
       setPerioVoiceToothIdx(idx);
       if (idx >= activTeeth.length) perioAdvanceStep("done");
@@ -1112,24 +1209,51 @@ export default function ConsultationPage() {
 
       // DataChannel（テキスト受信用）
       const dc = pc.createDataChannel("oai-events");
+
+      // ★ deltaで届いた文字を貯めるバッファ（数字をリアルタイムで1個ずつ拾う）
+      let deltaBuffer = "";
+
       dc.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
 
-          // 音声文字起こし（途中）
+          // 音声文字起こし（途中）→ 数字が来た瞬間に即反映
           if (msg.type === "conversation.item.input_audio_transcription.delta") {
-            setPerioInterimText(prev => prev + (msg.delta || ""));
+            const delta = msg.delta || "";
+            deltaBuffer += delta;
+            setPerioInterimText(deltaBuffer);
+
+            // deltaバッファから数字を1個ずつ取り出してリアルタイム反映
+            const numMatches = Array.from(deltaBuffer.matchAll(/(\d+(?:\.\d+)?)/g));
+            if (numMatches.length > 0) {
+              // 最後の数字が途中の可能性があるので、末尾が数字で終わっている場合は保留
+              const lastChar = deltaBuffer[deltaBuffer.length - 1];
+              const safeMatches = /\d/.test(lastChar)
+                ? numMatches.slice(0, -1)  // 末尾の数字は次のdeltaを待つ
+                : numMatches;
+
+              if (safeMatches.length > 0) {
+                const nums = safeMatches.map(m => parseFloat(m[1])).filter(n => !isNaN(n));
+                // 処理済みの部分をバッファから削除
+                const lastSafe = safeMatches[safeMatches.length - 1];
+                deltaBuffer = deltaBuffer.slice((lastSafe.index ?? 0) + lastSafe[0].length);
+                if (nums.length > 0) parsePerioVoiceDelta(nums);
+              }
+            }
           }
+
           // 音声文字起こし（確定）
           if (msg.type === "conversation.item.input_audio_transcription.completed") {
             const text = msg.transcript || "";
+            deltaBuffer = "";
             setPerioInterimText("");
             if (text.trim()) {
-              addLog(`✅ 認識: "${text}"`);
-              parsePerioVoice(text);
+              addLog(`✅ 認識完了: "${text}"`);
+              // BOPのみcompletedで処理（「あり/なし」の言葉判定が必要なため）
+              // 数字系（pocket/mobility/recession）はdeltaで処理済みなので呼ばない
+              if (perioStep === "bop") parsePerioVoice(text);
             }
           }
-          // ※ response.text.done は使わない（AIが数字を繰り返すため二重入力になる）
         } catch { /* ignore */ }
       };
 
