@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { image_base64, image_url, patient_id } = body;
+    const { image_base64, image_url, patient_id, media_type } = body;
+    // media_typeが未指定の場合はimage/jpegにフォールバック
+    const resolvedMediaType = media_type || "image/jpeg";
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -17,7 +19,7 @@ export async function POST(req: NextRequest) {
       ? {
           type: "image_url" as const,
           image_url: {
-            url: `data:image/jpeg;base64,${image_base64}`,
+            url: `data:${resolvedMediaType};base64,${image_base64}`,
             detail: "high" as const,
           },
         }
