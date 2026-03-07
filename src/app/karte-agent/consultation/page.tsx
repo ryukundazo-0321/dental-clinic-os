@@ -2084,10 +2084,31 @@ export default function ConsultationPage() {
 
           {/* 傷病歯式チャート（常時表示） */}
           <div className="bg-white rounded-lg border p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="font-medium text-gray-700">🗺 傷病歯式チャート</h3>
-                <p className="text-xs text-gray-400 mt-0.5">歯にホバーでステータス変更できます</p>
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-1">
+                  <h3 className="font-medium text-gray-700">🗺 傷病歯式チャート</h3>
+                  {/* 録音ボタン（常時表示） */}
+                  {voiceLoading ? (
+                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-blue-100 text-blue-600 border border-blue-300">
+                      <span className="animate-spin">⏳</span> AI解析中...
+                    </span>
+                  ) : (
+                    <button
+                      onClick={isRecording ? stopRecording : startRecording}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                        isRecording
+                          ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-200"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-300"
+                      }`}
+                    >
+                      🎙 {isRecording
+                        ? `録音中 ${Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:${(recordingSeconds % 60).toString().padStart(2, "0")} ■`
+                        : "録音開始"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">歯にホバーでステータス変更 · 録音してドクターの説明を自動解析</p>
               </div>
               {confirmedDiagnosesList.length > 0 && (
                 <button
@@ -2317,7 +2338,6 @@ export default function ConsultationPage() {
           {[
             { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
             { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio", fullscreen: true },
-            { type: "voice" as PopupType, icon: "🎙", label: "録音", step: "voice" },
             { type: "diagnosis" as PopupType, icon: "🔍", label: "病名", step: "diagnosis" },
             { type: "treatment" as PopupType, icon: "💊", label: "治療", step: "treatment" },
             { type: "billing" as PopupType, icon: "💰", label: "算定", step: "billing" },
