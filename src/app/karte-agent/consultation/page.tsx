@@ -546,17 +546,51 @@ export default function ConsultationPage() {
     addLog("📸 写真アップロード → AI解析中...");
 
     try {
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(",")[1]);
-        reader.readAsDataURL(file);
+      // iPadのHEIC/HEIF形式をJPEGに変換してからbase64化
+      const isHeic = file.type === "image/heic" || file.type === "image/heif"
+        || file.name.toLowerCase().endsWith(".heic") || file.name.toLowerCase().endsWith(".heif");
+
+      let base64: string;
+      let mediaType: string;
+
+      // HEIC or 通常画像 どちらもcanvasでリサイズしてJPEGに統一
+      // iPadの写真は12〜48MPで巨大 → 最大2048pxに縮小してAPIに送る
+      const MAX_PX = 2048;
+
+      const objectUrl = URL.createObjectURL(file);
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error("画像の読み込みに失敗しました。対応していない形式の可能性があります。"));
+        i.src = objectUrl;
       });
+      URL.revokeObjectURL(objectUrl);
+
+      // リサイズ計算
+      let { width, height } = img;
+      if (width > MAX_PX || height > MAX_PX) {
+        if (width > height) { height = Math.round(height * MAX_PX / width); width = MAX_PX; }
+        else { width = Math.round(width * MAX_PX / height); height = MAX_PX; }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+
+      if (isHeic) addLog(`📱 iPad形式を変換・リサイズ中... (${width}×${height}px)`);
+      else if (img.width > MAX_PX || img.height > MAX_PX) addLog(`📐 大きな画像をリサイズ中... (${img.width}×${img.height} → ${width}×${height}px)`);
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      base64 = dataUrl.split(",")[1];
+      mediaType = "image/jpeg";
 
       const res = await fetch("/api/xray-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_base64: base64,
+          media_type: mediaType,
           patient_id: patient?.id,
           medical_record_id: medicalRecord?.id,
         }),
@@ -605,7 +639,8 @@ export default function ConsultationPage() {
         addLog(`⚠️ レントゲン解析エラー: ${errMsg}`);
       }
     } catch (err) {
-      addLog("⚠️ 写真解析に失敗しました");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      addLog(`⚠️ 写真解析に失敗しました: ${msg}`);
     } finally {
       setPhotoLoading(false);
     }
