@@ -78,6 +78,7 @@ interface DetectedDiagnosis {
   short?: string;
   confidence: number;
   reason: string;
+  suspected_teeth?: string[]; // レントゲン由来の候補歯番リスト
 }
 
 interface PatientDiagnosis {
@@ -692,6 +693,23 @@ export default function ConsultationPage() {
         existing.reason = "問診票＋レントゲン一致";
       } else {
         integrated.push(rec);
+      }
+    }
+
+    // 同じ傷病コードのレントゲン歯番を suspected_teeth としてまとめる
+    // （問診票由来で tooth が空のものに対して、レントゲン由来の歯番候補を付与）
+    for (const item of integrated) {
+      if (!item.tooth) {
+        const sameCode = aiToothFindings
+          .filter(f => {
+            const mapped = xrayDiagMap[f.finding?.toLowerCase()];
+            return mapped && mapped.code === item.code;
+          })
+          .map(f => f.tooth)
+          .filter(Boolean);
+        if (sameCode.length > 0) {
+          item.suspected_teeth = sameCode;
+        }
       }
     }
 
@@ -1790,20 +1808,41 @@ export default function ConsultationPage() {
         {detectedDiagnoses.length > 0 && (
           <div className="bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 flex items-center gap-3 flex-wrap">
             <span className="text-yellow-700 font-medium text-sm">🦷 仮傷病名:</span>
-            {detectedDiagnoses.slice(0, 3).map((d, i) => (
-              <div key={i} className="flex items-center gap-1">
-                <span className="text-sm">
-                  {d.tooth ? `${d.tooth}番 ` : ""}{d.name}
-                  {(d.confidence > 0) && <span className="text-xs text-gray-500 ml-1">({Math.round(d.confidence * 100)}%)</span>}
-                </span>
-                <button
-                  onClick={() => confirmDiagnosis(d)}
-                  className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded hover:bg-yellow-600"
-                >
-                  決定
-                </button>
-              </div>
-            ))}
+            {detectedDiagnoses.slice(0, 3).map((d, i) => {
+              // tooth がある場合はそのまま、ない場合は reason からエリアヒントを抽出
+              const toothLabel = d.tooth ? `${d.tooth}番` : null;
+              const areaHint = !d.tooth && d.reason ? (() => {
+                const r = d.reason;
+                if (r.includes("右上")) return "右上あたり？";
+                if (r.includes("左上")) return "左上あたり？";
+                if (r.includes("右下")) return "右下あたり？";
+                if (r.includes("左下")) return "左下あたり？";
+                if (r.includes("前歯")) return "前歯あたり？";
+                if (r.includes("奥歯")) return "奥歯あたり？";
+                if (r.includes("上顎")) return "上顎あたり？";
+                if (r.includes("下顎")) return "下顎あたり？";
+                return null;
+              })() : null;
+              return (
+                <div key={i} className="flex items-center gap-1">
+                  <span className="text-sm">
+                    {toothLabel && <span className="font-bold text-yellow-800">{toothLabel} </span>}
+                    {d.name}
+                    {areaHint && <span className="text-xs text-yellow-600 ml-1">📍 {areaHint}</span>}
+                    {!toothLabel && d.suspected_teeth && d.suspected_teeth.length > 0 && (
+                      <span className="text-xs text-purple-600 ml-1">📍 {d.suspected_teeth.join("・")}番あたり？</span>
+                    )}
+                    {(d.confidence > 0) && <span className="text-xs text-gray-400 ml-1">({Math.round(d.confidence * 100)}%)</span>}
+                  </span>
+                  <button
+                    onClick={() => confirmDiagnosis(d)}
+                    className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded hover:bg-yellow-600"
+                  >
+                    決定
+                  </button>
+                </div>
+              );
+            })}
             <button onClick={() => setPopup("diagnosis")} className="text-xs text-yellow-700 underline">変更する</button>
             <button onClick={() => setDetectedDiagnoses([])} className="text-xs text-gray-400 ml-auto">✕</button>
           </div>
@@ -2042,16 +2081,33 @@ export default function ConsultationPage() {
               <DiagnosisToothChart
                 patientDiagnoses={patientDiagnoses}
                 pastDiagnoses={pastPatientDiagnoses}
-                predictedDiagnoses={confirmedDiagnosesList.length === 0
-                  ? (medicalRecord?.predicted_diagnoses || []).map((pd: PredictedDiagnosis) => ({
+                predictedDiagnoses={[
+                  // 問診票予測（patient_diagnosesに未登録のもの）
+                  ...(medicalRecord?.predicted_diagnoses || [])
+                    .filter((pd: PredictedDiagnosis) =>
+                      pd.tooth && !patientDiagnoses.some(d => d.tooth === pd.tooth)
+                    )
+                    .map((pd: PredictedDiagnosis) => ({
                       tooth: pd.tooth || "", code: pd.code, name: pd.name,
                       short: pd.short || pd.code, confidence: pd.confidence, reason: "予測",
-                    }))
-                  : []}
+                    })),
+                  // バナーに出ている検出済み候補（未確定）
+                  ...detectedDiagnoses
+                    .filter(d => d.tooth && !patientDiagnoses.some(p => p.tooth === d.tooth))
+                    .map(d => ({ tooth: d.tooth, code: d.code, name: d.name, short: d.short || d.code, confidence: d.confidence, reason: d.reason })),
+                ]}
                 todayTeeth={todayTeeth}
                 scheduleConfirmed={scheduleConfirmed}
                 onStatusChange={updateDiagnosisStatus}
                 toothChart={toothChartDraft}
+                onToothClick={(tooth, diagName) => {
+                  // すでにpatient_diagnosesに登録済みの歯はステータス変更のみ
+                  const existing = patientDiagnoses.find(d => d.tooth === String(tooth));
+                  if (existing) return; // ホバーメニューで対応
+                  // 未登録の歯 → 傷病名追加ポップアップを開く（歯番をプリセット）
+                  setPopup("diagnosis");
+                  addLog(`🦷 ${tooth}番 傷病名追加`);
+                }}
               />
               {/* 傷病リスト */}
               <div className="mt-3 flex flex-wrap gap-2">
@@ -2483,7 +2539,7 @@ export default function ConsultationPage() {
 // ==============================
 function DiagnosisToothChart({
   patientDiagnoses, pastDiagnoses, predictedDiagnoses, todayTeeth, scheduleConfirmed,
-  onStatusChange, toothChart,
+  onStatusChange, toothChart, onToothClick,
 }: {
   patientDiagnoses: PatientDiagnosis[];
   pastDiagnoses: PatientDiagnosis[];
@@ -2492,6 +2548,7 @@ function DiagnosisToothChart({
   scheduleConfirmed: boolean;
   onStatusChange?: (diagId: string, status: PatientDiagnosis["status"]) => void;
   toothChart?: Record<string, ToothStatus>;
+  onToothClick?: (tooth: number, diagName?: string) => void;
 }) {
   const UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
   const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
@@ -2571,7 +2628,10 @@ function DiagnosisToothChart({
     return (
       <div className="relative group">
         {/* セル本体 - 大きめ */}
-        <div className={`w-10 h-12 rounded text-xs flex flex-col items-center justify-center transition-all cursor-pointer gap-0.5 px-0.5 ${style}`}>
+        <div
+          className={`w-10 h-12 rounded text-xs flex flex-col items-center justify-center transition-all cursor-pointer gap-0.5 px-0.5 ${style}`}
+          onClick={() => onToothClick && onToothClick(tooth, diagName || undefined)}
+        >
           <span className="font-medium" style={{ fontSize: 9 }}>{tooth}</span>
           {diagCode && (
             <span className="font-bold leading-none text-center" style={{ fontSize: 8 }}>{diagCode}</span>
