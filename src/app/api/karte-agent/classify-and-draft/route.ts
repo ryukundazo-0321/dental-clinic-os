@@ -13,7 +13,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "transcript is required" }, { status: 400 });
     }
 
-    // 傷病名マスタを取得（音声からの傷病名検出に使用）
     const { data: diagnosisMaster } = await supabase
       .from("diagnosis_master")
       .select("code, name, category")
@@ -23,54 +22,57 @@ export async function POST(req: NextRequest) {
       .map((d: { code: string; name: string; category: string }) => `${d.code}:${d.name}(${d.category})`)
       .join("\n");
 
-    const systemPrompt = `あなたは歯科クリニックの音声記録を解析するAIです。
-スタッフの発言を解析し、以下のJSON形式で出力してください。
+    const systemPrompt = `あなたは歯科専門のカルテ記録AIです。
+豊富な歯科臨床知識を持ち、日本の歯科用番号体系（FDI方式）を完全に理解しています。
 
-## 出力形式（必ずこのJSON形式のみ出力）
+## 入力の性質
+これは「ドクターが患者に向けて診察内容をわかりやすく説明している発言」の文字起こしです。
+患者向けの平易な言葉（「虫歯」「神経を取る」「右下の奥歯」等）で話されています。
+
+## あなたのタスク
+歯科医師として以下を推論・抽出してください：
+
+### 1. 歯番の特定
+日本語の口語表現から、FDI方式の歯番（11〜18, 21〜28, 31〜38, 41〜48）に変換します。
+- 上顎右側=1X、上顎左側=2X、下顎左側=3X、下顎右側=4X
+- 「一番奥」=8番、「奥から2番目」=7番、「奥歯」=6〜8番、「前歯」=1〜3番
+- 「右」「左」「上」「下」の組み合わせで象限を特定
+- 複数の歯への言及はそれぞれ個別に抽出
+
+### 2. 傷病名の特定
+患者向けの平易な表現を臨床診断名に変換します。
+歯科医師が患者に話す言葉と実際の病名の対応を、臨床知識に基づき推論してください。
+diagnosis_masterの中から最も適切なコードと名称を選択します。
+
+### 3. 処置の特定
+「今日は〇〇します」「〇〇していきましょう」などの処置予定を抽出します。
+
+## 出力形式（JSONのみ・余分な説明不要）
 {
-  "s": "患者の主訴・症状（SOAPのS）",
-  "tooth": "歯式・歯の状態に関する所見",
-  "perio": "歯周組織の所見（ポケット深さ等）",
-  "dh": "歯科衛生士の処置記録",
-  "dr": "ドクターの処置・診断記録",
   "detected_diagnoses": [
     {
-      "tooth": "歯番（例: 46、16、全顎等）",
-      "code": "傷病名コード（diagnosis_masterより）",
-      "name": "傷病名（diagnosis_masterより）",
-      "confidence": 0.0〜1.0の信頼度,
-      "reason": "検出理由（音声中の根拠となった発言）"
+      "tooth": "FDI歯番（例: 46）。全顎・複数歯は空文字",
+      "code": "diagnosis_masterのコード",
+      "name": "diagnosis_masterの傷病名",
+      "confidence": 明言なら1.0・推論なら0.85,
+      "reason": "発言中の根拠となった表現をそのまま引用"
     }
-  ]
+  ],
+  "detected_procedures": [
+    {
+      "tooth": "FDI歯番",
+      "procedure": "処置名（臨床用語で）"
+    }
+  ],
+  "soap_o": "ドクターの客観的所見（SOAP-O）",
+  "soap_p": "治療計画（SOAP-P）"
 }
 
-## 傷病名検出ルール
-- 音声から歯番と症状を組み合わせて傷病名を推定する
-- 「虫歯」「むし歯」「カリエス」→ C1/C2/C3/C4のいずれか（深さの言及で判断）
-- 「歯髄炎」「神経が死んでいる」「神経を取る」→ Pul（慢性/急性）
-- 「根尖病巣」「膿が出ている」「根っこの炎症」→ Per/Perico
-- 「歯周病」「ポケットが深い」「グラグラ」→ P1/P2/P3
-- 「歯肉炎」「歯ぐきが腫れている」→ G
-- 「抜歯」「抜く」→ 根拠となる病名を推定（C4/Per等）
-- 「詰め物が取れた」「クラウンが外れた」→ 脱離
-- 信頼度0.7未満の場合でも出力（フロントでフィルタリング）
-- 歯番が不明な場合は tooth を "" にする
-- detected_diagnosesは最大5件まで
+## 傷病名マスタ（必ずここから選択）
+${diagnosisList.slice(0, 3000)}`;
 
-## 傷病名マスタ（参照用）
-${diagnosisList.slice(0, 3000)}
-...（他多数）
+    const userPrompt = `以下のドクターの発言を解析してください：\n\n${transcript}`;
 
-## 注意事項
-- 余分な説明文は不要、JSONのみ出力
-- 傷病名が検出できない場合はdetected_diagnosesを空配列にする
-- 歯番は「右上6番」→「16」、「左下4番」→「34」のように歯科用番号に変換`;
-
-    const userPrompt = `以下の音声テキストを解析してください：
-
-${transcript}`;
-
-    // OpenAI APIを呼び出し
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -83,7 +85,7 @@ ${transcript}`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.3,
+        temperature: 0.1,
         response_format: { type: "json_object" },
       }),
     });
@@ -98,11 +100,6 @@ ${transcript}`;
     const rawContent = openaiData.choices[0]?.message?.content || "{}";
 
     let parsed: {
-      s?: string;
-      tooth?: string;
-      perio?: string;
-      dh?: string;
-      dr?: string;
       detected_diagnoses?: Array<{
         tooth: string;
         code: string;
@@ -110,35 +107,30 @@ ${transcript}`;
         confidence: number;
         reason: string;
       }>;
+      detected_procedures?: Array<{
+        tooth: string;
+        procedure: string;
+      }>;
+      soap_o?: string;
+      soap_p?: string;
     };
     try {
       parsed = JSON.parse(rawContent);
     } catch {
-      parsed = { s: rawContent, detected_diagnoses: [] };
+      parsed = { detected_diagnoses: [] };
     }
 
-    // detected_diagnosesを信頼度でソート
     if (parsed.detected_diagnoses) {
       parsed.detected_diagnoses.sort((a, b) => b.confidence - a.confidence);
     }
 
-    // medical_record_idがある場合はドラフト保存
-    if (medical_record_id && field_key) {
-      const fieldsToSave = ["s", "tooth", "perio", "dh", "dr"];
-      for (const key of fieldsToSave) {
-        const value = parsed[key as keyof typeof parsed];
-        if (value && typeof value === "string" && value.trim()) {
-          await supabase.from("karte_ai_drafts").upsert(
-            {
-              medical_record_id,
-              field_key: key,
-              content: value,
-              status: "draft",
-              source: "voice",
-            },
-            { onConflict: "medical_record_id,field_key" }
-          );
-        }
+    // SOAP自動保存
+    if (medical_record_id) {
+      const updates: Record<string, string> = {};
+      if (parsed.soap_o) updates["soap_o"] = parsed.soap_o;
+      if (parsed.soap_p) updates["soap_p"] = parsed.soap_p;
+      if (Object.keys(updates).length > 0) {
+        await supabase.from("medical_records").update(updates).eq("id", medical_record_id);
       }
     }
 
@@ -146,6 +138,7 @@ ${transcript}`;
       success: true,
       classified: parsed,
       detected_diagnoses: parsed.detected_diagnoses || [],
+      detected_procedures: parsed.detected_procedures || [],
     });
   } catch (error) {
     console.error("classify-and-draft error:", error);
