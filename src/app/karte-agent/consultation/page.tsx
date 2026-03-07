@@ -2084,31 +2084,10 @@ export default function ConsultationPage() {
 
           {/* 傷病歯式チャート（常時表示） */}
           <div className="bg-white rounded-lg border p-4">
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="font-medium text-gray-700">🗺 傷病歯式チャート</h3>
-                  {/* 録音ボタン（常時表示） */}
-                  {voiceLoading ? (
-                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-blue-100 text-blue-600 border border-blue-300">
-                      <span className="animate-spin">⏳</span> AI解析中...
-                    </span>
-                  ) : (
-                    <button
-                      onClick={isRecording ? stopRecording : startRecording}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
-                        isRecording
-                          ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-200"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-300"
-                      }`}
-                    >
-                      🎙 {isRecording
-                        ? `録音中 ${Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:${(recordingSeconds % 60).toString().padStart(2, "0")} ■`
-                        : "録音開始"}
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-gray-400">歯にホバーでステータス変更 · 録音してドクターの説明を自動解析</p>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="font-medium text-gray-700">🗺 傷病歯式チャート</h3>
+                <p className="text-xs text-gray-400 mt-0.5">歯にホバーでステータス変更</p>
               </div>
               {confirmedDiagnosesList.length > 0 && (
                 <button
@@ -2128,6 +2107,10 @@ export default function ConsultationPage() {
                 </button>
               )}
             </div>
+            {/* 左右レイアウト：左=チャート、右=確認リスト */}
+            <div className="flex gap-4">
+              {/* 左：チャート */}
+              <div className="flex-1 min-w-0">
             {/* 前回の傷病歯式チャート */}
             {pastPatientDiagnoses.length > 0 && (
               <div className="mb-3">
@@ -2212,6 +2195,53 @@ export default function ConsultationPage() {
                 </div>
               )}
             </div>
+              </div>{/* 左カラム終わり */}
+
+              {/* 右：確認リスト（録音結果・傷病候補） */}
+              <div className="w-56 shrink-0">
+                <p className="text-xs font-medium text-gray-500 mb-2">🎙 録音解析結果</p>
+                {voiceLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-blue-500 bg-blue-50 rounded-lg p-3">
+                    <span className="animate-spin">⏳</span> AI解析中...
+                  </div>
+                ) : showVoiceConfirm && voiceConfirmList.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-500">以下を確定しますか？</p>
+                    {voiceConfirmList.map((d, i) => (
+                      <div key={i} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5">
+                        <div className="flex-1 min-w-0">
+                          {d.tooth && <span className="font-bold text-gray-800 text-xs">{d.tooth}番 </span>}
+                          <span className="text-xs text-gray-700">{d.name}</span>
+                        </div>
+                        <button
+                          onClick={() => setVoiceConfirmList(prev => prev.filter((_, idx) => idx !== i))}
+                          className="text-gray-300 hover:text-red-400 ml-1 text-sm leading-none shrink-0"
+                        >✕</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-1 mt-2">
+                      <button
+                        onClick={() => { setShowVoiceConfirm(false); setVoiceConfirmList([]); }}
+                        className="flex-1 py-1.5 rounded-lg border border-gray-300 text-gray-500 text-xs hover:bg-gray-50"
+                      >キャンセル</button>
+                      <button
+                        onClick={async () => {
+                          for (const d of voiceConfirmList) { await confirmDiagnosis(d); }
+                          setShowVoiceConfirm(false);
+                          setVoiceConfirmList([]);
+                        }}
+                        className="flex-1 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-700"
+                      >✅ OK</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 text-center">
+                    <p>🎙 サイドバーの録音ボタンを押して</p>
+                    <p className="mt-1">ドクターの説明を録音してください</p>
+                  </div>
+                )}
+              </div>{/* 右カラム終わり */}
+            </div>{/* 左右レイアウト終わり */}
           </div>
 
           {/* 処置記録 */}
@@ -2335,6 +2365,30 @@ export default function ConsultationPage() {
 
         {/* アクションボタン */}
         <div className="w-16 bg-white border-l flex flex-col items-center py-4 gap-3">
+          {/* 録音ボタン（大きく・一番上） */}
+          {voiceLoading ? (
+            <div className="flex flex-col items-center gap-0.5 w-12 h-14 rounded-xl border-2 border-blue-300 bg-blue-50 justify-center">
+              <span className="text-xl animate-spin">⏳</span>
+              <span className="text-xs text-blue-500" style={{fontSize:9}}>解析中</span>
+            </div>
+          ) : (
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              className={`flex flex-col items-center gap-0.5 w-12 h-14 rounded-xl border-2 transition-all ${
+                isRecording
+                  ? "border-red-500 bg-red-500 text-white animate-pulse shadow-lg shadow-red-200"
+                  : "border-gray-300 bg-white hover:bg-red-50 hover:border-red-300 text-gray-600"
+              }`}
+            >
+              <span className="text-2xl">🎙</span>
+              <span className="text-xs font-medium" style={{fontSize:9}}>
+                {isRecording
+                  ? `${Math.floor(recordingSeconds / 60).toString().padStart(2,"0")}:${(recordingSeconds % 60).toString().padStart(2,"0")}`
+                  : "録音"}
+              </span>
+            </button>
+          )}
+          <div className="w-8 border-t border-gray-200" />
           {[
             { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
             { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio", fullscreen: true },
