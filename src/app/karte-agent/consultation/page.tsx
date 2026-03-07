@@ -2197,29 +2197,49 @@ export default function ConsultationPage() {
             </div>
               </div>{/* 左カラム終わり */}
 
-              {/* 右：確認リスト（録音結果・傷病候補） */}
-              <div className="w-56 shrink-0">
-                <p className="text-xs font-medium text-gray-500 mb-2">🎙 録音解析結果</p>
+              {/* 右：録音ボタン＋確認リスト */}
+              <div className="w-52 shrink-0 flex flex-col items-center gap-3">
+                {/* 大きな録音ボタン（赤丸） */}
                 {voiceLoading ? (
-                  <div className="flex items-center gap-2 text-xs text-blue-500 bg-blue-50 rounded-lg p-3">
-                    <span className="animate-spin">⏳</span> AI解析中...
+                  <div className="w-24 h-24 rounded-full bg-blue-100 border-4 border-blue-300 flex flex-col items-center justify-center">
+                    <span className="text-2xl animate-spin">⏳</span>
+                    <span className="text-xs text-blue-500 mt-1">解析中</span>
                   </div>
-                ) : showVoiceConfirm && voiceConfirmList.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-500">以下を確定しますか？</p>
+                ) : (
+                  <button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`w-24 h-24 rounded-full border-4 flex flex-col items-center justify-center transition-all shadow-lg ${
+                      isRecording
+                        ? "bg-red-500 border-red-600 animate-pulse shadow-red-300 text-white"
+                        : "bg-white border-gray-300 hover:border-red-400 hover:bg-red-50 text-gray-600"
+                    }`}
+                  >
+                    <span className="text-3xl">🎙</span>
+                    <span className="text-xs font-medium mt-1">
+                      {isRecording
+                        ? `${Math.floor(recordingSeconds / 60).toString().padStart(2,"0")}:${(recordingSeconds % 60).toString().padStart(2,"0")}`
+                        : "録音"}
+                    </span>
+                  </button>
+                )}
+
+                {/* 確認リスト（赤四角エリア） */}
+                {showVoiceConfirm && voiceConfirmList.length > 0 && (
+                  <div className="w-full bg-yellow-50 border border-yellow-300 rounded-xl p-3 space-y-2">
+                    <p className="text-xs font-medium text-yellow-800">以下を確定しますか？</p>
                     {voiceConfirmList.map((d, i) => (
-                      <div key={i} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5">
+                      <div key={i} className="flex items-center justify-between bg-white border border-yellow-200 rounded-lg px-2 py-1.5">
                         <div className="flex-1 min-w-0">
                           {d.tooth && <span className="font-bold text-gray-800 text-xs">{d.tooth}番 </span>}
                           <span className="text-xs text-gray-700">{d.name}</span>
                         </div>
                         <button
                           onClick={() => setVoiceConfirmList(prev => prev.filter((_, idx) => idx !== i))}
-                          className="text-gray-300 hover:text-red-400 ml-1 text-sm leading-none shrink-0"
+                          className="text-gray-300 hover:text-red-400 ml-1 leading-none shrink-0"
                         >✕</button>
                       </div>
                     ))}
-                    <div className="flex gap-1 mt-2">
+                    <div className="flex gap-2 pt-1">
                       <button
                         onClick={() => { setShowVoiceConfirm(false); setVoiceConfirmList([]); }}
                         className="flex-1 py-1.5 rounded-lg border border-gray-300 text-gray-500 text-xs hover:bg-gray-50"
@@ -2233,11 +2253,6 @@ export default function ConsultationPage() {
                         className="flex-1 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-700"
                       >✅ OK</button>
                     </div>
-                  </div>
-                ) : (
-                  <div className="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 text-center">
-                    <p>🎙 サイドバーの録音ボタンを押して</p>
-                    <p className="mt-1">ドクターの説明を録音してください</p>
                   </div>
                 )}
               </div>{/* 右カラム終わり */}
@@ -2365,33 +2380,10 @@ export default function ConsultationPage() {
 
         {/* アクションボタン */}
         <div className="w-16 bg-white border-l flex flex-col items-center py-4 gap-3">
-          {/* 録音ボタン（大きく・一番上） */}
-          {voiceLoading ? (
-            <div className="flex flex-col items-center gap-0.5 w-12 h-14 rounded-xl border-2 border-blue-300 bg-blue-50 justify-center">
-              <span className="text-xl animate-spin">⏳</span>
-              <span className="text-xs text-blue-500" style={{fontSize:9}}>解析中</span>
-            </div>
-          ) : (
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              className={`flex flex-col items-center gap-0.5 w-12 h-14 rounded-xl border-2 transition-all ${
-                isRecording
-                  ? "border-red-500 bg-red-500 text-white animate-pulse shadow-lg shadow-red-200"
-                  : "border-gray-300 bg-white hover:bg-red-50 hover:border-red-300 text-gray-600"
-              }`}
-            >
-              <span className="text-2xl">🎙</span>
-              <span className="text-xs font-medium" style={{fontSize:9}}>
-                {isRecording
-                  ? `${Math.floor(recordingSeconds / 60).toString().padStart(2,"0")}:${(recordingSeconds % 60).toString().padStart(2,"0")}`
-                  : "録音"}
-              </span>
-            </button>
-          )}
-          <div className="w-8 border-t border-gray-200" />
           {[
             { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
             { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio", fullscreen: true },
+            { type: "voice" as PopupType, icon: "🎙", label: "録音", step: "voice" },
             { type: "diagnosis" as PopupType, icon: "🔍", label: "病名", step: "diagnosis" },
             { type: "treatment" as PopupType, icon: "💊", label: "治療", step: "treatment" },
             { type: "billing" as PopupType, icon: "💰", label: "算定", step: "billing" },
