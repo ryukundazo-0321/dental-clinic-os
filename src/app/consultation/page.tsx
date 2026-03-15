@@ -435,7 +435,6 @@ export default function ConsultationPage() {
                 {selectedApt.status==="in_consultation"&&(<>
                   {/* ★ 修正: 診察画面を開くボタン → hubではなく直接新診察ページへ */}
                   <a href={`/karte-agent/consultation?appointment_id=${selectedApt.id}`} className="block w-full py-3 rounded-lg text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 text-center shadow-lg shadow-orange-200">🩺 診察画面を開く →</a>
-                  <a href={`/karte-agent/unit?appointment_id=${selectedApt.id}`} className="block w-full py-3 rounded-lg text-sm font-bold bg-gray-900 text-white hover:bg-gray-800 text-center">🤖 カルテエージェントで開く →</a>
                   <button onClick={()=>updateStatus(selectedApt,"completed")} className="w-full py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 hover:bg-purple-200">✅ 診察完了</button>
                 </>)}
 
