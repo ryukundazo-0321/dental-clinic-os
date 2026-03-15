@@ -83,10 +83,10 @@ interface DetectedDiagnosis {
 
 interface PatientDiagnosis {
   id: string;
-  tooth: string | null;
+  tooth_number: string | null;
   diagnosis_code: string;
   diagnosis_name: string;
-  status: "planned" | "in_treatment" | "completed" | "watching";
+  outcome: "continuing" | "completed" | "discontinued";
   session_total?: number;    // 全何回の計画か
   session_current?: number;  // 今何回目か
   medical_record_id: string;
@@ -357,7 +357,7 @@ export default function ConsultationPage() {
           setPatientDiagnoses(currentDiags);
           // confirmedDiagnosesListにも反映
           setConfirmedDiagnosesList(currentDiags.map((d: PatientDiagnosis) => ({
-            tooth: d.tooth || "",
+            tooth: d.tooth_number || "",
             code: d.diagnosis_code,
             name: d.diagnosis_name,
             short: d.diagnosis_code,
@@ -783,10 +783,10 @@ export default function ConsultationPage() {
   // ==============================
   // 傷病名ステータス変更
   // ==============================
-  async function updateDiagnosisStatus(diagId: string, status: PatientDiagnosis["status"]) {
-    await supabase.from("patient_diagnoses").update({ status }).eq("id", diagId);
-    setPatientDiagnoses(prev => prev.map(d => d.id === diagId ? { ...d, status } : d));
-    addLog(`🔄 ステータス更新: ${status}`);
+  async function updateDiagnosisStatus(diagId: string, outcome: PatientDiagnosis["outcome"]) {
+    await supabase.from("patient_diagnoses").update({ outcome }).eq("id", diagId);
+    setPatientDiagnoses(prev => prev.map(d => d.id === diagId ? { ...d, outcome } : d));
+    addLog(`🔄 ステータス更新: ${outcome}`);
   }
 
   // ==============================
@@ -808,14 +808,14 @@ export default function ConsultationPage() {
     const { data: insertedDiag } = await supabase.from("patient_diagnoses").insert({
       patient_id: patient.id,
       medical_record_id: medicalRecord.id,
-      tooth: diag.tooth || null,
+      tooth_number: diag.tooth || null,
       diagnosis_code: diag.code,
       diagnosis_name: diag.name,
-      status: "planned",
+      outcome: "continuing",
     }).select().single();
     if (insertedDiag) {
       setPatientDiagnoses(prev => {
-        const exists = prev.some(d => d.tooth === insertedDiag.tooth && d.diagnosis_code === insertedDiag.diagnosis_code);
+        const exists = prev.some(d => d.tooth_number === insertedDiag.tooth_number && d.diagnosis_code === insertedDiag.diagnosis_code);
         return exists ? prev : [...prev, insertedDiag];
       });
     }
@@ -2294,7 +2294,7 @@ export default function ConsultationPage() {
                   // 問診票予測（patient_diagnosesに未登録のもの）
                   ...(medicalRecord?.predicted_diagnoses || [])
                     .filter((pd: PredictedDiagnosis) =>
-                      pd.tooth && !patientDiagnoses.some(d => d.tooth === pd.tooth)
+                      pd.tooth && !patientDiagnoses.some(d => d.tooth_number === pd.tooth)
                     )
                     .map((pd: PredictedDiagnosis) => ({
                       tooth: pd.tooth || "", code: pd.code, name: pd.name,
@@ -2302,7 +2302,7 @@ export default function ConsultationPage() {
                     })),
                   // バナーに出ている検出済み候補（未確定）
                   ...detectedDiagnoses
-                    .filter(d => d.tooth && !patientDiagnoses.some(p => p.tooth === d.tooth))
+                    .filter(d => d.tooth && !patientDiagnoses.some(p => p.tooth_number === d.tooth))
                     .map(d => ({ tooth: d.tooth, code: d.code, name: d.name, short: d.short || d.code, confidence: d.confidence, reason: d.reason })),
                 ]}
                 todayTeeth={todayTeeth}
@@ -2311,7 +2311,7 @@ export default function ConsultationPage() {
                 toothChart={toothChartDraft}
                 onToothClick={(tooth, diagName) => {
                   // すでにpatient_diagnosesに登録済みの歯はステータス変更のみ
-                  const existing = patientDiagnoses.find(d => d.tooth === String(tooth));
+                  const existing = patientDiagnoses.find(d => d.tooth_number === String(tooth));
                   if (existing) return; // ホバーメニューで対応
                   // 未登録の歯 → 傷病名追加ポップアップを開く（歯番をプリセット）
                   setPopup("diagnosis");
@@ -2817,7 +2817,7 @@ function DiagnosisToothChart({
   predictedDiagnoses: DiagnosisWithTooth[];
   todayTeeth: string[];
   scheduleConfirmed: boolean;
-  onStatusChange?: (diagId: string, status: PatientDiagnosis["status"]) => void;
+  onStatusChange?: (diagId: string, outcome: PatientDiagnosis["outcome"]) => void;
   toothChart?: Record<string, ToothStatus>;
   onToothClick?: (tooth: number, diagName?: string) => void;
 }) {
@@ -2825,10 +2825,9 @@ function DiagnosisToothChart({
   const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
   const STATUS_CONFIG = {
-    planned:      { label: "計画中",   bg: "bg-red-400",    text: "text-white",   border: "border-red-600" },
-    in_treatment: { label: "治療中",   bg: "bg-orange-400", text: "text-white",   border: "border-orange-600" },
+    continuing:   { label: "治療中",   bg: "bg-orange-400", text: "text-white",   border: "border-orange-600" },
     completed:    { label: "治療済",   bg: "bg-green-500",  text: "text-white",   border: "border-green-700" },
-    watching:     { label: "経過観",   bg: "bg-yellow-400", text: "text-gray-900",border: "border-yellow-600" },
+    discontinued: { label: "中止",     bg: "bg-gray-400",   text: "text-white",   border: "border-gray-600" },
   };
 
   const isMissing = (tooth: number) => {
@@ -2837,10 +2836,10 @@ function DiagnosisToothChart({
   };
 
   function getCurrentDiag(tooth: number) {
-    return patientDiagnoses.find(d => d.tooth === String(tooth));
+    return patientDiagnoses.find(d => d.tooth_number === String(tooth));
   }
   function getPastDiag(tooth: number) {
-    return pastDiagnoses.find(d => d.tooth === String(tooth));
+    return pastDiagnoses.find(d => d.tooth_number === String(tooth));
   }
   function getPredicted(tooth: number) {
     return predictedDiagnoses.find(d => d.tooth === String(tooth));
@@ -2868,7 +2867,7 @@ function DiagnosisToothChart({
     let diagName = "";
 
     if (cur) {
-      const cfg = STATUS_CONFIG[cur.status] || STATUS_CONFIG.planned;
+      const cfg = STATUS_CONFIG[cur.outcome] || STATUS_CONFIG.continuing;
       if (scheduleConfirmed) {
         style = isToday
           ? `${cfg.bg} ${cfg.text} border-2 ${cfg.border} ring-2 ring-offset-1 ring-indigo-400`
@@ -2883,16 +2882,16 @@ function DiagnosisToothChart({
       diagCode = pred.short || pred.code;
       diagName = pred.name;
     } else if (past) {
-      const cfg = STATUS_CONFIG[past.status] || STATUS_CONFIG.completed;
+      const cfg = STATUS_CONFIG[past.outcome] || STATUS_CONFIG.completed;
       style = `${cfg.bg} ${cfg.text} border ${cfg.border} opacity-40`;
       diagCode = past.diagnosis_code;
       diagName = past.diagnosis_name;
     }
 
     const tooltipLines = [
-      cur && `${tooth}番: ${cur.diagnosis_name}（${STATUS_CONFIG[cur.status]?.label}）`,
+      cur && `${tooth}番: ${cur.diagnosis_name}（${STATUS_CONFIG[cur.outcome]?.label}）`,
       cur?.session_total && cur.session_total > 1 && `進捗: ${cur.session_current || 1}/${cur.session_total}回`,
-      past && !cur && `前回: ${past.diagnosis_name}（${STATUS_CONFIG[past.status]?.label || ""}）`,
+      past && !cur && `前回: ${past.diagnosis_name}（${STATUS_CONFIG[past.outcome]?.label || ""}）`,
       pred && !cur && `予測: ${pred.name}`,
     ].filter(Boolean);
 
@@ -2923,7 +2922,7 @@ function DiagnosisToothChart({
         {/* ステータス変更メニュー */}
         {cur && onStatusChange && (
           <div className="absolute top-13 left-0 z-50 hidden group-hover:block bg-white border rounded-lg shadow-lg p-1 w-24">
-            {(Object.entries(STATUS_CONFIG) as [PatientDiagnosis["status"], typeof STATUS_CONFIG.planned][]).map(([key, cfg]) => (
+            {(Object.entries(STATUS_CONFIG) as [PatientDiagnosis["outcome"], typeof STATUS_CONFIG.continuing][]).map(([key, cfg]) => (
               <button
                 key={key}
                 onClick={() => onStatusChange(cur.id, key)}
