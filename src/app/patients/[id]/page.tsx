@@ -299,10 +299,12 @@ export default function PatientDetailPage() {
   const [es, setES] = useState(false);
   const [expandedVisitDate, setExpandedVisitDate] = useState<string | null>(null);
   const [receiptHtml, setReceiptHtml] = useState<string | null>(null);
+  const [todayAptId, setTodayAptId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [p, r, t, s, img] = await Promise.all([
+    const todayJST = new Date(new Date().getTime() + 9 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const [p, r, t, s, img, todayApt] = await Promise.all([
       supabase.from("patients").select("*").eq("id", pid).single(),
       supabase
         .from("medical_records")
@@ -324,6 +326,16 @@ export default function PatientDetailPage() {
         .select("*")
         .eq("patient_id", pid)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("appointments")
+        .select("id")
+        .eq("patient_id", pid)
+        .gte("scheduled_at", `${todayJST}T00:00:00`)
+        .lte("scheduled_at", `${todayJST}T23:59:59`)
+        .not("status", "in", '("cancelled","billing_done")')
+        .order("scheduled_at")
+        .limit(1)
+        .maybeSingle(),
     ]);
     if (p.data) setPatient(p.data);
     if (r.data) {
@@ -345,6 +357,7 @@ export default function PatientDetailPage() {
     if (t.data) setTH(t.data);
     if (s.data) setPS2(s.data);
     if (img.data) setImages(img.data);
+    if (todayApt.data) setTodayAptId(todayApt.data.id);
     setLoading(false);
   }, [pid]);
 
@@ -543,10 +556,12 @@ export default function PatientDetailPage() {
               </span>
             )}
             <Link
-              href={`/consultation?patient=${patient.id}`}
+              href={todayAptId
+                ? `/karte-agent/consultation?appointment_id=${todayAptId}`
+                : `/reservation?patient=${patient.id}`}
               className="bg-orange-500 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-orange-600"
             >
-              🩺 診察開始
+              {todayAptId ? "🩺 診察開始" : "📅 予約を入れる"}
             </Link>
           </div>
         </div>
