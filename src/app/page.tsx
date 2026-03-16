@@ -93,40 +93,37 @@ export default function Home() {
 
   async function fetchAlerts() {
     const items: AlertItem[] = [];
-    // 未会計
     const { data: unpaid } = await supabase.from("billing").select("id").eq("payment_status", "unpaid");
     if (unpaid && unpaid.length > 0) items.push({ type: "unpaid", label: "未会計", count: unpaid.length, href: "/billing", color: "text-red-600 bg-red-50", icon: "💰" });
-    // 未確定カルテ
     const { data: unconfirmed } = await supabase.from("medical_records").select("id").eq("doctor_confirmed", false).neq("status", "confirmed");
     if (unconfirmed && unconfirmed.length > 0) items.push({ type: "unconfirmed", label: "未確定カルテ", count: unconfirmed.length, href: "/chart?tab=unconfirmed", color: "text-orange-600 bg-orange-50", icon: "📋" });
-    // 来院済（診察待ち）
     const { data: waitingApt } = await supabase.from("appointments").select("id").eq("status", "checked_in")
       .gte("scheduled_at", `${todayStr}T00:00:00+00`).lte("scheduled_at", `${todayStr}T23:59:59+00`);
-    if (waitingApt && waitingApt.length > 0) items.push({ type: "waiting", label: "診察待ち", count: waitingApt.length, href: "/reservation", color: "text-green-600 bg-green-50", icon: "🩺" });
+    if (waitingApt && waitingApt.length > 0) items.push({ type: "waiting", label: "診察待ち", count: waitingApt.length, href: "/consultation", color: "text-green-600 bg-green-50", icon: "🩺" });
     setAlerts(items);
   }
 
-  // グラフの最大値
   const maxPoints = Math.max(...monthlyData.map(d => d.points), 1);
 
   const menuItems = [
-    { href: "/reservation", icon: "📅", iconBg: "bg-blue-50 text-blue-600 group-hover:bg-blue-100", title: "予約管理", desc: "予約の確認・新規受付", ready: true },
-    { href: "/reservation", icon: "🩺", iconBg: "bg-orange-50 text-orange-600 group-hover:bg-orange-100", title: "診察カレンダー", desc: "タイムテーブル・アポ帳", ready: true },
-    { href: "/reception-dashboard", icon: "🏥", iconBg: "bg-rose-50 text-rose-600 group-hover:bg-rose-100", title: "受付ダッシュボード", desc: "チェア別・本日の患者一覧", ready: true },
-    { href: "/patients", icon: "👤", iconBg: "bg-sky-50 text-sky-600 group-hover:bg-sky-100", title: "患者管理", desc: "患者一覧・検索・歯式・カルテ", ready: true },
-    { href: "/checkin", icon: "📱", iconBg: "bg-green-50 text-green-600 group-hover:bg-green-100", title: "受付", desc: "チェックイン・受付番号発行", ready: true },
-    { href: "/billing", icon: "💰", iconBg: "bg-purple-50 text-purple-600 group-hover:bg-purple-100", title: "会計", desc: "精算・レセプト管理", ready: true },
-    { href: "/monitor", icon: "🖥️", iconBg: "bg-teal-50 text-teal-600 group-hover:bg-teal-100", title: "待合モニター", desc: "待合室表示用画面", ready: true },
-    { href: "/recall", icon: "🔔", iconBg: "bg-amber-50 text-amber-600 group-hover:bg-amber-100", title: "リコール管理", desc: "定期検診リコール対象者一覧", ready: true },
+    { href: "/reservation",   icon: "📅", iconBg: "bg-blue-50 text-blue-600 group-hover:bg-blue-100",   title: "予約管理",       desc: "予約の確認・新規受付",           ready: true },
+    // ★ 修正: /reservation → /consultation
+    { href: "/consultation",  icon: "🩺", iconBg: "bg-orange-50 text-orange-600 group-hover:bg-orange-100", title: "診察カレンダー", desc: "タイムテーブル・アポ帳",         ready: true },
+    { href: "/reception-dashboard", icon: "🏥", iconBg: "bg-rose-50 text-rose-600 group-hover:bg-rose-100", title: "受付ダッシュボード", desc: "チェア別・本日の患者一覧",   ready: true },
+    { href: "/patients",      icon: "👤", iconBg: "bg-sky-50 text-sky-600 group-hover:bg-sky-100",       title: "患者管理",       desc: "患者一覧・検索・歯式・カルテ",   ready: true },
+    { href: "/checkin",       icon: "📱", iconBg: "bg-green-50 text-green-600 group-hover:bg-green-100", title: "受付",           desc: "チェックイン・受付番号発行",     ready: true },
+    { href: "/billing",       icon: "💰", iconBg: "bg-purple-50 text-purple-600 group-hover:bg-purple-100", title: "会計",        desc: "精算・レセプト管理",             ready: true },
+    { href: "/monitor",       icon: "🖥️", iconBg: "bg-teal-50 text-teal-600 group-hover:bg-teal-100",   title: "待合モニター",   desc: "待合室表示用画面",               ready: true },
+    { href: "/recall",        icon: "🔔", iconBg: "bg-amber-50 text-amber-600 group-hover:bg-amber-100", title: "リコール管理",   desc: "定期検診リコール対象者一覧",     ready: true },
   ];
 
   const settingsItems = [
-    { href: "/settings", icon: "⚙️", title: "クリニック設定", desc: "基本情報・ユニット・スタッフ・予約枠" },
-    { href: "/audit", icon: "🔍", title: "監査ログ", desc: "カルテ・会計の全変更履歴" },
-    { href: "/lab-order", icon: "🏭", title: "技工指示書", desc: "補綴物の発注・進捗管理" },
-    { href: "/csv-import", icon: "📥", title: "CSVインポート", desc: "患者・予約データの一括取込" },
-    { href: "/reservation/book", icon: "🌐", title: "患者向け予約ページ", desc: "Web予約画面（URLを患者に共有）" },
-    { href: "/mypage", icon: "👤", title: "患者マイページ", desc: "予約確認・治療経過（URLを患者に共有）" },
+    { href: "/settings",        icon: "⚙️", title: "クリニック設定",     desc: "基本情報・ユニット・スタッフ・予約枠" },
+    { href: "/audit",           icon: "🔍", title: "監査ログ",           desc: "カルテ・会計の全変更履歴" },
+    { href: "/lab-order",       icon: "🏭", title: "技工指示書",         desc: "補綴物の発注・進捗管理" },
+    { href: "/csv-import",      icon: "📥", title: "CSVインポート",       desc: "患者・予約データの一括取込" },
+    { href: "/reservation/book",icon: "🌐", title: "患者向け予約ページ", desc: "Web予約画面（URLを患者に共有）" },
+    { href: "/mypage",          icon: "👤", title: "患者マイページ",     desc: "予約確認・治療経過（URLを患者に共有）" },
   ];
 
   return (
@@ -151,7 +148,6 @@ export default function Home() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* アラート */}
         {alerts.length > 0 && (
           <div className="flex gap-3 mb-6">
             {alerts.map(a => (
@@ -165,7 +161,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* 本日のリアルタイム状況 */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <p className="text-[10px] text-gray-400 mb-1">本日の予約</p>
@@ -194,7 +189,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 今月の売上グラフ */}
         <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -216,7 +210,6 @@ export default function Home() {
               </div>
             </div>
           </div>
-          {/* 棒グラフ（CSS純正） */}
           <div className="flex items-end gap-[2px] h-32">
             {monthlyData.map(d => {
               const h = (d.points / maxPoints) * 100;
@@ -237,11 +230,10 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 業務メニュー */}
         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">業務メニュー</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           {menuItems.map((item) => (
-            <Link key={item.href} href={item.href} className="block">
+            <Link key={item.title} href={item.href} className="block">
               <div className={`bg-white rounded-xl border border-gray-200 p-5 hover:border-sky-400 hover:shadow-md transition-all group ${!item.ready ? "opacity-50" : ""}`}>
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl transition-colors ${item.iconBg}`}>{item.icon}</div>
@@ -258,7 +250,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* 設定 */}
         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">設定・ツール</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {settingsItems.map((item) => (
