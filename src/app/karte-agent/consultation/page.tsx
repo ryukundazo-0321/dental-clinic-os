@@ -580,7 +580,12 @@ export default function ConsultationPage() {
         setXraySummary(data.summary || "");
         setXrayNotableFindings(data.analysis?.notable_findings || []);
         addLog(`🦷 AI歯式解析完了: ${enrichedFindings.length}件の所見`);
-        setPopup("photo");
+        // 写真パネルではなく確認ポップアップを開く
+        if (enrichedFindings.length > 0) {
+          setShowXrayConfirm(true);
+        } else {
+          addLog("⚠️ 所見が検出されませんでした。実際のX線画像または口腔内写真をアップロードしてください。");
+        }
       } else {
         const errData = await res.json().catch(() => ({}));
         addLog(`⚠️ レントゲン解析エラー: ${errData.error || `HTTP ${res.status}`}`);
@@ -1737,7 +1742,7 @@ export default function ConsultationPage() {
             <div className="flex items-center gap-2 mb-1">
               <span className="text-purple-700 font-medium text-sm">📸 AI歯式所見:</span>
               <button onClick={applyAllAiFindings} className="bg-purple-600 text-white text-xs px-2 py-0.5 rounded hover:bg-purple-700">一括反映</button>
-              <button onClick={() => setPopup("photo")} className="text-xs text-purple-600 underline">詳細を見る</button>
+              <button onClick={() => setShowXrayConfirm(true)} className="text-xs text-purple-600 underline">詳細を見る</button>
               <button onClick={() => setAiToothFindings([])} className="text-xs text-gray-400 ml-auto">✕</button>
             </div>
             <div className="flex flex-wrap gap-2">
