@@ -1889,61 +1889,35 @@ export default function ConsultationPage() {
                 </div>
               </div>
 
-              {/* 傷病歯式チャート */}
-              <div className="mb-3">
-                {pastPatientDiagnoses.length > 0 && (
-                  <div className="mb-2">
-                    <p className="text-[10px] text-gray-400 mb-1">前回</p>
-                    <DiagnosisToothChart patientDiagnoses={pastPatientDiagnoses} pastDiagnoses={[]} predictedDiagnoses={[]} todayTeeth={[]} scheduleConfirmed={false} />
-                  </div>
-                )}
-                <DiagnosisToothChart
-                  patientDiagnoses={patientDiagnoses}
-                  pastDiagnoses={pastPatientDiagnoses}
-                  predictedDiagnoses={[
-                    ...(medicalRecord?.predicted_diagnoses || []).filter((pd: PredictedDiagnosis) => pd.tooth && !patientDiagnoses.some(d => d.tooth_number === pd.tooth)).map((pd: PredictedDiagnosis) => ({ tooth: pd.tooth || "", code: pd.code, name: pd.name, short: pd.short || pd.code, confidence: pd.confidence, reason: "予測" })),
-                    ...detectedDiagnoses.filter(d => d.tooth && !patientDiagnoses.some(p => p.tooth_number === d.tooth)).map(d => ({ tooth: d.tooth, code: d.code, name: d.name, short: d.short || d.code, confidence: d.confidence, reason: d.reason })),
-                  ]}
-                  todayTeeth={todayTeeth}
-                  scheduleConfirmed={scheduleConfirmed}
-                  onStatusChange={updateDiagnosisStatus}
-                  toothChart={toothChartDraft}
-                  onToothClick={(tooth) => { const existing = patientDiagnoses.find(d => d.tooth_number === String(tooth)); if (existing) return; setPopup("diagnosis"); addLog(`🦷 ${tooth}番 傷病名追加`); }}
-                />
-              </div>
-
-              {/* 確定傷病名バッジ */}
-              {confirmedDiagnosesList.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {confirmedDiagnosesList.map((d, i) => (
-                    <div key={i} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border font-medium ${todayTeeth.includes(d.tooth) ? "bg-indigo-100 border-indigo-400 text-indigo-800" : "bg-gray-50 border-gray-200 text-gray-600"}`}>
-                      {d.tooth && <span className="font-bold">{d.tooth}番</span>}
-                      <span>{d.name}</span>
-                      {todayTeeth.includes(d.tooth) && <span className="text-indigo-500 text-[9px] font-bold ml-0.5">TODAY</span>}
+              {/* 傷病名テキスト一覧＋録音ボタン（モックアップ準拠：チャートなし） */}
+              <div className={`rounded-xl border-2 p-4 flex items-center gap-6 transition-all min-h-[120px] ${isRecording ? "border-red-300 bg-red-50" : "border-dashed border-gray-200 bg-gray-50"}`}>
+                {/* 左：確定傷病名テキスト一覧 */}
+                <div className="flex-1 min-w-0">
+                  {confirmedDiagnosesList.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {confirmedDiagnosesList.map((d, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${todayTeeth.includes(d.tooth) ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-500"}`}>
+                            {d.tooth ? `${d.tooth}番` : "全顎"}
+                          </span>
+                          <span className="text-sm font-medium text-gray-800">{d.name}</span>
+                          {todayTeeth.includes(d.tooth) && (
+                            <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">TODAY</span>
+                          )}
+                          <button
+                            onClick={async () => { setConfirmedDiagnosis(d as DetectedDiagnosis); await fetchTreatmentPatterns(d.short || d.code); }}
+                            className="text-[10px] text-blue-500 hover:text-blue-700 underline ml-auto shrink-0"
+                          >治療パターン</button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {/* 音声入力エリア（傷病名） */}
-              <div className={`rounded-xl border-2 p-4 flex items-center gap-4 transition-all ${isRecording ? "border-red-300 bg-red-50" : "border-dashed border-gray-300 bg-gray-50"}`}>
-                {voiceLoading ? (
-                  <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center shrink-0"><span className="text-2xl animate-spin">⏳</span></div>
-                ) : (
-                  <button onClick={isRecording ? stopRecording : startRecording}
-                    className={`w-16 h-16 rounded-full border-4 flex flex-col items-center justify-center transition-all shrink-0 ${isRecording ? "bg-red-500 border-red-600 text-white animate-pulse" : "bg-white border-gray-300 hover:border-red-400 text-gray-500"}`}>
-                    <span className="text-2xl">🎙</span>
-                    <span className="text-[9px] font-bold mt-0.5">{isRecording ? `${Math.floor(recordingSeconds/60).toString().padStart(2,"0")}:${(recordingSeconds%60).toString().padStart(2,"0")}` : "録音"}</span>
-                  </button>
-                )}
-                <div className="flex-1">
-                  {isRecording ? (
-                    <p className="text-sm font-bold text-red-600 animate-pulse">録音中… 話し終えたら止めてください</p>
-                  ) : transcript ? (
-                    <div><p className="text-xs text-gray-400 mb-1">最後の文字起こし</p><p className="text-sm text-gray-700">{transcript}</p></div>
                   ) : (
-                    <div><p className="text-sm font-bold text-gray-600">（音声で傷病名を入力）</p><p className="text-xs text-gray-400 mt-0.5">「〇〇番の〇〇を本日治療…」の形式で話してください</p></div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-500">（音声で傷病名を入力）</p>
+                      <p className="text-xs text-gray-400 mt-1">「〇〇番の〇〇を本日治療…」と話してください</p>
+                    </div>
                   )}
+                  {/* 音声確認リスト */}
                   {showVoiceConfirm && voiceConfirmList.length > 0 && (
                     <div className="mt-2 space-y-1">
                       {voiceConfirmList.map((d, i) => (
@@ -1958,8 +1932,32 @@ export default function ConsultationPage() {
                       </div>
                     </div>
                   )}
+                  {isRecording && (
+                    <p className="text-sm font-bold text-red-600 animate-pulse mt-2">録音中… 話し終えたら止めてください</p>
+                  )}
+                  {!isRecording && transcript && (
+                    <div className="mt-2 pt-2 border-t"><p className="text-xs text-gray-400 mb-1">最後の文字起こし</p><p className="text-xs text-gray-600">{transcript}</p></div>
+                  )}
+                </div>
+
+                {/* 右：録音ボタン（大・中央） */}
+                <div className="shrink-0 flex flex-col items-center gap-2">
+                  {voiceLoading ? (
+                    <div className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center">
+                      <span className="text-2xl animate-spin">⏳</span>
+                    </div>
+                  ) : (
+                    <button onClick={isRecording ? stopRecording : startRecording}
+                      className={`w-20 h-20 rounded-full border-4 flex flex-col items-center justify-center transition-all shadow-md
+                        ${isRecording ? "bg-red-500 border-red-600 text-white animate-pulse shadow-red-200" : "bg-white border-gray-300 hover:border-gray-400 hover:bg-gray-50 text-gray-500"}`}>
+                      <span className="text-3xl">🎙</span>
+                      <span className="text-[10px] font-bold mt-1">{isRecording ? `${Math.floor(recordingSeconds/60).toString().padStart(2,"0")}:${(recordingSeconds%60).toString().padStart(2,"0")}` : "録音"}</span>
+                    </button>
+                  )}
                 </div>
               </div>
+
+
 
               {/* スケジュール確定後：今日の治療ボタン */}
               {scheduleConfirmed && todayTeeth.length > 0 && (
