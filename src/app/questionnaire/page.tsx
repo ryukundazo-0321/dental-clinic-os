@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 // ─── 型定義 ────────────────────────────────────────────────────────────────
 
@@ -350,7 +350,7 @@ export default function QuestionnairePage() {
   const submit = useCallback(async (finalAnswers: Answers) => {
     setIsSubmitting(true);
     try {
-      const supabase = createClient();
+
 
       // 1. questionnaire_responses に保存
       const { data: qr, error } = await supabase
