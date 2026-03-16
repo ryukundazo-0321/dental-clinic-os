@@ -33,6 +33,11 @@ interface PersonalityProfile {
   one_line?: string;
   safety_alerts?: string[];
   analyzed_at?: string;
+  raw_medical_answers?: {
+    medication_names?: string;
+    diseases?: string[];
+    [key: string]: unknown;
+  };
 }
 
 interface Appointment {
@@ -1077,14 +1082,6 @@ export default function ConsultationPage() {
   const isFirstVisit = appointment.visit_type === "initial" || pastRecords.length === 0;
   const profile = patient.personality_profile;
 
-  // パーソナリティーレベルの色
-  const anxietyColor = profile?.anxiety_level === "high" ? "text-red-600 bg-red-50 border-red-200"
-    : profile?.anxiety_level === "low" ? "text-green-600 bg-green-50 border-green-200"
-    : "text-yellow-600 bg-yellow-50 border-yellow-200";
-  const jishuColor = profile?.jishu_potential === "high" ? "text-blue-600 bg-blue-50 border-blue-200"
-    : profile?.jishu_potential === "low" ? "text-gray-600 bg-gray-50 border-gray-200"
-    : "text-indigo-600 bg-indigo-50 border-indigo-200";
-
   // ==============================
   // レンダリング
   // ==============================
@@ -1527,34 +1524,64 @@ export default function ConsultationPage() {
       )}
 
       {/* ヘッダー */}
-      <header className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">←</button>
-          <div>
-            <span className="font-bold text-lg">{patient.name}</span>
-            <span className="ml-2 text-sm text-gray-500">{age}歳</span>
-            <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{patient.insurance_type || "社保"}</span>
-            <span className={`ml-2 text-sm px-2 py-0.5 rounded ${isFirstVisit ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>{isFirstVisit ? "初診" : "再診"}</span>
-            {revisitMode === "new_start" && <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-bold">新主訴優先</span>}
+      <header className="bg-white border-b shadow-sm">
+        {/* 医療安全アラートバー（アラートがある時のみ表示） */}
+        {profile?.safety_alerts && profile.safety_alerts.length > 0 && (
+          <div className="bg-red-50 border-b border-red-200 px-4 py-1 flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold text-red-600">⚠️ 医療安全</span>
+            {profile.safety_alerts.map((alert, i) => (
+              <span key={i} className="text-xs text-red-700 bg-white border border-red-300 px-2 py-0.5 rounded-full">{alert}</span>
+            ))}
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <div className="text-2xl font-bold text-blue-700">{totalPoints}<span className="text-sm text-gray-500 ml-1">点</span></div>
-            <div className="text-xs text-gray-500">({Math.round(totalPoints * 10)}円)</div>
+        )}
+        <div className="px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => router.back()} className="text-gray-400 hover:text-gray-600 text-lg">←</button>
+            <div>
+              <div className="flex items-center gap-2">
+                {/* 患者イニシャルアバター */}
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                  {(patient.name || "?").charAt(0)}
+                </div>
+                <span className="font-bold text-lg text-gray-900">{patient.name}</span>
+                <span className="text-sm text-gray-400">{age}歳</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isFirstVisit ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}>
+                  {isFirstVisit ? "初診" : "再診"}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{patient.insurance_type || "社保"}</span>
+                {revisitMode === "new_start" && (
+                  <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">⚡ 新主訴優先</span>
+                )}
+              </div>
+              {/* 来院日・担当医 */}
+              <div className="text-xs text-gray-400 mt-0.5 ml-10">
+                {appointment.appointment_date?.slice(0, 10)} &nbsp;•&nbsp;
+                {isFirstVisit ? `初診 / 過去来院なし` : `再診 / 過去${pastRecords.length}回`}
+              </div>
+            </div>
           </div>
-          {/* 算定確定ボタン → 最終確認ポップアップを開く */}
-          <button
-            onClick={openFinalizePopup}
-            disabled={(medicalRecord.structured_procedures || []).length === 0}
-            className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-              focusStep === "billing" && (medicalRecord.structured_procedures || []).length > 0
-                ? "bg-blue-600 text-white animate-pulse shadow-lg"
-                : (medicalRecord.structured_procedures || []).length > 0
-                ? "bg-blue-600 text-white hover:bg-blue-700"
-                : "bg-gray-200 text-gray-400 cursor-not-allowed"
-            }`}
-          >算定確定 →</button>
+          <div className="flex items-center gap-2">
+            {/* 歯周検査ボタン */}
+            <button
+              onClick={() => { setShowPerioFull(true); setPerioStep("pocket"); }}
+              className="px-4 py-2 rounded-lg text-sm font-bold bg-rose-500 text-white hover:bg-rose-600 shadow-sm"
+            >🦷 歯周検査</button>
+            {/* 点数表示 */}
+            <div className="text-right px-3">
+              <div className="text-2xl font-bold text-blue-700">{totalPoints}<span className="text-sm text-gray-400 ml-1">点</span></div>
+              <div className="text-xs text-gray-400">¥{Math.round(totalPoints * 10).toLocaleString()}</div>
+            </div>
+            {/* 算定確定ボタン */}
+            <button
+              onClick={openFinalizePopup}
+              disabled={(medicalRecord.structured_procedures || []).length === 0}
+              className={`px-5 py-2.5 rounded-lg font-bold text-sm transition-all ${
+                (medicalRecord.structured_procedures || []).length > 0
+                  ? "bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200"
+                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
+              } ${focusStep === "billing" && (medicalRecord.structured_procedures || []).length > 0 ? "animate-pulse" : ""}`}
+            >算定確定 →</button>
+          </div>
         </div>
       </header>
 
@@ -1733,26 +1760,42 @@ export default function ConsultationPage() {
         {/* ── 左カラム：患者情報 ＋ パーソナリティーチャート ── */}
         <div className="w-64 bg-white border-r flex flex-col overflow-y-auto shrink-0">
 
-          {/* 患者基本情報 */}
+          {/* ステータス確認（保険/服薬/既往歴） */}
           <div className="px-4 py-3 border-b">
-            <div className="text-xs text-gray-400 mb-1">患者情報</div>
-            <div className="font-bold text-gray-800">{patient.name}</div>
-            <div className="text-xs text-gray-500">{age}歳 / {appointment.appointment_date?.slice(0, 10)}</div>
-            <div className="text-xs text-gray-500 mt-1">
-              {isFirstVisit ? "🟢 初診" : "🔵 再診"}
-              {!isFirstVisit && pastRecords.length > 0 && ` / 過去${pastRecords.length}回`}
-            </div>
-            {medicalRecord.soap_s && (
-              <div className="mt-2 bg-blue-50 rounded-lg p-2">
-                <div className="text-xs font-bold text-blue-700 mb-1">主訴</div>
-                <div className="text-xs text-gray-700 line-clamp-3">{medicalRecord.soap_s.replace("【主訴】", "")}</div>
+            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">👤 ステータス確認</div>
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2">
+                <span className="text-[10px] text-gray-400 w-10 shrink-0 pt-0.5">保険</span>
+                <span className="text-xs font-bold text-gray-700">{patient.insurance_type || "社保"} / {Math.round((patient as { copay_rate?: number }).copay_rate ?? 3)}割負担</span>
               </div>
-            )}
+              {profile?.raw_medical_answers?.medication_names && (
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] text-gray-400 w-10 shrink-0 pt-0.5">服薬</span>
+                  <span className="text-xs text-gray-700">{profile.raw_medical_answers.medication_names}</span>
+                </div>
+              )}
+              {profile?.raw_medical_answers?.diseases && (profile.raw_medical_answers.diseases as string[]).filter(d => d !== "none").length > 0 && (
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] text-gray-400 w-10 shrink-0 pt-0.5">既往歴</span>
+                  <span className="text-xs text-gray-700">{(profile.raw_medical_answers.diseases as string[]).filter(d => d !== "none").join("、")}</span>
+                </div>
+              )}
+            </div>
           </div>
 
+          {/* 問診（主訴） */}
+          {medicalRecord.soap_s && (
+            <div className="px-4 py-3 border-b">
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">💬 問診（主訴）</div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
+                <p className="text-xs text-gray-700 leading-relaxed">「{medicalRecord.soap_s.replace("【主訴】", "").trim()}」</p>
+              </div>
+            </div>
+          )}
+
           {/* パーソナリティーチャート */}
-          <div className="px-4 py-3 border-b flex-1">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🧠 患者プロファイル</div>
+          <div className="px-4 py-3 flex-1">
+            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">🧠 患者プロファイル</div>
 
             {profile ? (
               <div className="space-y-3">
@@ -1763,62 +1806,18 @@ export default function ConsultationPage() {
                   </div>
                 )}
 
-                {/* 不安度 */}
-                {profile.anxiety_level && (
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">歯科不安度</div>
-                    <div className={`text-xs font-bold px-2 py-1 rounded-lg border inline-flex items-center gap-1 ${anxietyColor}`}>
-                      {profile.anxiety_level === "high" ? "😰" : profile.anxiety_level === "low" ? "😊" : "😐"}
-                      {profile.anxiety_label || profile.anxiety_level}
-                    </div>
-                  </div>
-                )}
-
-                {/* 自費提案適性 */}
-                {profile.jishu_potential && (
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">自費提案適性</div>
-                    <div className={`text-xs font-bold px-2 py-1 rounded-lg border inline-flex items-center gap-1 ${jishuColor}`}>
-                      {profile.jishu_potential === "high" ? "💎" : profile.jishu_potential === "low" ? "🏥" : "⚖️"}
-                      {profile.jishu_label || profile.jishu_potential}
-                    </div>
-                  </div>
-                )}
-
-                {/* コミュニケーションスタイル */}
-                {profile.comm_label && (
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">コミュニケーション</div>
-                    <div className="text-xs text-gray-700 bg-gray-50 rounded-lg px-2 py-1.5">
-                      {profile.comm_style === "detail" ? "📊" : profile.comm_style === "quick" ? "⚡" : "✅"}
-                      {" "}{profile.comm_label}
-                    </div>
-                  </div>
-                )}
+                {/* 六角形レーダーチャート */}
+                <HexRadarChart profile={profile} />
 
                 {/* スタッフ推奨アクション */}
                 {profile.action_tips && profile.action_tips.length > 0 && (
                   <div>
-                    <div className="text-xs text-gray-400 mb-1">スタッフへの推奨</div>
+                    <div className="text-[10px] text-gray-400 mb-1.5">スタッフへの推奨</div>
                     <div className="space-y-1">
                       {profile.action_tips.map((tip, i) => (
-                        <div key={i} className="text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 flex items-start gap-1">
-                          <span className="text-yellow-500 shrink-0">•</span>
-                          <span>{tip}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 医療安全アラート */}
-                {profile.safety_alerts && profile.safety_alerts.length > 0 && (
-                  <div>
-                    <div className="text-xs font-bold text-red-600 mb-1">⚠️ 医療安全アラート</div>
-                    <div className="space-y-1">
-                      {profile.safety_alerts.map((alert, i) => (
-                        <div key={i} className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
-                          {alert}
+                        <div key={i} className="text-xs text-gray-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-start gap-1.5">
+                          <span className="text-amber-500 shrink-0 mt-0.5">▸</span>
+                          <span className="leading-relaxed">{tip}</span>
                         </div>
                       ))}
                     </div>
@@ -1826,18 +1825,18 @@ export default function ConsultationPage() {
                 )}
               </div>
             ) : (
-              <div className="text-xs text-gray-400 text-center py-4">
-                <div className="text-2xl mb-2">🧠</div>
-                <p>問診票完了後に<br />プロファイルが表示されます</p>
+              <div className="text-xs text-gray-400 text-center py-6">
+                <div className="text-3xl mb-3">🧠</div>
+                <p className="leading-relaxed">問診票完了後に<br />プロファイルが表示されます</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* ── 右メインエリア ── */}
+        {/* ── 右メインエリア：中央（歯式・傷病名）＋右（処置記録常駐） ── */}
         <div className="flex flex-1 overflow-hidden">
 
-          {/* カルテ中央エリア */}
+          {/* 中央エリア（歯式チャート・傷病名・SOAP） */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
             {/* 過去カルテ */}
@@ -2049,8 +2048,72 @@ export default function ConsultationPage() {
             </div>
           </div>
 
+          {/* ── 処置記録 右カラム常駐 ── */}
+          <div className="w-72 bg-white border-l flex flex-col overflow-hidden shrink-0">
+            <div className="px-4 py-3 border-b flex items-center justify-between">
+              <h3 className="font-bold text-gray-700 text-sm">📋 処置記録</h3>
+              <div className="flex items-center gap-1">
+                <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科初診料（267点）を追加"); }} className="text-[10px] bg-green-50 text-green-600 px-1.5 py-0.5 rounded hover:bg-green-100">＋初診</button>
+                <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科再診料（58点）を追加"); }} className="text-[10px] bg-gray-50 text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-100">＋再診</button>
+                <button onClick={() => setPopup("diagnosis")} className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded hover:bg-blue-100">＋病名</button>
+              </div>
+            </div>
+
+            {/* 処置リスト */}
+            <div className="flex-1 overflow-y-auto px-3 py-2">
+              {(medicalRecord.structured_procedures || []).length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <div className="text-3xl mb-2">📝</div>
+                  <p className="text-xs">傷病名を確定すると<br/>処置記録が追加されます</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {(medicalRecord.structured_procedures || []).map((proc, i) => (
+                    <div key={proc.id} className="flex items-start justify-between bg-gray-50 rounded-lg px-2.5 py-2 group hover:bg-blue-50 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {proc.tooth && <span className="text-[10px] font-bold bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded">{proc.tooth}番</span>}
+                          <span className="text-[10px] text-gray-400 truncate">{proc.diagnosis_name}</span>
+                        </div>
+                        <p className="text-xs font-medium text-gray-800 truncate">{proc.procedure_name}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                        <span className="text-sm font-bold text-blue-700">{proc.points}</span>
+                        <span className="text-[10px] text-gray-400">点</span>
+                        <button onClick={async () => { const updated = (medicalRecord.structured_procedures || []).filter((_, j) => j !== i); await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev); }} className="text-gray-300 hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 合計・算定確定 */}
+            <div className="border-t p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-gray-500">合計</span>
+                <div className="text-right">
+                  <span className="text-2xl font-bold text-blue-700">{totalPoints}</span>
+                  <span className="text-xs text-gray-400 ml-1">点</span>
+                </div>
+              </div>
+              <div className="text-right text-xs text-gray-400 mb-3">
+                3割負担 ¥{Math.round(totalPoints * 10 * 0.3).toLocaleString()}
+              </div>
+              <button
+                onClick={openFinalizePopup}
+                disabled={(medicalRecord.structured_procedures || []).length === 0}
+                className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${
+                  (medicalRecord.structured_procedures || []).length > 0
+                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:opacity-90 shadow-md shadow-blue-200"
+                    : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                } ${focusStep === "billing" && (medicalRecord.structured_procedures || []).length > 0 ? "animate-pulse" : ""}`}
+              >算定確定 →</button>
+            </div>
+          </div>
+
           {/* アクションボタン */}
-          <div className="w-16 bg-white border-l flex flex-col items-center py-4 gap-3">
+          <div className="w-14 bg-white border-l flex flex-col items-center py-4 gap-3">
             {[
               { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
               { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio", fullscreen: true },
@@ -2211,6 +2274,111 @@ export default function ConsultationPage() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ==============================
+// 六角形レーダーチャート（パーソナリティービジュアライザー）
+// ==============================
+function HexRadarChart({ profile }: { profile: PersonalityProfile }) {
+  // 6軸の定義
+  const axes = [
+    { key: "anxiety",  label: "不安度",   getValue: () => profile.anxiety_level  === "high" ? 0.9 : profile.anxiety_level  === "low" ? 0.2 : 0.5 },
+    { key: "jishu",    label: "自費志向",  getValue: () => profile.jishu_potential === "high" ? 0.9 : profile.jishu_potential === "low" ? 0.2 : 0.5 },
+    { key: "explain",  label: "説明希望",  getValue: () => profile.comm_style === "detail" ? 0.85 : profile.comm_style === "quick" ? 0.2 : 0.55 },
+    { key: "talk",     label: "会話希望",  getValue: () => profile.comm_style === "detail" ? 0.7 : profile.comm_style === "quick" ? 0.25 : 0.5 },
+    { key: "quality",  label: "品質重視",  getValue: () => profile.jishu_potential === "high" ? 0.85 : profile.jishu_potential === "low" ? 0.3 : 0.55 },
+    { key: "speed",    label: "早期希望",  getValue: () => profile.comm_style === "quick" ? 0.8 : profile.comm_style === "detail" ? 0.3 : 0.5 },
+  ];
+
+  const SIZE = 120;
+  const CENTER = SIZE / 2;
+  const MAX_R = CENTER - 20;
+  const N = axes.length;
+
+  // 各軸の角度（上から時計回り）
+  const angleOf = (i: number) => (Math.PI * 2 * i) / N - Math.PI / 2;
+
+  // 六角形の外枠ポイント
+  const hexPoints = Array.from({ length: N }, (_, i) => {
+    const a = angleOf(i);
+    return [CENTER + MAX_R * Math.cos(a), CENTER + MAX_R * Math.sin(a)];
+  });
+
+  // データポイント
+  const dataPoints = axes.map((ax, i) => {
+    const r = ax.getValue() * MAX_R;
+    const a = angleOf(i);
+    return [CENTER + r * Math.cos(a), CENTER + r * Math.sin(a)];
+  });
+
+  const toPath = (pts: number[][]) => pts.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`).join(" ") + " Z";
+
+  // 目盛り線（25%・50%・75%）
+  const gridLevels = [0.25, 0.5, 0.75, 1.0];
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+        {/* グリッド */}
+        {gridLevels.map((level, li) => {
+          const pts = Array.from({ length: N }, (_, i) => {
+            const a = angleOf(i);
+            const r = level * MAX_R;
+            return [CENTER + r * Math.cos(a), CENTER + r * Math.sin(a)];
+          });
+          return (
+            <polygon key={li}
+              points={pts.map(p => p.join(",")).join(" ")}
+              fill="none"
+              stroke={level === 1.0 ? "#cbd5e1" : "#e2e8f0"}
+              strokeWidth={level === 1.0 ? 1.5 : 0.8}
+            />
+          );
+        })}
+
+        {/* 軸線 */}
+        {hexPoints.map(([x, y], i) => (
+          <line key={i} x1={CENTER} y1={CENTER} x2={x} y2={y} stroke="#e2e8f0" strokeWidth={0.8} />
+        ))}
+
+        {/* データ面 */}
+        <path d={toPath(dataPoints)} fill="rgba(99,102,241,0.15)" stroke="#6366f1" strokeWidth={1.5} />
+
+        {/* データポイント */}
+        {dataPoints.map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r={2.5} fill="#6366f1" />
+        ))}
+
+        {/* 軸ラベル */}
+        {hexPoints.map(([x, y], i) => {
+          const ax = angleOf(i);
+          const lx = CENTER + (MAX_R + 13) * Math.cos(ax);
+          const ly = CENTER + (MAX_R + 13) * Math.sin(ax);
+          return (
+            <text key={i} x={lx} y={ly}
+              textAnchor="middle" dominantBaseline="central"
+              fontSize="7" fill="#94a3b8" fontWeight="600">
+              {axes[i].label}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* 凡例バッジ */}
+      <div className="flex flex-wrap justify-center gap-1.5 mt-1">
+        {[
+          { label: profile.anxiety_label || "不安度", level: profile.anxiety_level,
+            color: profile.anxiety_level === "high" ? "bg-red-100 text-red-700" : profile.anxiety_level === "low" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700" },
+          { label: profile.jishu_label || "自費",   level: profile.jishu_potential,
+            color: profile.jishu_potential === "high" ? "bg-blue-100 text-blue-700" : profile.jishu_potential === "low" ? "bg-gray-100 text-gray-600" : "bg-indigo-100 text-indigo-700" },
+          { label: profile.comm_label || "説明",    level: profile.comm_style,
+            color: "bg-purple-100 text-purple-700" },
+        ].map((b, i) => (
+          <span key={i} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${b.color}`}>{b.label}</span>
+        ))}
       </div>
     </div>
   );
