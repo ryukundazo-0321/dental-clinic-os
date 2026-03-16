@@ -2087,7 +2087,7 @@ export default function ConsultationPage() {
           {/* アクションボタン */}
           <div className="w-14 bg-white border-l flex flex-col items-center py-4 gap-3">
             {[
-              { type: "photo" as PopupType, icon: "📸", label: "写真", step: "photo" },
+              // 写真ボタンは歯式チャート右の📷ボタンに統合済みのため削除
               { type: "perio" as PopupType, icon: "🦷", label: "P検", step: "perio", fullscreen: true },
               { type: "voice" as PopupType, icon: "🎙", label: "録音", step: "voice" },
               { type: "diagnosis" as PopupType, icon: "🔍", label: "病名", step: "diagnosis" },
@@ -2108,12 +2108,11 @@ export default function ConsultationPage() {
             ))}
           </div>
 
-          {/* ポップアップパネル */}
-          {popup && (
+          {/* ポップアップパネル（写真はページ上の📷ボタンに統合済み） */}
+          {popup && popup !== "photo" && (
             <div className="w-80 bg-white border-l shadow-lg overflow-y-auto">
               <div className="flex items-center justify-between px-4 py-3 border-b">
                 <h3 className="font-medium text-gray-700">
-                  {popup === "photo" && "📸 写真・レントゲン"}
                   {popup === "perio" && "🦷 歯周検査（P検）"}
                   {popup === "voice" && "🎙 音声録音"}
                   {popup === "diagnosis" && "🔍 傷病名選択"}
@@ -2123,41 +2122,6 @@ export default function ConsultationPage() {
                 <button onClick={() => setPopup(null)} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
               <div className="p-4">
-                {popup === "photo" && (
-                  <div className="space-y-4">
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                      {photoLoading ? (
-                        <div><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-2" /><p className="text-sm text-gray-500">AI解析中...</p></div>
-                      ) : (
-                        <><div className="text-4xl mb-2">📸</div><p className="text-sm text-gray-600 mb-3">レントゲン・口腔内写真をアップロード</p>
-                        <label className="cursor-pointer bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700">ファイル選択<input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} /></label></>
-                      )}
-                    </div>
-                    {xraySummary && <div className="bg-purple-50 border border-purple-200 rounded-lg p-3"><p className="text-xs font-medium text-purple-700 mb-1">📋 全体所見</p><p className="text-xs text-gray-700">{xraySummary}</p></div>}
-                    {xrayNotableFindings.length > 0 && <div className="bg-orange-50 border border-orange-200 rounded-lg p-3"><p className="text-xs font-medium text-orange-700 mb-1">⚠️ 重要所見</p>{xrayNotableFindings.map((nf, i) => <p key={i} className="text-xs text-gray-700">・{nf}</p>)}</div>}
-                    {aiToothFindings.length > 0 && (
-                      <div>
-                        <h4 className="font-medium text-sm mb-2">歯別AI所見</h4>
-                        <div className="space-y-2">
-                          {aiToothFindings.map((f, i) => (
-                            <div key={i} className="border rounded p-2 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-sm">{f.tooth}番</span>
-                                  <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{f.suggestedDiagnosis || f.finding}</span>
-                                  <span className="text-xs text-gray-400">{Math.round((f.confidence || 0) * 100)}%</span>
-                                </div>
-                                <button onClick={() => applyAiFindings(i)} className="bg-purple-600 text-white text-xs px-2 py-1 rounded">反映</button>
-                              </div>
-                              {f.detail && <p className="text-xs text-gray-600 pl-1">└ {f.detail}</p>}
-                            </div>
-                          ))}
-                          <button onClick={applyAllAiFindings} className="w-full bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700">一括反映</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {popup === "voice" && (
                   <div className="space-y-4 text-center">
