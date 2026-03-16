@@ -1836,203 +1836,177 @@ export default function ConsultationPage() {
         {/* ── 右メインエリア：中央（歯式・傷病名）＋右（処置記録常駐） ── */}
         <div className="flex flex-1 overflow-hidden">
 
-          {/* 中央エリア（歯式チャート・傷病名・SOAP） */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* ── 中央エリア（モックアップ準拠レイアウト） ── */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
 
-            {/* 過去カルテ */}
-            {pastRecords.length > 0 && !isFirstVisit && (
-              <div className="bg-white rounded-lg border">
-                <button onClick={() => setShowPastRecords(!showPastRecords)} className="w-full px-4 py-3 text-left flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50">
-                  <span>📋 過去カルテ（{pastRecords.length}件）</span>
-                  <span>{showPastRecords ? "▲" : "▼"}</span>
-                </button>
-                {showPastRecords && (
-                  <div className="px-4 pb-3 space-y-2">
-                    {pastRecords.map((pr) => (
-                      <div key={pr.id} className="border-l-2 border-gray-200 pl-3 py-1">
-                        <div className="text-xs text-gray-500">{new Date(pr.soap_s || "").toLocaleDateString("ja-JP")}</div>
-                        <div className="text-sm">{pr.soap_s?.slice(0, 80) || "記録なし"}</div>
-                        {(pr.structured_procedures || []).slice(0, 3).map((p, i) => (
-                          <span key={i} className="text-xs bg-gray-100 text-gray-600 px-1 py-0.5 rounded mr-1">{p.procedure_name}</span>
-                        ))}
-                      </div>
-                    ))}
+            {/* ① 口腔状態エリア：歯式チャート ＋ 右に写真・録音ボタン */}
+            <div className="bg-white rounded-xl border p-4 flex gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-bold text-gray-800 text-sm">🦷 最初の口腔状態（歯式チャート）</h3>
+                  <span className="text-[10px] text-gray-400">タップして状態変更</span>
+                </div>
+                {medicalRecord.previous_tooth_chart && (
+                  <div className="mb-2">
+                    <div className="text-[10px] text-gray-400 mb-1">前回</div>
+                    <ToothChart chart={medicalRecord.previous_tooth_chart} dim onToothClick={() => {}} editingTooth={null} onSetStatus={() => {}} />
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* 歯式チャート */}
-            <div className="bg-white rounded-lg border p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-gray-700">🦷 歯式チャート</h3>
-                <span className="text-xs text-gray-400">タップして状態変更</span>
-              </div>
-              {medicalRecord.previous_tooth_chart && (
-                <div className="mb-2">
-                  <div className="text-xs text-gray-400 mb-1">前回</div>
-                  <ToothChart chart={medicalRecord.previous_tooth_chart} dim onToothClick={() => {}} editingTooth={null} onSetStatus={() => {}} />
-                </div>
-              )}
-              <div>
-                <div className="text-xs text-gray-500 mb-1">今回</div>
                 <ToothChart chart={toothChartDraft} dim={false} onToothClick={handleToothClick} editingTooth={editingTooth} onSetStatus={setToothStatus} />
               </div>
+              {/* 写真・録音ボタン（右縦並び） */}
+              <div className="flex flex-col gap-3 shrink-0 justify-center">
+                {voiceLoading ? (
+                  <div className="w-20 h-20 rounded-xl bg-blue-50 border-2 border-blue-200 flex flex-col items-center justify-center">
+                    <span className="text-2xl animate-spin">⏳</span>
+                    <span className="text-[10px] text-blue-500 mt-1">解析中</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`w-20 h-20 rounded-xl border-2 flex flex-col items-center justify-center transition-all shadow-sm ${isRecording ? "bg-red-500 border-red-500 text-white animate-pulse" : "bg-gray-50 border-gray-300 hover:border-gray-400 hover:bg-gray-100 text-gray-600"}`}
+                  >
+                    <span className="text-3xl">🎙</span>
+                    <span className="text-[10px] font-bold mt-1">{isRecording ? `${Math.floor(recordingSeconds/60).toString().padStart(2,"0")}:${(recordingSeconds%60).toString().padStart(2,"0")}` : "録音"}</span>
+                  </button>
+                )}
+                <label className={`w-20 h-20 rounded-xl border-2 flex flex-col items-center justify-center cursor-pointer transition-all shadow-sm ${photoLoading ? "bg-purple-50 border-purple-200" : "bg-gray-50 border-gray-300 hover:border-gray-400 hover:bg-gray-100 text-gray-600"}`}>
+                  {photoLoading ? (<><span className="text-xl animate-spin">⏳</span><span className="text-[10px] text-purple-500 mt-1">解析中</span></>) : (<><span className="text-3xl">📷</span><span className="text-[10px] font-bold mt-1 text-gray-600">写真</span></>)}
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} disabled={photoLoading} />
+                </label>
+              </div>
             </div>
 
-            {/* 傷病歯式チャート */}
-            <div className="bg-white rounded-lg border p-4">
+            {/* ② 傷病名エリア */}
+            <div className="bg-white rounded-xl border p-4">
               <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="font-medium text-gray-700">🗺 傷病歯式チャート</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">歯にホバーでステータス変更</p>
-                </div>
-                {confirmedDiagnosesList.length > 0 && (
-                  <button
-                    onClick={() => {
-                      const draft = confirmedDiagnosesList.map((d, i) => ({
-                        sessionNo: i + 1, teeth: [d.tooth].filter(Boolean), diagnoses: [d],
-                        label: `第${i + 1}回: ${d.tooth ? `${d.tooth}番 ` : ""}${d.name}`,
-                      }));
-                      setScheduleDraft(draft); setShowSchedulePopup(true);
-                    }}
-                    className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700"
-                  >📅 治療スケジュールを組む</button>
-                )}
-              </div>
-              <div className="flex gap-4">
-                <div className="flex-1 min-w-0">
-                  {pastPatientDiagnoses.length > 0 && (
-                    <div className="mb-3">
-                      <p className="text-xs text-gray-400 mb-1">前回</p>
-                      <DiagnosisToothChart patientDiagnoses={pastPatientDiagnoses} pastDiagnoses={[]} predictedDiagnoses={[]} todayTeeth={[]} scheduleConfirmed={false} />
-                    </div>
+                <h3 className="font-bold text-gray-800">📋 傷病名</h3>
+                <div className="flex items-center gap-2">
+                  {confirmedDiagnosesList.length > 0 && (
+                    <button onClick={() => { const draft = confirmedDiagnosesList.map((d, i) => ({ sessionNo: i + 1, teeth: [d.tooth].filter(Boolean), diagnoses: [d], label: `第${i + 1}回: ${d.tooth ? `${d.tooth}番 ` : ""}${d.name}` })); setScheduleDraft(draft); setShowSchedulePopup(true); }} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded-lg hover:bg-indigo-700">📅 スケジュール</button>
                   )}
-                  <div>
-                    {pastPatientDiagnoses.length > 0 && <p className="text-xs text-gray-500 mb-1">今回</p>}
-                    <DiagnosisToothChart
-                      patientDiagnoses={patientDiagnoses}
-                      pastDiagnoses={pastPatientDiagnoses}
-                      predictedDiagnoses={[
-                        ...(medicalRecord?.predicted_diagnoses || []).filter((pd: PredictedDiagnosis) => pd.tooth && !patientDiagnoses.some(d => d.tooth_number === pd.tooth)).map((pd: PredictedDiagnosis) => ({ tooth: pd.tooth || "", code: pd.code, name: pd.name, short: pd.short || pd.code, confidence: pd.confidence, reason: "予測" })),
-                        ...detectedDiagnoses.filter(d => d.tooth && !patientDiagnoses.some(p => p.tooth_number === d.tooth)).map(d => ({ tooth: d.tooth, code: d.code, name: d.name, short: d.short || d.code, confidence: d.confidence, reason: d.reason })),
-                      ]}
-                      todayTeeth={todayTeeth}
-                      scheduleConfirmed={scheduleConfirmed}
-                      onStatusChange={updateDiagnosisStatus}
-                      toothChart={toothChartDraft}
-                      onToothClick={(tooth) => { const existing = patientDiagnoses.find(d => d.tooth_number === String(tooth)); if (existing) return; setPopup("diagnosis"); addLog(`🦷 ${tooth}番 傷病名追加`); }}
-                    />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {confirmedDiagnosesList.map((d, i) => (
-                        <div key={i} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${todayTeeth.includes(d.tooth) ? "bg-indigo-100 border-indigo-400 text-indigo-800" : "bg-gray-50 border-gray-200 text-gray-600"}`}>
-                          <span>{d.tooth ? `${d.tooth}番` : ""} {d.name}</span>
-                          {todayTeeth.includes(d.tooth) && <span className="text-indigo-600 font-bold">今日</span>}
-                        </div>
-                      ))}
-                    </div>
-                    {scheduleConfirmed && todayTeeth.length > 0 && (
-                      <div className="mt-4 border-t pt-3">
-                        <p className="text-xs text-gray-500 mb-2">今日治療する歯をタップして治療パターンを選択してください：</p>
-                        <div className="flex flex-wrap gap-2">
-                          {confirmedDiagnosesList.filter(d => todayTeeth.includes(d.tooth)).map((d, i) => (
-                            <button key={i} onClick={async () => { setConfirmedDiagnosis(d as DetectedDiagnosis); await fetchTreatmentPatterns(d.short || d.code); addLog(`🦷 ${d.tooth}番 ${d.name} の治療パターンを表示`); }} className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-sm flex items-center gap-2">
-                              <span className="font-bold">{d.tooth}番</span>
-                              <span>{d.name}</span>
-                              <span className="text-indigo-200 text-xs">→ 治療パターン</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-lg hover:bg-blue-100 border border-blue-200">＋ 病名追加</button>
                 </div>
+              </div>
 
-                {/* 録音ボタン */}
-                <div className="w-52 shrink-0 flex flex-col items-center gap-3">
-                  {voiceLoading ? (
-                    <div className="w-24 h-24 rounded-full bg-blue-100 border-4 border-blue-300 flex flex-col items-center justify-center">
-                      <span className="text-2xl animate-spin">⏳</span>
-                      <span className="text-xs text-blue-500 mt-1">解析中</span>
+              {/* 傷病歯式チャート */}
+              <div className="mb-3">
+                {pastPatientDiagnoses.length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-[10px] text-gray-400 mb-1">前回</p>
+                    <DiagnosisToothChart patientDiagnoses={pastPatientDiagnoses} pastDiagnoses={[]} predictedDiagnoses={[]} todayTeeth={[]} scheduleConfirmed={false} />
+                  </div>
+                )}
+                <DiagnosisToothChart
+                  patientDiagnoses={patientDiagnoses}
+                  pastDiagnoses={pastPatientDiagnoses}
+                  predictedDiagnoses={[
+                    ...(medicalRecord?.predicted_diagnoses || []).filter((pd: PredictedDiagnosis) => pd.tooth && !patientDiagnoses.some(d => d.tooth_number === pd.tooth)).map((pd: PredictedDiagnosis) => ({ tooth: pd.tooth || "", code: pd.code, name: pd.name, short: pd.short || pd.code, confidence: pd.confidence, reason: "予測" })),
+                    ...detectedDiagnoses.filter(d => d.tooth && !patientDiagnoses.some(p => p.tooth_number === d.tooth)).map(d => ({ tooth: d.tooth, code: d.code, name: d.name, short: d.short || d.code, confidence: d.confidence, reason: d.reason })),
+                  ]}
+                  todayTeeth={todayTeeth}
+                  scheduleConfirmed={scheduleConfirmed}
+                  onStatusChange={updateDiagnosisStatus}
+                  toothChart={toothChartDraft}
+                  onToothClick={(tooth) => { const existing = patientDiagnoses.find(d => d.tooth_number === String(tooth)); if (existing) return; setPopup("diagnosis"); addLog(`🦷 ${tooth}番 傷病名追加`); }}
+                />
+              </div>
+
+              {/* 確定傷病名バッジ */}
+              {confirmedDiagnosesList.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {confirmedDiagnosesList.map((d, i) => (
+                    <div key={i} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border font-medium ${todayTeeth.includes(d.tooth) ? "bg-indigo-100 border-indigo-400 text-indigo-800" : "bg-gray-50 border-gray-200 text-gray-600"}`}>
+                      {d.tooth && <span className="font-bold">{d.tooth}番</span>}
+                      <span>{d.name}</span>
+                      {todayTeeth.includes(d.tooth) && <span className="text-indigo-500 text-[9px] font-bold ml-0.5">TODAY</span>}
                     </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 音声入力エリア（傷病名） */}
+              <div className={`rounded-xl border-2 p-4 flex items-center gap-4 transition-all ${isRecording ? "border-red-300 bg-red-50" : "border-dashed border-gray-300 bg-gray-50"}`}>
+                {voiceLoading ? (
+                  <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center shrink-0"><span className="text-2xl animate-spin">⏳</span></div>
+                ) : (
+                  <button onClick={isRecording ? stopRecording : startRecording}
+                    className={`w-16 h-16 rounded-full border-4 flex flex-col items-center justify-center transition-all shrink-0 ${isRecording ? "bg-red-500 border-red-600 text-white animate-pulse" : "bg-white border-gray-300 hover:border-red-400 text-gray-500"}`}>
+                    <span className="text-2xl">🎙</span>
+                    <span className="text-[9px] font-bold mt-0.5">{isRecording ? `${Math.floor(recordingSeconds/60).toString().padStart(2,"0")}:${(recordingSeconds%60).toString().padStart(2,"0")}` : "録音"}</span>
+                  </button>
+                )}
+                <div className="flex-1">
+                  {isRecording ? (
+                    <p className="text-sm font-bold text-red-600 animate-pulse">録音中… 話し終えたら止めてください</p>
+                  ) : transcript ? (
+                    <div><p className="text-xs text-gray-400 mb-1">最後の文字起こし</p><p className="text-sm text-gray-700">{transcript}</p></div>
                   ) : (
-                    <button
-                      onClick={isRecording ? stopRecording : startRecording}
-                      className={`w-24 h-24 rounded-full border-4 flex flex-col items-center justify-center transition-all shadow-lg ${isRecording ? "bg-red-500 border-red-600 animate-pulse shadow-red-300 text-white" : "bg-white border-gray-300 hover:border-red-400 hover:bg-red-50 text-gray-600"}`}
-                    >
-                      <span className="text-3xl">🎙</span>
-                      <span className="text-xs font-medium mt-1">
-                        {isRecording ? `${Math.floor(recordingSeconds / 60).toString().padStart(2,"0")}:${(recordingSeconds % 60).toString().padStart(2,"0")}` : "録音"}
-                      </span>
-                    </button>
+                    <div><p className="text-sm font-bold text-gray-600">（音声で傷病名を入力）</p><p className="text-xs text-gray-400 mt-0.5">「〇〇番の〇〇を本日治療…」の形式で話してください</p></div>
                   )}
                   {showVoiceConfirm && voiceConfirmList.length > 0 && (
-                    <div className="w-full bg-yellow-50 border border-yellow-300 rounded-xl p-3 space-y-2">
-                      <p className="text-xs font-medium text-yellow-800">以下を確定しますか？</p>
+                    <div className="mt-2 space-y-1">
                       {voiceConfirmList.map((d, i) => (
-                        <div key={i} className="flex items-center justify-between bg-white border border-yellow-200 rounded-lg px-2 py-1.5">
-                          <div className="flex-1 min-w-0">{d.tooth && <span className="font-bold text-gray-800 text-xs">{d.tooth}番 </span>}<span className="text-xs text-gray-700">{d.name}</span></div>
-                          <button onClick={() => setVoiceConfirmList(prev => prev.filter((_, idx) => idx !== i))} className="text-gray-300 hover:text-red-400 ml-1 leading-none shrink-0">✕</button>
+                        <div key={i} className="flex items-center justify-between bg-white border border-yellow-300 rounded-lg px-2 py-1">
+                          <span className="text-xs">{d.tooth && <strong>{d.tooth}番 </strong>}{d.name}</span>
+                          <button onClick={() => setVoiceConfirmList(prev => prev.filter((_, idx) => idx !== i))} className="text-gray-300 hover:text-red-400 text-xs ml-2">✕</button>
                         </div>
                       ))}
-                      <div className="flex gap-2 pt-1">
-                        <button onClick={() => { setShowVoiceConfirm(false); setVoiceConfirmList([]); }} className="flex-1 py-1.5 rounded-lg border border-gray-300 text-gray-500 text-xs hover:bg-gray-50">キャンセル</button>
-                        <button onClick={async () => { for (const d of voiceConfirmList) { await confirmDiagnosis(d); } setShowVoiceConfirm(false); setVoiceConfirmList([]); }} className="flex-1 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-700">✅ OK</button>
+                      <div className="flex gap-2 mt-1">
+                        <button onClick={() => { setShowVoiceConfirm(false); setVoiceConfirmList([]); }} className="flex-1 py-1 rounded-lg border text-gray-500 text-xs">キャンセル</button>
+                        <button onClick={async () => { for (const d of voiceConfirmList) { await confirmDiagnosis(d); } setShowVoiceConfirm(false); setVoiceConfirmList([]); }} className="flex-1 py-1 rounded-lg bg-green-600 text-white text-xs font-bold">✅ OK</button>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* 処置記録 */}
-            <div className="bg-white rounded-lg border p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-gray-700">📋 処置記録</h3>
-                <div className="flex items-center gap-2">
-                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科初診料（267点）を追加"); }} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded hover:bg-green-100">＋初診料</button>
-                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科再診料（58点）を追加"); }} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded hover:bg-gray-100">＋再診料</button>
-                  <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100">+ 傷病名追加</button>
-                </div>
-              </div>
-              {(medicalRecord.structured_procedures || []).length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
-                  <div className="text-3xl mb-2">📝</div>
-                  <p className="text-sm">傷病名を確定すると処置記録が追加されます</p>
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead><tr className="text-xs text-gray-500 border-b"><th className="text-left pb-2 w-12">歯番</th><th className="text-left pb-2">傷病名</th><th className="text-left pb-2">処置</th><th className="text-right pb-2 w-16">点数</th><th className="w-8"></th></tr></thead>
-                  <tbody>
-                    {(medicalRecord.structured_procedures || []).map((proc, i) => (
-                      <tr key={proc.id} className="border-b last:border-0 hover:bg-gray-50">
-                        <td className="py-2 font-medium">{proc.tooth || "-"}</td>
-                        <td className="py-2 text-gray-600">{proc.diagnosis_name}</td>
-                        <td className="py-2">{proc.procedure_name}</td>
-                        <td className="py-2 text-right font-medium text-blue-700">{proc.points}</td>
-                        <td className="py-2">
-                          <button onClick={async () => { const updated = (medicalRecord.structured_procedures || []).filter((_, j) => j !== i); await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev); }} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
-                        </td>
-                      </tr>
+              {/* スケジュール確定後：今日の治療ボタン */}
+              {scheduleConfirmed && todayTeeth.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <p className="text-xs text-gray-500 mb-2">今日治療する歯：</p>
+                  <div className="flex flex-wrap gap-2">
+                    {confirmedDiagnosesList.filter(d => todayTeeth.includes(d.tooth)).map((d, i) => (
+                      <button key={i} onClick={async () => { setConfirmedDiagnosis(d as DetectedDiagnosis); await fetchTreatmentPatterns(d.short || d.code); addLog(`🦷 ${d.tooth}番 ${d.name} の治療パターンを表示`); }}
+                        className="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-indigo-700 flex items-center gap-1">
+                        <span className="font-bold">{d.tooth}番</span><span>{d.name}</span>
+                      </button>
                     ))}
-                  </tbody>
-                  <tfoot><tr className="border-t"><td colSpan={3} className="pt-2 text-right text-sm text-gray-500">合計</td><td className="pt-2 text-right font-bold text-lg text-blue-700">{totalPoints}</td><td></td></tr></tfoot>
-                </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 次回以降のスケジュール（確定後に常時表示） */}
+              {treatmentSchedule.length > 1 && (
+                <div className="mt-4 border-t pt-3">
+                  <p className="text-xs font-bold text-gray-500 mb-2">📅 次回以降のスケジュール</p>
+                  <div className="space-y-2">
+                    {treatmentSchedule.slice(1).map((s, i) => (
+                      <div key={i} className="bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
+                        <div className="text-xs font-bold text-indigo-700 mb-1">第{s.sessionNo}回</div>
+                        {s.diagnoses.map((d, j) => <div key={j} className="text-xs text-gray-600">{d.tooth ? `${d.tooth}番 ` : ""}{d.name}</div>)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 
-            {/* SOAP */}
-            <div className="bg-white rounded-lg border">
-              <button onClick={() => setShowSoap(!showSoap)} className="w-full px-4 py-3 text-left flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50">
+            {/* ③ SOAP */}
+            <div className="bg-white rounded-xl border">
+              <button onClick={() => setShowSoap(!showSoap)} className="w-full px-4 py-3 text-left flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-xl">
                 <span>📄 SOAP（サブカルテ）</span>
-                <span>{showSoap ? "▲" : "▼"}</span>
+                <span className="text-gray-400">{showSoap ? "▲" : "▼"}</span>
               </button>
               {showSoap && (
-                <div className="px-4 pb-4 space-y-3">
+                <div className="px-4 pb-4 space-y-3 border-t">
                   {(["soap_s", "soap_o", "soap_a", "soap_p"] as const).map((field) => (
-                    <div key={field}>
-                      <label className="text-xs font-medium text-gray-500 uppercase">{field.replace("soap_", "")}</label>
-                      <textarea className="w-full mt-1 border rounded p-2 text-sm resize-none" rows={2} value={medicalRecord[field] || ""} onChange={(e) => setMedicalRecord((prev) => prev ? { ...prev, [field]: e.target.value } : prev)} onBlur={(e) => updateSoap(field, e.target.value)} />
+                    <div key={field} className="mt-3">
+                      <label className="text-xs font-bold text-gray-400 uppercase">{field.replace("soap_", "")}</label>
+                      <textarea className="w-full mt-1 border rounded-lg p-2 text-sm resize-none focus:outline-none focus:border-blue-400" rows={2}
+                        value={medicalRecord[field] || ""}
+                        onChange={(e) => setMedicalRecord((prev) => prev ? { ...prev, [field]: e.target.value } : prev)}
+                        onBlur={(e) => updateSoap(field, e.target.value)} />
                     </div>
                   ))}
                 </div>
@@ -2040,10 +2014,10 @@ export default function ConsultationPage() {
             </div>
 
             {/* 記録ログ */}
-            <div className="bg-white rounded-lg border p-4">
-              <h3 className="font-medium text-gray-700 mb-2 text-sm">🕐 記録</h3>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {activityLog.length === 0 ? <p className="text-xs text-gray-400">記録はありません</p> : activityLog.map((log, i) => <div key={i} className="text-xs text-gray-600">{log}</div>)}
+            <div className="bg-white rounded-xl border p-3">
+              <h3 className="font-bold text-gray-400 mb-2 text-xs uppercase tracking-wider">🕐 記録</h3>
+              <div className="space-y-1 max-h-28 overflow-y-auto">
+                {activityLog.length === 0 ? <p className="text-xs text-gray-400">記録はありません</p> : activityLog.map((log, i) => <div key={i} className="text-xs text-gray-500">{log}</div>)}
               </div>
             </div>
           </div>
