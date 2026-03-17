@@ -484,11 +484,14 @@ export default function PatientDetailPage() {
 
       <main className="max-w-screen-2xl mx-auto px-4 py-4">
 
-        {/* ===== 上段：全顎チャート ＋ 右サイドパネル ===== */}
-        <div className="flex gap-4 mb-4">
+        {/* ===== メインレイアウト：左（チャート＋カルテ）＋ 右（未処置歯・タスク他） ===== */}
+        <div className="flex gap-4 items-start">
+
+          {/* 左メインカラム（全顎チャート＋カルテ履歴） */}
+          <div className="flex-1 flex flex-col gap-4">
 
           {/* 全顎チャート */}
-          <div className="flex-1 bg-white rounded-xl border border-gray-200 p-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-bold text-gray-900">● 全顎チャート</h2>
               <div className="flex items-center gap-3">
@@ -627,11 +630,10 @@ export default function PatientDetailPage() {
             })()}
           </div>
 
-          {/* 右サイドパネル（モックアップ準拠：未処置歯リスト常時表示 ＋ ボタン3つ） */}
-          <div className="w-80 shrink-0 flex flex-col gap-3">
 
-            {/* 未処置歯リスト（常時展開） */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden flex-1">
+          {/* 右サイドカラム（未処置歯リスト＋タスク他） */}
+          <div className="w-64 shrink-0 flex flex-col gap-3">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-gray-800">📋 未処置歯リスト</span>
@@ -687,8 +689,7 @@ export default function PatientDetailPage() {
                 </div>
               </div>
             </div>
-
-            {/* タスク一覧・書類・チャット（モックアップ通りボタン形式） */}
+            {/* タスク・書類・チャット（同じ右サイドカラム内） */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
                 <span className="text-sm font-bold text-gray-800">✅ タスク一覧</span>
@@ -764,10 +765,8 @@ export default function PatientDetailPage() {
               </button>
             </div>
           </div>
-        </div>
-
-        {/* ===== 下段：カルテ履歴 ===== */}
-        <div className="bg-white rounded-xl border border-gray-200">
+            {/* ===== カルテ履歴（左メインカラム2つ目） ===== */}
+            <div className="bg-white rounded-xl border border-gray-200">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">📋 カルテ履歴</h2>
             {/* 傷病名管理タブ */}
@@ -1039,8 +1038,10 @@ export default function PatientDetailPage() {
                 </div>
               );
             })}
-          </div>
-        </div>
+          </div>  {/* カルテ履歴終了 */}
+          </div>  {/* 左メインカラム終了 */}
+          </div>  {/* 右サイドカラム終了 */}
+        </div>  {/* メインflex終了 */}
       </main>
 
       {/* ===== 患者基本情報モーダル ===== */}
