@@ -484,11 +484,11 @@ export default function PatientDetailPage() {
 
       <main className="max-w-screen-2xl mx-auto px-4 py-4">
 
-        {/* ===== メインレイアウト：左（チャート＋カルテ）＋ 右（未処置歯・タスク他） ===== */}
+        {/* ===== メインレイアウト（モックアップ準拠） ===== */}
         <div className="flex gap-4 items-start">
 
-          {/* 左メインカラム（全顎チャート＋カルテ履歴） */}
-          <div className="flex-1 flex flex-col gap-4">
+          {/* 左カラム：全顎チャート ＋ カルテ履歴 */}
+          <div className="flex-1 min-w-0 flex flex-col gap-4">
 
           {/* 全顎チャート */}
           <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -630,144 +630,8 @@ export default function PatientDetailPage() {
             })()}
           </div>
 
-
-          {/* 右サイドカラム（未処置歯リスト＋タスク他） */}
-          <div className="w-64 shrink-0 flex flex-col gap-3">
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-gray-800">📋 未処置歯リスト</span>
-                  {untreatedDiagnoses.length > 0 && (
-                    <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untreatedDiagnoses.length}歯</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                {untreatedDiagnoses.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-xs text-gray-400">未処置歯はありません</div>
-                ) : (
-                  <div className="divide-y divide-gray-50">
-                    {untreatedDiagnoses.map(d => {
-                      const current = d.session_current || 0;
-                      const total = d.session_total || 1;
-                      const pct = Math.round((current / total) * 100);
-                      const isActive = tc[d.tooth_number||""]?.status === "in_treatment";
-                      return (
-                        <div key={d.id} className={`px-4 py-3 ${isActive ? "bg-orange-50" : ""}`}>
-                          <div className="flex items-start justify-between mb-1.5">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {d.tooth_number && (
-                                <span className="text-[11px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{d.tooth_number}番</span>
-                              )}
-                              <span className="text-xs font-bold text-gray-800">{d.diagnosis_name}</span>
-                            </div>
-                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${isActive ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>
-                              {isActive ? "治療中" : "計画中"}
-                            </span>
-                          </div>
-                          {total > 1 ? (
-                            <div className="flex items-center gap-2 mt-1">
-                              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="text-[9px] text-gray-400 shrink-0">{current}/{total}回</span>
-                            </div>
-                          ) : (
-                            <p className="text-[10px] text-gray-400 mt-0.5">
-                              {current === 0 ? "未開始" : `第${current}回`} / 全{total}回予定
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="px-4 py-3 border-t border-gray-100">
-                  <button className="w-full text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-lg transition-colors">
-                    ＋ 治療計画書作成
-                  </button>
-                </div>
-              </div>
-            </div>
-            {/* タスク・書類・チャット（同じ右サイドカラム内） */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
-                <span className="text-sm font-bold text-gray-800">✅ タスク一覧</span>
-                <span className="text-gray-400">›</span>
-              </button>
-
-              {/* 書類・資料（展開式） */}
-              <div className="border-t border-gray-100">
-                <button onClick={() => setShowDocPanel(!showDocPanel)}
-                  className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-gray-800">📄 書類・資料</span>
-                    {images.length > 0 && <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{images.length}</span>}
-                  </div>
-                  <span className="text-gray-400">{showDocPanel ? "▼" : "›"}</span>
-                </button>
-                {showDocPanel && (
-                  <div className="border-b border-gray-100">
-                    <div className="px-4 py-3 border-b border-gray-50">
-                      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-lg p-3 cursor-pointer hover:border-sky-400 hover:bg-sky-50 transition-all text-xs text-gray-500">
-                        <span>{imgLoading ? "⏳ アップロード中..." : "📤 画像をアップロード"}</span>
-                        <input type="file" accept="image/*" className="hidden" disabled={imgLoading}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0]; if (!file) return;
-                            setImgLoading(true);
-                            const formData = new FormData();
-                            formData.append("file", file); formData.append("patient_id", pid); formData.append("image_type", "panorama");
-                            const res = await fetch("/api/image-upload", { method: "POST", body: formData });
-                            const data = await res.json();
-                            if (data.success) await fetchData(); else alert("アップロード失敗: " + data.error);
-                            setImgLoading(false); e.target.value = "";
-                          }} />
-                      </label>
-                    </div>
-                    <div className="max-h-40 overflow-y-auto divide-y divide-gray-50">
-                      {images.length === 0 ? (
-                        <div className="px-4 py-4 text-center text-xs text-gray-400">画像はまだありません</div>
-                      ) : images.map(img => {
-                        const pubUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL||""}/storage/v1/object/public/patient-images/${img.storage_path}`;
-                        const hasAi = img.ai_analysis && Object.keys(img.ai_analysis).length > 0;
-                        return (
-                          <div key={img.id} className="px-4 py-2 flex items-center gap-2">
-                            <img src={pubUrl} alt="" className="w-8 h-8 object-cover rounded border border-gray-200" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[10px] font-bold text-gray-700 truncate">{img.file_name || img.image_type}</p>
-                              {hasAi && <span className="text-[9px] text-green-600 font-bold">AI分析済</span>}
-                            </div>
-                            <button disabled={aiAnalyzing} onClick={async () => {
-                              setAiAnalyzing(true);
-                              const imgRes = await fetch(pubUrl); const blob = await imgRes.blob();
-                              const b64: string = await new Promise(res => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(blob); });
-                              const resp = await fetch("/api/xray-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64, patient_id: pid }) });
-                              const data = await resp.json();
-                              if (data.success) { await supabase.from("patient_images").update({ ai_analysis: data.analysis }).eq("id", img.id); await fetchData(); alert("AI分析完了: " + (data.summary||"")); }
-                              else alert("分析失敗: " + data.error);
-                              setAiAnalyzing(false);
-                            }} className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded hover:bg-purple-100 shrink-0">AI</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="px-4 py-2 flex gap-2">
-                      <button className="flex-1 text-[10px] font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 py-1.5 rounded transition-colors">📋 紹介状</button>
-                      <button className="flex-1 text-[10px] font-bold text-green-600 bg-green-50 hover:bg-green-100 py-1.5 rounded transition-colors">✍️ 同意書</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {/* チャット */}
-              <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50">
-                <span className="text-sm font-bold text-gray-800">💬 チャット</span>
-                <span className="text-gray-400">›</span>
-              </button>
-            </div>
-          </div>
-            {/* ===== カルテ履歴（左メインカラム2つ目） ===== */}
-            <div className="bg-white rounded-xl border border-gray-200">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+          {/* カルテ履歴 */}
+                    <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">📋 カルテ履歴</h2>
             {/* 傷病名管理タブ */}
             <div className="flex items-center gap-2">
@@ -1039,8 +903,147 @@ export default function PatientDetailPage() {
               );
             })}
           </div>  {/* カルテ履歴終了 */}
-          </div>  {/* 左メインカラム終了 */}
-          </div>  {/* 右サイドカラム終了 */}
+
+          </div>{/* 左カラム終了 */}
+
+          {/* 中カラム：未処置歯リスト */}
+          <div className="w-56 shrink-0">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-800">📋 未処置歯リスト</span>
+                  {untreatedDiagnoses.length > 0 && (
+                    <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untreatedDiagnoses.length}歯</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                {untreatedDiagnoses.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-xs text-gray-400">未処置歯はありません</div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {untreatedDiagnoses.map(d => {
+                      const current = d.session_current || 0;
+                      const total = d.session_total || 1;
+                      const pct = Math.round((current / total) * 100);
+                      const isActive = tc[d.tooth_number||""]?.status === "in_treatment";
+                      return (
+                        <div key={d.id} className={`px-4 py-3 ${isActive ? "bg-orange-50" : ""}`}>
+                          <div className="flex items-start justify-between mb-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {d.tooth_number && (
+                                <span className="text-[11px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{d.tooth_number}番</span>
+                              )}
+                              <span className="text-xs font-bold text-gray-800">{d.diagnosis_name}</span>
+                            </div>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${isActive ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>
+                              {isActive ? "治療中" : "計画中"}
+                            </span>
+                          </div>
+                          {total > 1 ? (
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-[9px] text-gray-400 shrink-0">{current}/{total}回</span>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              {current === 0 ? "未開始" : `第${current}回`} / 全{total}回予定
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="px-4 py-3 border-t border-gray-100">
+                  <button className="w-full text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-lg transition-colors">
+                    ＋ 治療計画書作成
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>{/* 中カラム終了 */}
+
+          {/* 右カラム：タスク・書類・チャット */}
+          <div className="w-44 shrink-0">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
+                <span className="text-sm font-bold text-gray-800">✅ タスク一覧</span>
+                <span className="text-gray-400">›</span>
+              </button>
+
+              {/* 書類・資料（展開式） */}
+              <div className="border-t border-gray-100">
+                <button onClick={() => setShowDocPanel(!showDocPanel)}
+                  className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-800">📄 書類・資料</span>
+                    {images.length > 0 && <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{images.length}</span>}
+                  </div>
+                  <span className="text-gray-400">{showDocPanel ? "▼" : "›"}</span>
+                </button>
+                {showDocPanel && (
+                  <div className="border-b border-gray-100">
+                    <div className="px-4 py-3 border-b border-gray-50">
+                      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-lg p-3 cursor-pointer hover:border-sky-400 hover:bg-sky-50 transition-all text-xs text-gray-500">
+                        <span>{imgLoading ? "⏳ アップロード中..." : "📤 画像をアップロード"}</span>
+                        <input type="file" accept="image/*" className="hidden" disabled={imgLoading}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0]; if (!file) return;
+                            setImgLoading(true);
+                            const formData = new FormData();
+                            formData.append("file", file); formData.append("patient_id", pid); formData.append("image_type", "panorama");
+                            const res = await fetch("/api/image-upload", { method: "POST", body: formData });
+                            const data = await res.json();
+                            if (data.success) await fetchData(); else alert("アップロード失敗: " + data.error);
+                            setImgLoading(false); e.target.value = "";
+                          }} />
+                      </label>
+                    </div>
+                    <div className="max-h-40 overflow-y-auto divide-y divide-gray-50">
+                      {images.length === 0 ? (
+                        <div className="px-4 py-4 text-center text-xs text-gray-400">画像はまだありません</div>
+                      ) : images.map(img => {
+                        const pubUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL||""}/storage/v1/object/public/patient-images/${img.storage_path}`;
+                        const hasAi = img.ai_analysis && Object.keys(img.ai_analysis).length > 0;
+                        return (
+                          <div key={img.id} className="px-4 py-2 flex items-center gap-2">
+                            <img src={pubUrl} alt="" className="w-8 h-8 object-cover rounded border border-gray-200" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] font-bold text-gray-700 truncate">{img.file_name || img.image_type}</p>
+                              {hasAi && <span className="text-[9px] text-green-600 font-bold">AI分析済</span>}
+                            </div>
+                            <button disabled={aiAnalyzing} onClick={async () => {
+                              setAiAnalyzing(true);
+                              const imgRes = await fetch(pubUrl); const blob = await imgRes.blob();
+                              const b64: string = await new Promise(res => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(blob); });
+                              const resp = await fetch("/api/xray-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64, patient_id: pid }) });
+                              const data = await resp.json();
+                              if (data.success) { await supabase.from("patient_images").update({ ai_analysis: data.analysis }).eq("id", img.id); await fetchData(); alert("AI分析完了: " + (data.summary||"")); }
+                              else alert("分析失敗: " + data.error);
+                              setAiAnalyzing(false);
+                            }} className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded hover:bg-purple-100 shrink-0">AI</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="px-4 py-2 flex gap-2">
+                      <button className="flex-1 text-[10px] font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 py-1.5 rounded transition-colors">📋 紹介状</button>
+                      <button className="flex-1 text-[10px] font-bold text-green-600 bg-green-50 hover:bg-green-100 py-1.5 rounded transition-colors">✍️ 同意書</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* チャット */}
+              <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50">
+                <span className="text-sm font-bold text-gray-800">💬 チャット</span>
+                <span className="text-gray-400">›</span>
+              </button>
+            </div>
+          </div>{/* 右カラム終了 */}
+
         </div>  {/* メインflex終了 */}
       </main>
 
