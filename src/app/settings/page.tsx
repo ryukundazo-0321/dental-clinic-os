@@ -682,10 +682,9 @@ export default function SettingsPage() {
                 })}
               </div>
             </div>
-          </div>
 
-          {/* 予約シャッター */}
-          <div className="space-y-4 mt-6">
+            {/* 予約シャッター */}
+            <div className="space-y-4 mt-6">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="font-bold text-gray-900">🚫 予約シャッター</h3>
@@ -739,6 +738,7 @@ export default function SettingsPage() {
                 <p><span className="font-bold">特定の日の特定の時間帯</span> — 例: 3/20の午後のみ休診など</p>
               </div>
             </div>
+          </div>
           </div>
         )}
 
