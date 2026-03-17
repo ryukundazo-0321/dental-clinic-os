@@ -820,7 +820,14 @@ export default function PatientDetailPage() {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <button onClick={() => setRightPanel(rightPanel === "chat" ? null : "chat")}
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
-                <span className="text-sm font-bold text-gray-800">💬 チャット</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-800">💬 チャット</span>
+                  {chatMessages.filter(m => !m.is_read && m.sender_type === "patient").length > 0 && (
+                    <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                      {chatMessages.filter(m => !m.is_read && m.sender_type === "patient").length}
+                    </span>
+                  )}
+                </div>
                 <span className="text-gray-400 text-xs">{rightPanel === "chat" ? "▲" : "▼"}</span>
               </button>
               {rightPanel === "chat" && (
