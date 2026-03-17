@@ -47,7 +47,10 @@ export default function Home() {
   function addToast(n: ClinicNotif) {
     const t: ToastItem = { id: n.id, title: n.title, body: n.body, type: n.type };
     setToasts(prev => [...prev, t]);
-    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== t.id)), 5000);
+    const tid = n.id;
+    setTimeout(() => {
+      setToasts(prev => prev.filter(x => x.id !== tid));
+    }, 5000);
   }
 
   async function fetchNotifs() {
