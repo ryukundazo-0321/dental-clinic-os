@@ -168,6 +168,7 @@ export default function PatientDetailPage() {
   // UI状態
   const [chartMode, setChartMode] = useState<"status" | "perio">("status");
   const [selectedTooth, setSelectedTooth] = useState<string | null>(null);
+  const [toothMode, setToothMode] = useState<ToothMode>("permanent");
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [expandedRecord, setExpandedRecord] = useState<string | null>(null);
   const [receiptHtml, setReceiptHtml] = useState<string | null>(null);
