@@ -228,18 +228,21 @@ export default function PatientDetailPage() {
     if (t.data) setTH(t.data as ToothHistoryEntry[]);
     if (s.data) setPS(s.data as PerioSnapshot[]);
     if (img.data) setImages(img.data as PatientImage[]);
-    if (todayApt.data) setTodayAptId(todayApt.data.id);
+    if (todayApt.data) setTodayAptId((todayApt.data as { id: string }).id);
     setLoading(false);
   }, [pid]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
-    supabase.from("diagnosis_master").select("code, name, category").order("sort_order")
-      .then(({ data }) => { if (data) setDiagMaster(data as DiagnosisMaster[]); });
-    supabase.from("diagnosis_modifiers").select("*").eq("is_active", true).order("sort_order")
-      .then(({ data }) => { if (data) setDiagModifiers(data as DiagnosisModifier[]); })
-      .catch(() => {}); // テーブルがない場合はスキップ
+    (async () => {
+      const { data: masterData } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
+      if (masterData) setDiagMaster(masterData as DiagnosisMaster[]);
+      try {
+        const { data: modData } = await supabase.from("diagnosis_modifiers").select("*").eq("is_active", true).order("sort_order");
+        if (modData) setDiagModifiers(modData as DiagnosisModifier[]);
+      } catch { /* テーブルがない場合はスキップ */ }
+    })();
   }, []);
 
   // 年齢に応じた乳歯モード自動設定
