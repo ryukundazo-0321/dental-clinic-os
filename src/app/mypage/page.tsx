@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
 // ===== Types =====
@@ -54,6 +54,10 @@ type PatientDiagnosis = {
   session_current: number | null;
 };
 
+type ChatMessage = {
+  id: string; patient_id: string; sender_type: string;
+  sender_name: string | null; content: string; is_read: boolean; created_at: string;
+};
 type PatientImage = {
   id: string;
   image_type: string;
@@ -129,6 +133,10 @@ export default function MyPage() {
   const [diagnoses, setDiagnoses] = useState<PatientDiagnosis[]>([]);
   const [images, setImages] = useState<PatientImage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<Tab>("appointment");
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null);
 
@@ -178,6 +186,44 @@ export default function MyPage() {
     if (dRes.data) setDiagnoses(dRes.data as PatientDiagnosis[]);
     if (imgRes.data) setImages(imgRes.data as PatientImage[]);
     setLoading(false);
+  }
+
+  // チャットメッセージ取得 + Realtime
+  useEffect(() => {
+    if (!patientFull?.id) return;
+    async function fetchChat() {
+      const { data } = await supabase.from("chat_messages")
+        .select("*").eq("patient_id", patientFull!.id).order("created_at", { ascending: true });
+      if (data) setChatMessages(data as ChatMessage[]);
+    }
+    fetchChat();
+
+    const channel = supabase.channel(`chat-patient-${patientFull.id}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "chat_messages",
+        filter: `patient_id=eq.${patientFull.id}`,
+      }, (payload) => {
+        setChatMessages(prev => [...prev, payload.new as ChatMessage]);
+        setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [patientFull?.id]);
+
+  async function sendChatMessage() {
+    if (!chatInput.trim() || chatSending || !patientFull) return;
+    setChatSending(true);
+    await supabase.from("chat_messages").insert({
+      patient_id: patientFull.id,
+      sender_type: "patient",
+      sender_name: patientFull.name_kanji,
+      content: chatInput.trim(),
+      is_read: false,
+    });
+    setChatInput("");
+    setChatSending(false);
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   }
 
   function handleLogout() {
@@ -564,15 +610,57 @@ export default function MyPage() {
 
         {/* ===== タブ4: チャット ===== */}
         {activeTab === "chat" && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm text-center">
-            <p className="text-4xl mb-3">💬</p>
-            <h2 className="text-sm font-bold text-gray-900 mb-2">チャット</h2>
-            <p className="text-xs text-gray-400 leading-relaxed mb-4">
-              担当スタッフとチャットでやりとりできます。<br />
-              治療に関するご質問・ご相談にお使いください。
-            </p>
-            <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-              <p className="text-xs text-gray-400">チャット機能は近日公開予定です</p>
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col" style={{ height: "calc(100vh - 220px)" }}>
+            {/* ヘッダー */}
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+              <span className="text-base">💬</span>
+              <span className="text-sm font-bold text-gray-900">クリニックとのチャット</span>
+              {chatMessages.filter(m => !m.is_read && m.sender_type === "staff").length > 0 && (
+                <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                  {chatMessages.filter(m => !m.is_read && m.sender_type === "staff").length}
+                </span>
+              )}
+            </div>
+            {/* メッセージ一覧 */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
+              {chatMessages.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-3xl mb-3">💬</p>
+                  <p className="text-sm text-gray-400">まだメッセージはありません</p>
+                  <p className="text-xs text-gray-300 mt-1">治療に関するご質問などお気軽にどうぞ</p>
+                </div>
+              ) : chatMessages.map(msg => (
+                <div key={msg.id} className={`flex ${msg.sender_type === "patient" ? "justify-end" : "justify-start"}`}>
+                  {msg.sender_type === "staff" && (
+                    <div className="w-7 h-7 bg-sky-100 text-sky-600 rounded-full flex items-center justify-center text-xs font-bold mr-2 shrink-0 mt-1">
+                      🦷
+                    </div>
+                  )}
+                  <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${msg.sender_type === "patient" ? "bg-sky-500 text-white rounded-br-sm" : "bg-white text-gray-800 border border-gray-200 rounded-bl-sm"}`}>
+                    <p className="leading-relaxed">{msg.content}</p>
+                    <p className={`text-[9px] mt-1 ${msg.sender_type === "patient" ? "text-sky-200" : "text-gray-400"}`}>
+                      {new Date(msg.created_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                      {msg.sender_type === "staff" && " · スタッフ"}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatBottomRef} />
+            </div>
+            {/* 入力エリア */}
+            <div className="px-3 py-3 border-t border-gray-200 bg-white flex items-end gap-2">
+              <textarea
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                placeholder="メッセージを入力..."
+                rows={2}
+                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-sky-400"
+              />
+              <button onClick={sendChatMessage} disabled={chatSending || !chatInput.trim()}
+                className="bg-sky-500 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-sky-600 disabled:opacity-40 shrink-0">
+                {chatSending ? "⏳" : "→"}
+              </button>
             </div>
           </div>
         )}
