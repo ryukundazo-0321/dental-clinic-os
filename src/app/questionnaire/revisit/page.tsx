@@ -58,7 +58,9 @@ export default function RevisitQuestionnairePage() {
       const { data: rec } = await supabase.from("medical_records").select("id, soap_s").eq("appointment_id", aptId).single();
       if (rec) {
         const existing = rec.soap_s || "";
-        await supabase.from("medical_records").update({ soap_s: existing ? existing + "\n---\n" + soapS : soapS }).eq("id", rec.id);
+        await supabase.from("medical_records").update({
+          soap_s: existing ? existing + "\n---\n" + soapS : soapS,
+        }).eq("id", rec.id);
       }
     }
     setSubmitted(true);
@@ -108,10 +110,13 @@ export default function RevisitQuestionnairePage() {
             <label className="text-sm font-bold text-gray-700 block mb-2">痛みの強さ（0=なし〜10=最大）</label>
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-400">0</span>
-              <input type="range" min={0} max={10} value={form.pain_level} onChange={e => setForm({ ...form, pain_level: parseInt(e.target.value) })}
+              <input type="range" min={0} max={10} value={form.pain_level}
+                onChange={e => setForm({ ...form, pain_level: parseInt(e.target.value) })}
                 className="flex-1" />
               <span className="text-xs text-gray-400">10</span>
-              <span className={`text-lg font-bold w-10 text-center ${form.pain_level >= 7 ? "text-red-600" : form.pain_level >= 4 ? "text-orange-500" : "text-green-600"}`}>{form.pain_level}</span>
+              <span className={`text-lg font-bold w-10 text-center ${form.pain_level >= 7 ? "text-red-600" : form.pain_level >= 4 ? "text-orange-500" : "text-green-600"}`}>
+                {form.pain_level}
+              </span>
             </div>
           </div>
         )}
@@ -134,7 +139,8 @@ export default function RevisitQuestionnairePage() {
           <label className="text-sm font-bold text-gray-700 block mb-2">前回から服用中のお薬に変更はありますか？</label>
           <div className="flex gap-2 mb-2">
             {["変更なし", "変更あり"].map(opt => (
-              <button key={opt} onClick={() => setForm({ ...form, medication_change: opt === "変更なし" ? "" : form.medication_change || "変更あり" })}
+              <button key={opt}
+                onClick={() => setForm({ ...form, medication_change: opt === "変更なし" ? "" : form.medication_change || "変更あり" })}
                 className={`text-sm px-4 py-2 rounded-lg border-2 font-bold ${(opt === "変更なし" && !form.medication_change) || (opt === "変更あり" && form.medication_change) ? "bg-sky-500 text-white border-sky-500" : "bg-white border-gray-200 text-gray-600"}`}>
                 {opt}
               </button>
@@ -150,10 +156,12 @@ export default function RevisitQuestionnairePage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <label className="text-sm font-bold text-gray-700 block mb-2">先生に伝えたいこと</label>
           <textarea value={form.other} onChange={e => setForm({ ...form, other: e.target.value })}
-            rows={3} placeholder="ご自由にお書きください" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none" />
+            rows={3} placeholder="ご自由にお書きください"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none" />
         </div>
 
-        <button onClick={handleSubmit} className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 shadow-lg shadow-green-200">
+        <button onClick={handleSubmit}
+          className="w-full bg-green-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-green-700 shadow-lg shadow-green-200">
           ✅ 入力完了
         </button>
       </main>
