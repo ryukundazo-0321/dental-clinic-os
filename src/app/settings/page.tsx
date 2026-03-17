@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-type Tab = "clinic" | "units" | "staff" | "slots" | "shutter" | "facility";
+type Tab = "clinic" | "units" | "staff" | "slots" | "facility";
 
 type Clinic = {
   id: string; name: string; address: string; phone: string;
@@ -308,7 +308,6 @@ export default function SettingsPage() {
     { key: "units", label: "ユニット", icon: "🪥" },
     { key: "staff", label: "スタッフ", icon: "👥" },
     { key: "slots", label: "予約枠", icon: "📅" },
-    { key: "shutter", label: "シャッター", icon: "🚫" },
     { key: "facility", label: "施設基準", icon: "📋" },
   ];
 
@@ -684,11 +683,9 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-        )}
 
-        {/* ========== 予約シャッタータブ ========== */}
-        {activeTab === "shutter" && (
-          <div className="space-y-4">
+          {/* 予約シャッター */}
+          <div className="space-y-4 mt-6">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="font-bold text-gray-900">🚫 予約シャッター</h3>
