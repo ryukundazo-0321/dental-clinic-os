@@ -832,7 +832,15 @@ export default function PatientDetailPage() {
               </button>
               {rightPanel === "chat" && (
                 <div className="border-t border-gray-100 px-4 py-3">
-                  <button onClick={() => setShowChat(true)}
+                  <button onClick={async () => {
+                    setShowChat(true);
+                    // 患者からの未読メッセージを既読にする
+                    const unreadIds = chatMessages.filter(m => !m.is_read && m.sender_type === "patient").map(m => m.id);
+                    if (unreadIds.length > 0) {
+                      await supabase.from("chat_messages").update({ is_read: true }).in("id", unreadIds);
+                      setChatMessages(prev => prev.map(m => unreadIds.includes(m.id) ? { ...m, is_read: true } : m));
+                    }
+                  }}
                     className="w-full bg-sky-600 text-white py-2.5 rounded-lg text-xs font-bold hover:bg-sky-700 flex items-center justify-center gap-2">
                     💬 チャットを開く
                     {chatMessages.filter(m => !m.is_read && m.sender_type === "patient").length > 0 && (
