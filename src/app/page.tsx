@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
@@ -50,10 +50,10 @@ export default function Home() {
     setTimeout(() => setToasts(prev => prev.filter(x => x.id !== t.id)), 5000);
   }
 
-  const fetchNotifs = useCallback(async () => {
+  async function fetchNotifs() {
     const { data } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(30);
     if (data) setNotifs(data as ClinicNotif[]);
-  }, []);
+  }
 
   async function markAllRead() {
     await supabase.from("notifications").update({ is_read: true }).eq("is_read", false);
@@ -73,7 +73,7 @@ export default function Home() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [fetchNotifs]);
+  }, []);
 
   async function fetchAll() {
     await Promise.all([fetchStats(), fetchTodayRevenue(), fetchMonthlyRevenue(), fetchAlerts()]);
