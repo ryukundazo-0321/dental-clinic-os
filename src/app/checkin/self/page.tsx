@@ -33,6 +33,7 @@ export default function SelfCheckinPage() {
   const [matched, setMatched] = useState<MatchedAppointment | null>(null);
   const [queueNumber, setQueueNumber] = useState(0);
   const [completedAptId, setCompletedAptId] = useState<string | null>(null);
+  const [completedPatientType, setCompletedPatientType] = useState<string>("returning");
   const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
@@ -51,7 +52,10 @@ export default function SelfCheckinPage() {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          router.push(`/questionnaire?appointment_id=${completedAptId}`);
+          const path = completedPatientType === "new"
+            ? `/questionnaire?appointment_id=${completedAptId}`
+            : `/questionnaire/revisit?appointment_id=${completedAptId}`;
+          router.push(path);
           return 0;
         }
         return prev - 1;
@@ -178,6 +182,7 @@ export default function SelfCheckinPage() {
 
     setQueueNumber(nextNumber);
     setCompletedAptId(matched.id);  // ← 問診遷移用にIDを保持
+    setCompletedPatientType(matched.patient_type);  // ← 初診/再診判定
     setStep("complete");
     setLoading(false);
   }
@@ -194,6 +199,7 @@ export default function SelfCheckinPage() {
     setMatched(null);
     setQueueNumber(0);
     setCompletedAptId(null);
+    setCompletedPatientType("returning");
   }
 
   function formatBirthDisplay(input: string): string {
@@ -335,7 +341,13 @@ export default function SelfCheckinPage() {
 
             <div className="space-y-3">
               <button
-                onClick={() => completedAptId && router.push(`/questionnaire?appointment_id=${completedAptId}`)}
+                onClick={() => {
+                  if (!completedAptId) return;
+                  const path = completedPatientType === "new"
+                    ? `/questionnaire?appointment_id=${completedAptId}`
+                    : `/questionnaire/revisit?appointment_id=${completedAptId}`;
+                  router.push(path);
+                }}
                 className="w-full bg-orange-500 text-white py-4 rounded-xl font-bold text-lg hover:bg-orange-600 active:scale-[0.98]"
               >
                 今すぐ問診へ進む →
