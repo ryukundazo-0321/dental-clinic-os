@@ -27,10 +27,7 @@ export default function CheckinPage() {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkinResult, setCheckinResult] = useState<{ number: number; name: string } | null>(null);
-
-  // 手動チェックイン用
   const [searchQuery, setSearchQuery] = useState("");
-
   const [showQR, setShowQR] = useState(false);
   const selfCheckinUrl = typeof window !== "undefined"
     ? `${window.location.origin}/checkin/self`
@@ -49,8 +46,6 @@ export default function CheckinPage() {
 
   async function fetchData() {
     setLoading(true);
-
-    // 今日の予約
     const { data: apts } = await supabase
       .from("appointments")
       .select(`id, scheduled_at, patient_type, status, doctor_id,
@@ -59,62 +54,42 @@ export default function CheckinPage() {
       .lte("scheduled_at", `${todayStr}T23:59:59`)
       .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true });
-
     if (apts) setAppointments(apts as unknown as TodayAppointment[]);
 
-    // 今日のキュー
     const { data: queueData } = await supabase
       .from("queue")
       .select("*")
       .gte("checked_in_at", `${todayStr}T00:00:00`)
       .order("queue_number", { ascending: true });
-
     if (queueData) setQueue(queueData);
-
     setLoading(false);
   }
 
-  // チェックイン処理
   async function checkin(appointment: TodayAppointment) {
     if (appointment.status !== "reserved") return;
-
-    // 次の受付番号を取得
     const maxNum = queue.length > 0 ? Math.max(...queue.map((q) => q.queue_number)) : 0;
     const nextNumber = maxNum + 1;
-
-    // 予約ステータスを来院済に
     await supabase.from("appointments").update({ status: "checked_in" }).eq("id", appointment.id);
-
-    // キューに追加
     await supabase.from("queue").insert({
       appointment_id: appointment.id,
       queue_number: nextNumber,
       status: "waiting",
       checked_in_at: new Date().toISOString(),
     });
-
-    setCheckinResult({
-      number: nextNumber,
-      name: appointment.patients?.name_kanji || "",
-    });
-
-    // 来院時アラート表示 (D13)
+    setCheckinResult({ number: nextNumber, name: appointment.patients?.name_kanji || "" });
     const alerts: string[] = [];
     if (appointment.patients?.alert_memo) alerts.push("📌 " + appointment.patients.alert_memo);
     if (appointment.patients?.infection_flags) alerts.push("🦠 感染症: " + appointment.patients.infection_flags);
     if (appointment.patients?.allergies && JSON.stringify(appointment.patients.allergies) !== "null" && JSON.stringify(appointment.patients.allergies) !== "[]" && JSON.stringify(appointment.patients.allergies) !== "{}") {
       alerts.push("⚠️ アレルギー: " + JSON.stringify(appointment.patients.allergies));
     }
-    if (alerts.length > 0) {
-      setTimeout(() => alert("⚠️ 患者アラート ⚠️\n\n" + alerts.join("\n")), 500);
-    }
-
-    // 3秒後に結果を消す
+    if (alerts.length > 0) setTimeout(() => alert("⚠️ 患者アラート ⚠️\n\n" + alerts.join("\n")), 500);
     setTimeout(() => setCheckinResult(null), 5000);
   }
 
   function formatTime(dateStr: string) {
-    const d = new Date(dateStr); return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
+    const d = new Date(dateStr);
+    return d.getUTCHours().toString().padStart(2, "0") + ":" + d.getUTCMinutes().toString().padStart(2, "0");
   }
 
   const reservedApts = appointments.filter((a) => a.status === "reserved");
@@ -126,7 +101,6 @@ export default function CheckinPage() {
         a.patients?.phone?.includes(searchQuery)
       )
     : reservedApts;
-
   const waitingQueue = queue.filter((q) => q.status === "waiting");
   const inRoomQueue = queue.filter((q) => q.status === "in_room");
 
@@ -149,10 +123,9 @@ export default function CheckinPage() {
         </div>
       </header>
 
-      {/* チェックイン成功表示 */}
       {checkinResult && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setCheckinResult(null)}>
-          <div className="bg-white rounded-3xl p-10 text-center max-w-sm mx-4 animate-bounce-in">
+          <div className="bg-white rounded-3xl p-10 text-center max-w-sm mx-4">
             <p className="text-sm text-gray-500 mb-2">受付番号</p>
             <p className="text-8xl font-bold text-sky-600 mb-4">{checkinResult.number}</p>
             <p className="text-xl font-bold text-gray-900 mb-2">{checkinResult.name} 様</p>
@@ -163,9 +136,7 @@ export default function CheckinPage() {
 
       <main className="max-w-7xl mx-auto px-4 py-4">
         <div className="flex gap-4">
-          {/* 左: チェックイン */}
           <div className="flex-1">
-            {/* サマリー */}
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
                 <p className="text-xs text-gray-400">未チェックイン</p>
@@ -181,13 +152,11 @@ export default function CheckinPage() {
               </div>
             </div>
 
-            {/* 検索 */}
             <div className="mb-4">
               <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="患者名・カナ・電話番号で検索..." className="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:border-sky-400" />
             </div>
 
-            {/* 予約済み一覧（チェックイン対象） */}
             <h3 className="text-sm font-bold text-gray-400 mb-2">📅 本日の予約（未チェックイン）</h3>
             {loading ? (
               <div className="text-center py-8 text-gray-400">読み込み中...</div>
@@ -220,7 +189,6 @@ export default function CheckinPage() {
               </div>
             )}
 
-            {/* チェックイン済み一覧 */}
             {checkedInApts.length > 0 && (
               <div className="mt-6">
                 <h3 className="text-sm font-bold text-gray-400 mb-2">✅ チェックイン済み</h3>
@@ -249,16 +217,13 @@ export default function CheckinPage() {
             )}
           </div>
 
-          {/* 右: 待合キュー */}
           <div className="w-72 flex-shrink-0 hidden lg:block">
             <div className="bg-white rounded-xl border border-gray-200 p-4 sticky top-4">
               <h3 className="font-bold text-gray-900 mb-3">待合リスト</h3>
-
               {waitingQueue.length === 0 && inRoomQueue.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-4">待合中の患者はいません</p>
               ) : (
                 <div className="space-y-2">
-                  {/* 診察中 */}
                   {inRoomQueue.map((q) => {
                     const apt = appointments.find((a) => a.id === q.appointment_id);
                     return (
@@ -273,8 +238,6 @@ export default function CheckinPage() {
                       </div>
                     );
                   })}
-
-                  {/* 待合中 */}
                   {waitingQueue.map((q) => {
                     const apt = appointments.find((a) => a.id === q.appointment_id);
                     return (
@@ -302,19 +265,16 @@ export default function CheckinPage() {
           <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-gray-900 mb-2">📱 セルフチェックイン用QRコード</h3>
             <p className="text-sm text-gray-500 mb-6">このQRコードを受付に掲示してください。<br />患者さんがスマホで読み取ってチェックインできます。</p>
-
-            {/* QRコード（Google Charts API使用） */}
             <div className="bg-white p-4 inline-block rounded-xl border-2 border-gray-200 mb-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`https://chart.googleapis.com/chart?cht=qr&chs=250x250&chl=${encodeURIComponent(selfCheckinUrl)}&choe=UTF-8`}
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(selfCheckinUrl)}`}
                 alt="QRコード"
                 width={250}
                 height={250}
               />
             </div>
-
             <p className="text-xs text-gray-400 mb-4 break-all">{selfCheckinUrl}</p>
-
             <div className="space-y-2">
               <button onClick={() => { navigator.clipboard.writeText(selfCheckinUrl); }}
                 className="w-full bg-sky-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-sky-700">
@@ -324,8 +284,7 @@ export default function CheckinPage() {
                 className="block w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-sm hover:bg-gray-200 text-center">
                 プレビューを開く →
               </a>
-              <button onClick={() => setShowQR(false)}
-                className="w-full text-gray-400 py-2 text-sm">閉じる</button>
+              <button onClick={() => setShowQR(false)} className="w-full text-gray-400 py-2 text-sm">閉じる</button>
             </div>
           </div>
         </div>
