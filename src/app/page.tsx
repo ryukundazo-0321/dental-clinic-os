@@ -1,12 +1,30 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 
 type BillingRow = { total_points: number; patient_burden: number; created_at: string };
 type AlertItem = { type: string; label: string; count: number; href: string; color: string; icon: string };
+
+type Notification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  patient_id: string | null;
+  related_id: string | null;
+  is_read: boolean;
+  created_at: string;
+};
+
+type Toast = {
+  id: string;
+  title: string;
+  body: string | null;
+  type: string;
+};
 
 export default function Home() {
   const { staff, signOut } = useAuth();
@@ -15,6 +33,11 @@ export default function Home() {
   const [monthlyData, setMonthlyData] = useState<{ day: number; points: number; burden: number }[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [monthTotal, setMonthTotal] = useState({ points: 0, burden: 0, count: 0 });
+
+  // 通知
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   function getTodayJST(): string {
     const now = new Date();
@@ -27,14 +50,54 @@ export default function Home() {
   const formattedDate = today.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
   const monthStart = `${todayStr.substring(0, 7)}-01`;
 
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  // トースト表示
+  function showToast(notif: Notification) {
+    const toast: Toast = { id: notif.id, title: notif.title, body: notif.body, type: notif.type };
+    setToasts(prev => [...prev, toast]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== toast.id));
+    }, 5000);
+  }
+
+  // 通知アイコン
+  function notifIcon(type: string) {
+    if (type === "checkin") return "🔔";
+    if (type === "booking") return "📅";
+    if (type === "chat") return "💬";
+    if (type === "cancel") return "❌";
+    return "📌";
+  }
+
+  // 通知取得
+  const fetchNotifications = useCallback(async () => {
+    const { data } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(30);
+    if (data) setNotifications(data as Notification[]);
+  }, []);
+
+  // 全既読
+  async function markAllRead() {
+    await supabase.from("notifications").update({ is_read: true }).eq("is_read", false);
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+  }
+
   useEffect(() => {
     fetchAll();
+    fetchNotifications();
+
     const channel = supabase.channel("dashboard-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => fetchAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "billing" }, () => fetchAll())
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, (payload) => {
+        const newNotif = payload.new as Notification;
+        setNotifications(prev => [newNotif, ...prev]);
+        showToast(newNotif);
+      })
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [fetchNotifications]);
 
   async function fetchAll() {
     await Promise.all([fetchStats(), fetchTodayRevenue(), fetchMonthlyRevenue(), fetchAlerts()]);
@@ -106,24 +169,23 @@ export default function Home() {
   const maxPoints = Math.max(...monthlyData.map(d => d.points), 1);
 
   const menuItems = [
-    { href: "/reservation",   icon: "📅", iconBg: "bg-blue-50 text-blue-600 group-hover:bg-blue-100",   title: "予約管理",       desc: "予約の確認・新規受付",           ready: true },
-    // ★ 修正: /reservation → /consultation
-    { href: "/consultation",  icon: "🩺", iconBg: "bg-orange-50 text-orange-600 group-hover:bg-orange-100", title: "診察カレンダー", desc: "タイムテーブル・アポ帳",         ready: true },
-    { href: "/reception-dashboard", icon: "🏥", iconBg: "bg-rose-50 text-rose-600 group-hover:bg-rose-100", title: "受付ダッシュボード", desc: "チェア別・本日の患者一覧",   ready: true },
-    { href: "/patients",      icon: "👤", iconBg: "bg-sky-50 text-sky-600 group-hover:bg-sky-100",       title: "患者管理",       desc: "患者一覧・検索・歯式・カルテ",   ready: true },
-    { href: "/checkin",       icon: "📱", iconBg: "bg-green-50 text-green-600 group-hover:bg-green-100", title: "受付",           desc: "チェックイン・受付番号発行",     ready: true },
-    { href: "/billing",       icon: "💰", iconBg: "bg-purple-50 text-purple-600 group-hover:bg-purple-100", title: "会計",        desc: "精算・レセプト管理",             ready: true },
-    { href: "/monitor",       icon: "🖥️", iconBg: "bg-teal-50 text-teal-600 group-hover:bg-teal-100",   title: "待合モニター",   desc: "待合室表示用画面",               ready: true },
-    { href: "/recall",        icon: "🔔", iconBg: "bg-amber-50 text-amber-600 group-hover:bg-amber-100", title: "リコール管理",   desc: "定期検診リコール対象者一覧",     ready: true },
+    { href: "/reservation",         icon: "📅", iconBg: "bg-blue-50 text-blue-600 group-hover:bg-blue-100",     title: "予約管理",           desc: "予約の確認・新規受付",         ready: true },
+    { href: "/consultation",        icon: "🩺", iconBg: "bg-orange-50 text-orange-600 group-hover:bg-orange-100", title: "診察カレンダー",     desc: "タイムテーブル・アポ帳",       ready: true },
+    { href: "/reception-dashboard", icon: "🏥", iconBg: "bg-rose-50 text-rose-600 group-hover:bg-rose-100",     title: "受付ダッシュボード", desc: "チェア別・本日の患者一覧",     ready: true },
+    { href: "/patients",            icon: "👤", iconBg: "bg-sky-50 text-sky-600 group-hover:bg-sky-100",         title: "患者管理",           desc: "患者一覧・検索・歯式・カルテ", ready: true },
+    { href: "/checkin",             icon: "📱", iconBg: "bg-green-50 text-green-600 group-hover:bg-green-100",   title: "受付",               desc: "チェックイン・受付番号発行",   ready: true },
+    { href: "/billing",             icon: "💰", iconBg: "bg-purple-50 text-purple-600 group-hover:bg-purple-100", title: "会計",              desc: "精算・レセプト管理",           ready: true },
+    { href: "/monitor",             icon: "🖥️", iconBg: "bg-teal-50 text-teal-600 group-hover:bg-teal-100",     title: "待合モニター",       desc: "待合室表示用画面",             ready: true },
+    { href: "/recall",              icon: "🔔", iconBg: "bg-amber-50 text-amber-600 group-hover:bg-amber-100",   title: "リコール管理",       desc: "定期検診リコール対象者一覧",   ready: true },
   ];
 
   const settingsItems = [
-    { href: "/settings",        icon: "⚙️", title: "クリニック設定",     desc: "基本情報・ユニット・スタッフ・予約枠" },
-    { href: "/audit",           icon: "🔍", title: "監査ログ",           desc: "カルテ・会計の全変更履歴" },
-    { href: "/lab-order",       icon: "🏭", title: "技工指示書",         desc: "補綴物の発注・進捗管理" },
-    { href: "/csv-import",      icon: "📥", title: "CSVインポート",       desc: "患者・予約データの一括取込" },
-    { href: "/reservation/book",icon: "🌐", title: "患者向け予約ページ", desc: "Web予約画面（URLを患者に共有）" },
-    { href: "/mypage",          icon: "👤", title: "患者マイページ",     desc: "予約確認・治療経過（URLを患者に共有）" },
+    { href: "/settings",         icon: "⚙️", title: "クリニック設定",     desc: "基本情報・ユニット・スタッフ・予約枠" },
+    { href: "/audit",            icon: "🔍", title: "監査ログ",           desc: "カルテ・会計の全変更履歴" },
+    { href: "/lab-order",        icon: "🏭", title: "技工指示書",         desc: "補綴物の発注・進捗管理" },
+    { href: "/csv-import",       icon: "📥", title: "CSVインポート",       desc: "患者・予約データの一括取込" },
+    { href: "/reservation/book", icon: "🌐", title: "患者向け予約ページ", desc: "Web予約画面（URLを患者に共有）" },
+    { href: "/mypage",           icon: "👤", title: "患者マイページ",     desc: "予約確認・治療経過（URLを患者に共有）" },
   ];
 
   return (
@@ -136,6 +198,45 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-sm text-gray-500">{formattedDate}</div>
+
+            {/* 🔔 通知ベルボタン */}
+            <div className="relative">
+              <button onClick={() => { setShowNotifications(!showNotifications); if (!showNotifications) markAllRead(); }}
+                className="relative w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors">
+                <span className="text-lg">🔔</span>
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* 通知一覧パネル */}
+              {showNotifications && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                    <span className="text-sm font-bold text-gray-900">通知</span>
+                    <button onClick={markAllRead} className="text-[10px] text-sky-600 hover:text-sky-700 font-bold">すべて既読</button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                    {notifications.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-xs text-gray-400">通知はありません</div>
+                    ) : notifications.map(n => (
+                      <div key={n.id} className={`px-4 py-3 flex items-start gap-3 ${!n.is_read ? "bg-sky-50" : ""}`}>
+                        <span className="text-lg shrink-0 mt-0.5">{notifIcon(n.type)}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-bold ${!n.is_read ? "text-gray-900" : "text-gray-500"}`}>{n.title}</p>
+                          {n.body && <p className="text-[10px] text-gray-400 mt-0.5">{n.body}</p>}
+                          <p className="text-[9px] text-gray-300 mt-1">{new Date(n.created_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                        </div>
+                        {!n.is_read && <span className="w-2 h-2 bg-sky-500 rounded-full shrink-0 mt-1.5" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {staff && (
               <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5">
                 <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: staff.color || "#0ea5e9" }}>{staff.name.charAt(0)}</div>
@@ -267,6 +368,34 @@ export default function Home() {
           ))}
         </div>
       </main>
+
+      {/* ===== トースト通知 ===== */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map(toast => (
+          <div key={toast.id}
+            className="bg-white border border-gray-200 rounded-2xl shadow-2xl px-4 py-3 flex items-start gap-3 w-72 pointer-events-auto animate-slide-in">
+            <span className="text-xl shrink-0">{notifIcon(toast.type)}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900">{toast.title}</p>
+              {toast.body && <p className="text-xs text-gray-500 mt-0.5">{toast.body}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 通知パネル外クリックで閉じる */}
+      {showNotifications && (
+        <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)} />
+      )}
+
+      <style>{`
+        @keyframes slide-in {
+          from { opacity: 0; transform: translateX(100%); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        .animate-slide-in { animation: slide-in 0.3s ease; }
+      `}</style>
+    </div>
     </div>
   );
 }
