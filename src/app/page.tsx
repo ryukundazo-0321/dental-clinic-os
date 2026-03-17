@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 type BillingRow = { total_points: number; patient_burden: number; created_at: string };
 type AlertItem = { type: string; label: string; count: number; href: string; color: string; icon: string };
 
-type Notification = {
+type ClinicNotification = {
   id: string;
   type: string;
   title: string;
@@ -35,7 +35,7 @@ export default function Home() {
   const [monthTotal, setMonthTotal] = useState({ points: 0, burden: 0, count: 0 });
 
   // 通知
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<ClinicNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -53,7 +53,7 @@ export default function Home() {
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
   // トースト表示
-  function showToast(notif: Notification) {
+  function showToast(notif: ClinicNotification) {
     const toast: Toast = { id: notif.id, title: notif.title, body: notif.body, type: notif.type };
     setToasts(prev => [...prev, toast]);
     setTimeout(() => {
@@ -73,7 +73,7 @@ export default function Home() {
   // 通知取得
   const fetchNotifications = useCallback(async () => {
     const { data } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(30);
-    if (data) setNotifications(data as Notification[]);
+    if (data) setNotifications(data as ClinicNotification[]);
   }, []);
 
   // 全既読
@@ -90,7 +90,7 @@ export default function Home() {
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => fetchAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "billing" }, () => fetchAll())
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, (payload) => {
-        const newNotif = payload.new as Notification;
+        const newNotif = payload.new as ClinicNotification;
         setNotifications(prev => [newNotif, ...prev]);
         showToast(newNotif);
       })
