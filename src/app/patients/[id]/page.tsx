@@ -256,7 +256,7 @@ export default function PatientDetailPage() {
       .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "chat_messages",
         filter: `patient_id=eq.${pid}`,
-      }, (payload) => {
+      }, (payload: { new: ChatMessage }) => {
         setChatMessages(prev => [...prev, payload.new as ChatMessage]);
         setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
       })
@@ -1329,7 +1329,7 @@ export default function PatientDetailPage() {
         </div>
       )}
 
-      {/* 領収書モーダル */}}
+      {/* 領収書モーダル */}
       {receiptHtml && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setReceiptHtml(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1352,14 +1352,16 @@ export default function PatientDetailPage() {
 // ==============================
 // サブコンポーネント
 // ==============================
-function StatusRow({ teeth, tc, sel, setSel, jaw }: { teeth: string[]; tc: Record<string, ToothData>; sel: string | null; setSel: (t: string) => void; jaw: "upper" | "lower" }) {
+function StatusRow({ teeth, tc, sel, setSel, jaw, isDeciduous = false }: { teeth: string[]; tc: Record<string, ToothData>; sel: string | null; setSel: (t: string) => void; jaw: "upper" | "lower"; isDeciduous?: boolean }) {
   return (
     <div className="flex gap-[2px]">
       {teeth.map(t => {
         const d = tc[t]; const s = d?.status || "normal"; const c = TS[s] || TS.normal; const isSel = sel === t;
+        const size = isDeciduous ? "w-8 h-10" : "w-10 h-12";
+        const textColor = isDeciduous && s === "normal" ? "text-pink-300" : c.color;
         return (
           <button key={t} onClick={() => setSel(t === sel ? "" : t)}
-            className={`w-10 h-12 rounded-lg border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${c.cbg} ${c.border} ${c.color} ${isSel ? "ring-2 ring-sky-400 scale-110 shadow-md" : ""}`}>
+            className={`${size} rounded-lg border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${c.cbg} ${c.border} ${textColor} ${isSel ? "ring-2 ring-sky-400 scale-110 shadow-md" : ""}`}>
             {jaw === "upper" ? (
               <><span className="text-[7px] text-gray-400 leading-none">{t}</span>
                 <span className="leading-tight">{s !== "normal" ? c.sl || c.label : ""}</span>
