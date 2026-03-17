@@ -47,6 +47,7 @@ type PatientDiagnosis = {
   session_total?: number | null; session_current?: number | null;
 };
 type DiagnosisMaster = { code: string; name: string; category: string };
+type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; modifier_position: string };
 type ToothHistoryEntry = {
   id: string; tooth_number: string; change_type: string;
   previous_status: string | null; new_status: string | null;
