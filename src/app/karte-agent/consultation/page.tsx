@@ -620,8 +620,21 @@ export default function ConsultationPage() {
   }
 
   async function confirmApplyAll() {
-    setToothChartDraft(xrayConfirmChart);
-    await saveToothChart(xrayConfirmChart);
+    // xrayConfirmChartのstate更新タイミング問題を回避するため
+    // aiToothFindingsから直接chartを再構築する
+    const statusToChart: Record<string, string> = {
+      caries: "c2", c0: "c0", c1: "c1", c2: "c2", c3: "c3", c4: "c4", watch: "watch",
+      crown: "crown", treated: "cr", filled: "cr", cr: "cr", inlay: "inlay",
+      bridge: "bridge", bridge_missing: "bridge_missing", missing: "missing",
+      implant: "implant", rct: "rct", root_remain: "root_remain", in_treatment: "in_treatment",
+    };
+    const newChart = { ...toothChartDraft };
+    for (const finding of aiToothFindings) {
+      const chartStatus = statusToChart[finding.finding?.toLowerCase()] || (finding as { chartStatus?: string }).chartStatus || "crown";
+      newChart[finding.tooth] = { status: chartStatus, notes: finding.detail || finding.finding };
+    }
+    setToothChartDraft(newChart);
+    await saveToothChart(newChart);
     addLog(`✅ AI所見を一括反映: ${aiToothFindings.length}件`);
 
     const integrated: DetectedDiagnosis[] = [];
