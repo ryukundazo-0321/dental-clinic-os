@@ -548,14 +548,12 @@ export default function ConsultationPage() {
       ctx.drawImage(img, 0, 0, width, height);
       if (isHeic) addLog(`📱 iPad形式を変換・リサイズ中...`);
 
-      // ── 画像前処理（X線読影精度向上） ──────────────────────────────────
+      // 画像種別をログに記録（前処理は行わず元画像をそのままAPIに渡す）
+      // GPT-4oは元画像の方が精度が高いため、コントラスト変換は行わない
       const imageData = ctx.getImageData(0, 0, width, height);
       const pixels = imageData.data;
-
-      // 画像種別を自動判定（モニター撮影 vs X線直接）
-      let totalBrightness = 0;
-      let colorVariance = 0;
-      const sampleStep = Math.max(1, Math.floor(pixels.length / 4 / 10000));
+      let totalBrightness = 0, colorVariance = 0;
+      const sampleStep = Math.max(1, Math.floor(pixels.length / 4 / 5000));
       let sampleCount = 0;
       for (let i = 0; i < pixels.length; i += 4 * sampleStep) {
         const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
@@ -567,24 +565,9 @@ export default function ConsultationPage() {
       const avgColorVariance = colorVariance / sampleCount;
       const isMonitorPhoto = avgColorVariance > 15 || avgBrightness > 180;
       const isXray = avgColorVariance < 10 && avgBrightness < 160;
-
-      if (isMonitorPhoto) addLog(`📸 モニター撮影を検出 → コントラスト強調・グレースケール変換を適用`);
-      else if (isXray) addLog(`🦷 X線画像を検出 → コントラスト強調を適用`);
-
-      // ピクセル処理: グレースケール変換 + コントラスト強調 + ガンマ補正
-      for (let i = 0; i < pixels.length; i += 4) {
-        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-        const contrastFactor = isMonitorPhoto ? 1.6 : isXray ? 1.4 : 1.2;
-        let enhanced = 128 + (gray - 128) * contrastFactor;
-        if (isMonitorPhoto) {
-          enhanced = 255 * Math.pow(Math.max(0, Math.min(255, enhanced)) / 255, 0.75);
-        }
-        const v = Math.round(Math.max(0, Math.min(255, enhanced)));
-        pixels[i] = v; pixels[i+1] = v; pixels[i+2] = v;
-      }
-      ctx.putImageData(imageData, 0, 0);
-      // ── 前処理ここまで ────────────────────────────────────────────────
+      if (isMonitorPhoto) addLog(`📸 モニター撮影として解析`);
+      else if (isXray) addLog(`🦷 X線画像として解析`);
+      else addLog(`📷 画像を解析中...`);
 
       const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
       const base64 = dataUrl.split(",")[1];
@@ -592,7 +575,13 @@ export default function ConsultationPage() {
       const res = await fetch("/api/xray-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_base64: base64, media_type: "image/jpeg", patient_id: patient?.id, medical_record_id: medicalRecord?.id }),
+        body: JSON.stringify({
+          image_base64: base64,
+          media_type: "image/jpeg",
+          patient_id: patient?.id,
+          medical_record_id: medicalRecord?.id,
+          image_hint: isMonitorPhoto ? "monitor_photo" : isXray ? "xray" : "unknown",
+        }),
       });
 
       if (res.ok) {
