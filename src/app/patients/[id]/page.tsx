@@ -47,8 +47,6 @@ type PatientDiagnosis = {
   session_total?: number | null; session_current?: number | null;
 };
 type DiagnosisMaster = { code: string; name: string; category: string };
-type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; modifier_position: string };
-type ToothMode = "permanent" | "deciduous" | "both";
 type ToothHistoryEntry = {
   id: string; tooth_number: string; change_type: string;
   previous_status: string | null; new_status: string | null;
@@ -66,6 +64,10 @@ type PatientImage = {
 type BillingData = {
   total_points: number; patient_burden: number; insurance_claim: number;
   burden_ratio: number; procedures_detail: unknown[]; payment_status: string; created_at: string;
+};
+type ChatMessage = {
+  id: string; patient_id: string; sender_type: string;
+  sender_name: string | null; content: string; is_read: boolean; created_at: string;
 };
 
 // ==============================
@@ -156,10 +158,6 @@ export default function PatientDetailPage() {
   const [diagnoses, setDiagnoses] = useState<PatientDiagnosis[]>([]);
   const [diagMaster, setDiagMaster] = useState<DiagnosisMaster[]>([]);
   const [diagModifiers, setDiagModifiers] = useState<DiagnosisModifier[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState("");
-  const [selectedSuffix, setSelectedSuffix] = useState("");
-  const [baseDiagName, setBaseDiagName] = useState("");
-  const [toothMode, setToothMode] = useState<ToothMode>("permanent");
   const [th, setTH] = useState<ToothHistoryEntry[]>([]);
   const [ps, setPS] = useState<PerioSnapshot[]>([]);
   const [images, setImages] = useState<PatientImage[]>([]);
@@ -172,6 +170,11 @@ export default function PatientDetailPage() {
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [expandedRecord, setExpandedRecord] = useState<string | null>(null);
   const [receiptHtml, setReceiptHtml] = useState<string | null>(null);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
   const [imgLoading, setImgLoading] = useState(false);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
 
@@ -187,6 +190,9 @@ export default function PatientDetailPage() {
   // 傷病名追加
   const [showDiagForm, setShowDiagForm] = useState(false);
   const [diagSearch, setDiagSearch] = useState("");
+  const [selectedPrefix, setSelectedPrefix] = useState("");
+  const [selectedSuffix, setSelectedSuffix] = useState("");
+  const [baseDiagName, setBaseDiagName] = useState("");
   const [newDiag, setNewDiag] = useState({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false });
 
   // カルテ編集（カルテ履歴クリックで展開・SOAP編集）
@@ -228,11 +234,48 @@ export default function PatientDetailPage() {
     if (t.data) setTH(t.data as ToothHistoryEntry[]);
     if (s.data) setPS(s.data as PerioSnapshot[]);
     if (img.data) setImages(img.data as PatientImage[]);
-    if (todayApt.data) setTodayAptId((todayApt.data as { id: string }).id);
+    if (todayApt.data) setTodayAptId(todayApt.data.id);
     setLoading(false);
   }, [pid]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // チャットメッセージ取得 + Realtimeサブスクリプション
+  useEffect(() => {
+    async function fetchChat() {
+      const { data } = await supabase.from("chat_messages")
+        .select("*").eq("patient_id", pid).order("created_at", { ascending: true });
+      if (data) setChatMessages(data as ChatMessage[]);
+    }
+    fetchChat();
+
+    const channel = supabase.channel(`chat-${pid}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "chat_messages",
+        filter: `patient_id=eq.${pid}`,
+      }, (payload) => {
+        setChatMessages(prev => [...prev, payload.new as ChatMessage]);
+        setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [pid]);
+
+  async function sendChatMessage() {
+    if (!chatInput.trim() || chatSending) return;
+    setChatSending(true);
+    await supabase.from("chat_messages").insert({
+      patient_id: pid,
+      sender_type: "staff",
+      sender_name: "スタッフ",
+      content: chatInput.trim(),
+      is_read: false,
+    });
+    setChatInput("");
+    setChatSending(false);
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+  }
 
   useEffect(() => {
     (async () => {
@@ -273,7 +316,6 @@ export default function PatientDetailPage() {
     if (data) setDiagnoses(data as PatientDiagnosis[]);
     setNewDiag({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false });
     setShowDiagForm(false); setDiagSearch("");
-    setSelectedPrefix(""); setSelectedSuffix(""); setBaseDiagName("");
     setSaving(false);
   }
 
@@ -504,15 +546,6 @@ export default function PatientDetailPage() {
                     📊 P検
                   </button>
                 </div>
-                {/* 乳歯モード切り替え */}
-                <div className="flex bg-gray-100 rounded-lg p-0.5">
-                  <button onClick={() => setToothMode("permanent")}
-                    className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${toothMode==="permanent" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>永久歯</button>
-                  <button onClick={() => setToothMode("both")}
-                    className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${toothMode==="both" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>混合</button>
-                  <button onClick={() => setToothMode("deciduous")}
-                    className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${toothMode==="deciduous" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>乳歯</button>
-                </div>
                 {/* 凡例 */}
                 <div className="flex items-center gap-2 text-[10px]">
                   {chartMode === "status" ? (
@@ -537,25 +570,11 @@ export default function PatientDetailPage() {
               <>
                 <div className="text-[9px] text-gray-400 mb-1">上顎 MAXILLA ← R</div>
                 <div className="flex justify-center overflow-x-auto mb-1">
-                  {(toothMode === "permanent" || toothMode === "both") && (
-                    <StatusRow teeth={[...UR, ...UL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="upper" />
-                  )}
+                  <StatusRow teeth={[...UR, ...UL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="upper" />
                 </div>
-                {(toothMode === "deciduous" || toothMode === "both") && (
-                  <div className="flex justify-center overflow-x-auto mb-1">
-                    <StatusRow teeth={[...UR_D, ...UL_D]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="upper" isDeciduous />
-                  </div>
-                )}
                 <div className="text-[9px] text-gray-400 mb-1">下顎 MANDIBLE ← R</div>
-                {(toothMode === "deciduous" || toothMode === "both") && (
-                  <div className="flex justify-center overflow-x-auto mb-1">
-                    <StatusRow teeth={[...LR_D, ...LL_D]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="lower" isDeciduous />
-                  </div>
-                )}
                 <div className="flex justify-center overflow-x-auto">
-                  {(toothMode === "permanent" || toothMode === "both") && (
-                    <StatusRow teeth={[...LR, ...LL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="lower" />
-                  )}
+                  <StatusRow teeth={[...LR, ...LL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="lower" />
                 </div>
               </>
             ) : (
@@ -779,10 +798,16 @@ export default function PatientDetailPage() {
                 <span className="text-gray-400 text-xs">{rightPanel === "chat" ? "▲" : "▼"}</span>
               </button>
               {rightPanel === "chat" && (
-                <div className="border-t border-gray-100 px-4 py-4 text-center text-xs text-gray-400">
-                  <p className="text-2xl mb-2">💬</p>
-                  <p>患者とのチャット機能</p>
-                  <p className="text-[10px] mt-1 text-gray-300">Phase 4で実装予定</p>
+                <div className="border-t border-gray-100 px-4 py-3">
+                  <button onClick={() => setShowChat(true)}
+                    className="w-full bg-sky-600 text-white py-2.5 rounded-lg text-xs font-bold hover:bg-sky-700 flex items-center justify-center gap-2">
+                    💬 チャットを開く
+                    {chatMessages.filter(m => !m.is_read && m.sender_type === "patient").length > 0 && (
+                      <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                        {chatMessages.filter(m => !m.is_read && m.sender_type === "patient").length}
+                      </span>
+                    )}
+                  </button>
                 </div>
               )}
             </div>
@@ -846,12 +871,8 @@ export default function PatientDetailPage() {
                   {diagSearch.length > 0 && (
                     <div className="max-h-28 overflow-y-auto bg-gray-50 rounded-lg border border-gray-200 mb-2">
                       {diagMaster.filter(d => d.name.includes(diagSearch) || d.code.includes(diagSearch)).slice(0, 10).map(d => (
-                        <button key={d.code} onClick={() => {
-                          setBaseDiagName(d.name);
-                          setSelectedPrefix(""); setSelectedSuffix("");
-                          setNewDiag(prev => ({ ...prev, diagnosis_code: d.code, diagnosis_name: d.name }));
-                          setDiagSearch("");
-                        }}
+                        <button key={d.code} onClick={() => { setBaseDiagName(d.name); setSelectedPrefix(""); setSelectedSuffix("");
+                          setNewDiag(prev => ({ ...prev, diagnosis_code: d.code, diagnosis_name: d.name })); setDiagSearch(""); }}
                           className="w-full text-left px-3 py-1.5 text-xs hover:bg-sky-50 border-b border-gray-100 last:border-0">
                           <span className="text-gray-400 mr-2">{d.code}</span>
                           <span className="font-bold text-gray-700">{d.name}</span>
@@ -863,54 +884,48 @@ export default function PatientDetailPage() {
                     <>
                       <div className="bg-sky-50 rounded-lg px-2 py-1.5 mb-2 text-xs font-bold text-sky-700">{newDiag.diagnosis_name}</div>
                       {/* 修飾語 */}
-                      {diagModifiers.length > 0 && (
-                        <div className="bg-white rounded-lg border border-gray-200 p-2 mb-2">
-                          <p className="text-[9px] text-gray-400 font-bold mb-1">修飾語</p>
-                          {(() => {
-                            const prefixes = diagModifiers.filter(m => m.modifier_position === "prefix");
-                            const suffixes = diagModifiers.filter(m => m.modifier_position === "suffix");
-                            const updateName = (prefix: string, suffix: string) => {
-                              const combined = `${prefix}${baseDiagName}${suffix}`;
-                              setNewDiag(prev => ({ ...prev, diagnosis_name: combined }));
-                            };
-                            return (
-                              <>
-                                {prefixes.length > 0 && (
-                                  <div className="mb-1.5">
-                                    <p className="text-[9px] text-gray-300 mb-0.5">前置</p>
-                                    <div className="flex flex-wrap gap-1">
-                                      <button onClick={() => { setSelectedPrefix(""); updateName("", selectedSuffix); }}
-                                        className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedPrefix === "" ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>なし</button>
-                                      {prefixes.map(m => (
-                                        <button key={m.id} onClick={() => { setSelectedPrefix(m.modifier_name); updateName(m.modifier_name, selectedSuffix); }}
-                                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedPrefix === m.modifier_name ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>
-                                          {m.modifier_name}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                {suffixes.length > 0 && (
-                                  <div>
-                                    <p className="text-[9px] text-gray-300 mb-0.5">後置</p>
-                                    <div className="flex flex-wrap gap-1">
-                                      <button onClick={() => { setSelectedSuffix(""); updateName(selectedPrefix, ""); }}
-                                        className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedSuffix === "" ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>なし</button>
-                                      {suffixes.map(m => (
-                                        <button key={m.id} onClick={() => { setSelectedSuffix(m.modifier_name); updateName(selectedPrefix, m.modifier_name); }}
-                                          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${selectedSuffix === m.modifier_name ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>
-                                          {m.modifier_name}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-                      <div className="bg-sky-50 rounded-lg px-2 py-1.5 mb-2 text-xs font-bold text-sky-700">{newDiag.diagnosis_name}</div>
+                      {diagModifiers.length > 0 && (() => {
+                        const prefixes = diagModifiers.filter(m => m.modifier_position === "prefix");
+                        const suffixes = diagModifiers.filter(m => m.modifier_position === "suffix");
+                        const updateName = (prefix: string, suffix: string) => {
+                          setNewDiag(prev => ({ ...prev, diagnosis_name: `${prefix}${baseDiagName}${suffix}` }));
+                        };
+                        return (
+                          <div className="bg-white rounded-lg border border-gray-200 p-2 mb-2">
+                            <p className="text-[9px] text-gray-400 font-bold mb-1">修飾語</p>
+                            {prefixes.length > 0 && (
+                              <div className="mb-1.5">
+                                <p className="text-[9px] text-gray-300 mb-0.5">前置</p>
+                                <div className="flex flex-wrap gap-1">
+                                  <button onClick={() => { setSelectedPrefix(""); updateName("", selectedSuffix); }}
+                                    className={`text-[10px] px-2 py-0.5 rounded border ${selectedPrefix==="" ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>なし</button>
+                                  {prefixes.map(m => (
+                                    <button key={m.id} onClick={() => { setSelectedPrefix(m.modifier_name); updateName(m.modifier_name, selectedSuffix); }}
+                                      className={`text-[10px] px-2 py-0.5 rounded border ${selectedPrefix===m.modifier_name ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>
+                                      {m.modifier_name}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {suffixes.length > 0 && (
+                              <div>
+                                <p className="text-[9px] text-gray-300 mb-0.5">後置</p>
+                                <div className="flex flex-wrap gap-1">
+                                  <button onClick={() => { setSelectedSuffix(""); updateName(selectedPrefix, ""); }}
+                                    className={`text-[10px] px-2 py-0.5 rounded border ${selectedSuffix==="" ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>なし</button>
+                                  {suffixes.map(m => (
+                                    <button key={m.id} onClick={() => { setSelectedSuffix(m.modifier_name); updateName(selectedPrefix, m.modifier_name); }}
+                                      className={`text-[10px] px-2 py-0.5 rounded border ${selectedSuffix===m.modifier_name ? "bg-sky-100 border-sky-300 text-sky-700" : "bg-white border-gray-200 text-gray-400"}`}>
+                                      {m.modifier_name}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <div className="grid grid-cols-2 gap-2 mb-2">
                         <div><label className="text-[9px] text-gray-400 block mb-0.5">歯番</label>
                           <input value={newDiag.tooth_number} onChange={e => setNewDiag({...newDiag, tooth_number: e.target.value})}
@@ -1231,7 +1246,64 @@ export default function PatientDetailPage() {
         </div>
       )}
 
-      {/* 領収書モーダル */}
+      {/* ===== チャットポップアップ ===== */}
+      {showChat && (
+        <div className="fixed inset-0 z-50 flex items-end justify-end p-4 pointer-events-none">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm h-[520px] flex flex-col pointer-events-auto border border-gray-200">
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between px-4 py-3 bg-sky-600 rounded-t-2xl">
+              <div className="flex items-center gap-2">
+                <span className="text-white text-sm">💬</span>
+                <span className="text-white text-sm font-bold">{patient?.name_kanji} さんとのチャット</span>
+              </div>
+              <button onClick={() => setShowChat(false)} className="text-sky-200 hover:text-white text-lg">✕</button>
+            </div>
+
+            {/* メッセージ一覧 */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
+              {chatMessages.length === 0 ? (
+                <div className="text-center py-8 text-xs text-gray-400">
+                  <p className="text-2xl mb-2">💬</p>
+                  <p>まだメッセージはありません</p>
+                </div>
+              ) : chatMessages.map(msg => (
+                <div key={msg.id} className={`flex ${msg.sender_type === "staff" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+                    msg.sender_type === "staff"
+                      ? "bg-sky-600 text-white rounded-br-sm"
+                      : "bg-white text-gray-800 border border-gray-200 rounded-bl-sm"
+                  }`}>
+                    <p className="leading-relaxed">{msg.content}</p>
+                    <p className={`text-[9px] mt-1 ${msg.sender_type === "staff" ? "text-sky-200" : "text-gray-400"}`}>
+                      {new Date(msg.created_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                      {msg.sender_type === "staff" && " · スタッフ"}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* 入力エリア */}
+            <div className="px-3 py-3 border-t border-gray-200 flex items-end gap-2">
+              <textarea
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                placeholder="メッセージを入力..."
+                rows={2}
+                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-sky-400"
+              />
+              <button onClick={sendChatMessage} disabled={chatSending || !chatInput.trim()}
+                className="bg-sky-600 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-sky-700 disabled:opacity-40 shrink-0">
+                {chatSending ? "⏳" : "→"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 領収書モーダル */}}
       {receiptHtml && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setReceiptHtml(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -1254,16 +1326,14 @@ export default function PatientDetailPage() {
 // ==============================
 // サブコンポーネント
 // ==============================
-function StatusRow({ teeth, tc, sel, setSel, jaw, isDeciduous = false }: { teeth: string[]; tc: Record<string, ToothData>; sel: string | null; setSel: (t: string) => void; jaw: "upper" | "lower"; isDeciduous?: boolean }) {
+function StatusRow({ teeth, tc, sel, setSel, jaw }: { teeth: string[]; tc: Record<string, ToothData>; sel: string | null; setSel: (t: string) => void; jaw: "upper" | "lower" }) {
   return (
     <div className="flex gap-[2px]">
       {teeth.map(t => {
         const d = tc[t]; const s = d?.status || "normal"; const c = TS[s] || TS.normal; const isSel = sel === t;
-        const size = isDeciduous ? "w-8 h-10" : "w-10 h-12";
-        const textColor = isDeciduous && s === "normal" ? "text-pink-300" : c.color;
         return (
           <button key={t} onClick={() => setSel(t === sel ? "" : t)}
-            className={`${size} rounded-lg border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${c.cbg} ${c.border} ${textColor} ${isSel ? "ring-2 ring-sky-400 scale-110 shadow-md" : ""}`}>
+            className={`w-10 h-12 rounded-lg border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${c.cbg} ${c.border} ${c.color} ${isSel ? "ring-2 ring-sky-400 scale-110 shadow-md" : ""}`}>
             {jaw === "upper" ? (
               <><span className="text-[7px] text-gray-400 leading-none">{t}</span>
                 <span className="leading-tight">{s !== "normal" ? c.sl || c.label : ""}</span>
