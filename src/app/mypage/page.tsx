@@ -66,6 +66,16 @@ type PatientImage = {
   created_at: string;
 };
 
+type ClinicBlock = {
+  id: string;
+  block_type: "date" | "weekly" | "daily" | "datetime";
+  block_date: string | null;
+  day_of_week: number | null;
+  time_from: string | null;
+  time_to: string | null;
+  is_active: boolean;
+};
+
 type Tab = "appointment" | "status" | "notice" | "chat" | "documents";
 
 // ===== Constants =====
@@ -140,6 +150,9 @@ export default function MyPage() {
   const [activeTab, setActiveTab] = useState<Tab>("appointment");
   const [cancelConfirm, setCancelConfirm] = useState<string | null>(null);
 
+  // 予約シャッター
+  const [clinicBlocks, setClinicBlocks] = useState<ClinicBlock[]>([]);
+
   // 予約
   const [bookStep, setBookStep] = useState<"select_date"|"select_time"|"confirm"|"complete">("select_date");
   const [selectedDate, setSelectedDate] = useState("");
@@ -175,16 +188,18 @@ export default function MyPage() {
 
   async function loadPatientData(patientId: string) {
     setLoading(true);
-    const [pRes, aRes, dRes, imgRes] = await Promise.all([
+    const [pRes, aRes, dRes, imgRes, blockRes] = await Promise.all([
       supabase.from("patients").select("id,patient_number,name_kanji,name_kana,date_of_birth,sex,phone,insurance_type,burden_ratio,allergies,current_tooth_chart,notes").eq("id", patientId).single(),
       supabase.from("appointments").select("id,scheduled_at,status,patient_type,medical_records(soap_s,soap_o,soap_a,soap_p,doctor_confirmed)").eq("patient_id", patientId).order("scheduled_at", { ascending: false }),
       supabase.from("patient_diagnoses").select("id,diagnosis_name,tooth_number,start_date,outcome,session_total,session_current").eq("patient_id", patientId).eq("outcome", "continuing").order("start_date", { ascending: false }),
       supabase.from("patient_images").select("id,image_type,file_name,storage_path,created_at").eq("patient_id", patientId).order("created_at", { ascending: false }),
+      supabase.from("clinic_blocks").select("*").eq("is_active", true),
     ]);
     if (pRes.data) setPatientFull(pRes.data as PatientFull);
     if (aRes.data) setAppointments(aRes.data as Appointment[]);
     if (dRes.data) setDiagnoses(dRes.data as PatientDiagnosis[]);
     if (imgRes.data) setImages(imgRes.data as PatientImage[]);
+    if (blockRes.data) setClinicBlocks(blockRes.data as ClinicBlock[]);
     setLoading(false);
   }
 
@@ -237,6 +252,36 @@ export default function MyPage() {
     await supabase.from("appointments").update({ status: "cancelled" }).eq("id", aptId);
     setAppointments(prev => prev.map(a => a.id === aptId ? { ...a, status: "cancelled" } : a));
     setCancelConfirm(null);
+  }
+
+  // シャッターチェック
+  function isDateBlocked(dateStr: string): boolean {
+    const dt = new Date(dateStr + "T00:00:00");
+    const dow = dt.getDay();
+    return clinicBlocks.some(b => {
+      if (b.block_type === "date") return b.block_date === dateStr;
+      if (b.block_type === "weekly") return b.day_of_week === dow && !b.time_from && !b.time_to;
+      return false;
+    });
+  }
+
+  function isTimeBlocked(dateStr: string, timeStr: string): boolean {
+    const dt = new Date(dateStr + "T00:00:00");
+    const dow = dt.getDay();
+    const [h, m] = timeStr.split(":").map(Number);
+    const minutes = h * 60 + m;
+    return clinicBlocks.some(b => {
+      if (!b.time_from || !b.time_to) return false;
+      const [fh, fm] = b.time_from.split(":").map(Number);
+      const [th, tm] = b.time_to.split(":").map(Number);
+      const from = fh * 60 + fm;
+      const to = th * 60 + tm;
+      const inRange = minutes >= from && minutes < to;
+      if (b.block_type === "daily") return inRange;
+      if (b.block_type === "weekly") return b.day_of_week === dow && inRange;
+      if (b.block_type === "datetime") return b.block_date === dateStr && inRange;
+      return false;
+    });
   }
 
   function getAvailableDates() {
@@ -429,21 +474,29 @@ export default function MyPage() {
                 <p className="text-xs text-gray-400 mb-4">{formatDateFull(selectedDate)}</p>
                 <p className="text-[10px] text-gray-400 font-bold mb-2">午前</p>
                 <div className="grid grid-cols-4 gap-2 mb-4">
-                  {getAvailableTimes().filter(t => parseInt(t) < 13).map(t => (
-                    <button key={t} onClick={() => { setSelectedTime(t); setBookStep("confirm"); }}
-                      className="py-2.5 rounded-lg border-2 border-gray-200 text-sm font-bold text-gray-700 hover:border-sky-400 hover:bg-sky-50">
-                      {t}
-                    </button>
-                  ))}
+                  {getAvailableTimes().filter(t => parseInt(t) < 13).map(t => {
+                    const blocked = isTimeBlocked(selectedDate, t);
+                    return (
+                      <button key={t} disabled={blocked}
+                        onClick={() => { if (!blocked) { setSelectedTime(t); setBookStep("confirm"); } }}
+                        className={`py-2.5 rounded-lg border-2 text-sm font-bold transition-all ${blocked ? "border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed" : "border-gray-200 text-gray-700 hover:border-sky-400 hover:bg-sky-50"}`}>
+                        {blocked ? "✕" : t}
+                      </button>
+                    );
+                  })}
                 </div>
                 <p className="text-[10px] text-gray-400 font-bold mb-2">午後</p>
                 <div className="grid grid-cols-4 gap-2">
-                  {getAvailableTimes().filter(t => parseInt(t) >= 14).map(t => (
-                    <button key={t} onClick={() => { setSelectedTime(t); setBookStep("confirm"); }}
-                      className="py-2.5 rounded-lg border-2 border-gray-200 text-sm font-bold text-gray-700 hover:border-sky-400 hover:bg-sky-50">
-                      {t}
-                    </button>
-                  ))}
+                  {getAvailableTimes().filter(t => parseInt(t) >= 14).map(t => {
+                    const blocked = isTimeBlocked(selectedDate, t);
+                    return (
+                      <button key={t} disabled={blocked}
+                        onClick={() => { if (!blocked) { setSelectedTime(t); setBookStep("confirm"); } }}
+                        className={`py-2.5 rounded-lg border-2 text-sm font-bold transition-all ${blocked ? "border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed" : "border-gray-200 text-gray-700 hover:border-sky-400 hover:bg-sky-50"}`}>
+                        {blocked ? "✕" : t}
+                      </button>
+                    );
+                  })}
                 </div>
                 <button onClick={() => setBookStep("select_date")} className="mt-4 w-full bg-gray-100 text-gray-500 py-2.5 rounded-xl text-xs font-bold">← 日付に戻る</button>
               </div>
@@ -454,11 +507,14 @@ export default function MyPage() {
                   {getAvailableDates().map(d => {
                     const dt = new Date(d+"T00:00:00");
                     const isSat = dt.getDay() === 6;
+                    const blocked = isDateBlocked(d);
                     return (
-                      <button key={d} onClick={() => { setSelectedDate(d); setBookStep("select_time"); }}
-                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 text-left hover:border-sky-400 hover:bg-sky-50 transition-all ${isSat ? "border-blue-200 bg-blue-50" : "border-gray-200"}`}>
-                        <span className="text-sm font-bold text-gray-800">{formatDateFull(d)}</span>
-                        <span className="text-xs text-gray-400">{isSat ? "午前のみ" : "9:00〜18:00"}</span>
+                      <button key={d}
+                        disabled={blocked}
+                        onClick={() => { if (!blocked) { setSelectedDate(d); setBookStep("select_time"); } }}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 text-left transition-all ${blocked ? "border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed" : isSat ? "border-blue-200 bg-blue-50 hover:border-sky-400 hover:bg-sky-50" : "border-gray-200 hover:border-sky-400 hover:bg-sky-50"}`}>
+                        <span className={`text-sm font-bold ${blocked ? "text-gray-400" : "text-gray-800"}`}>{formatDateFull(d)}</span>
+                        <span className="text-xs text-gray-400">{blocked ? "🚫 受付不可" : isSat ? "午前のみ" : "9:00〜18:00"}</span>
                       </button>
                     );
                   })}
