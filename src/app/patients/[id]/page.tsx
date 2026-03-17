@@ -46,6 +46,7 @@ type PatientDiagnosis = {
   outcome: string; is_primary: boolean; notes: string | null;
   session_total?: number | null; session_current?: number | null;
 };
+type ToothMode = "permanent" | "deciduous" | "both";
 type DiagnosisMaster = { code: string; name: string; category: string };
 type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; modifier_position: string };
 type ToothHistoryEntry = {
@@ -537,6 +538,15 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-bold text-gray-900">● 全顎チャート</h2>
               <div className="flex items-center gap-3">
+                {/* 乳歯モード切り替え */}
+                <div className="flex bg-gray-100 rounded-lg p-0.5">
+                  <button onClick={() => setToothMode("permanent")}
+                    className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${toothMode==="permanent" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>永久歯</button>
+                  <button onClick={() => setToothMode("both")}
+                    className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${toothMode==="both" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>混合</button>
+                  <button onClick={() => setToothMode("deciduous")}
+                    className={`px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all ${toothMode==="deciduous" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>乳歯</button>
+                </div>
                 {/* チャートモード切り替え */}
                 <div className="flex bg-gray-100 rounded-lg p-0.5">
                   <button onClick={() => setChartMode("status")}
@@ -572,11 +582,25 @@ export default function PatientDetailPage() {
               <>
                 <div className="text-[9px] text-gray-400 mb-1">上顎 MAXILLA ← R</div>
                 <div className="flex justify-center overflow-x-auto mb-1">
-                  <StatusRow teeth={[...UR, ...UL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="upper" />
+                  {(toothMode === "permanent" || toothMode === "both") && (
+                    <StatusRow teeth={[...UR, ...UL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="upper" />
+                  )}
                 </div>
+                {(toothMode === "deciduous" || toothMode === "both") && (
+                  <div className="flex justify-center overflow-x-auto mb-1">
+                    <StatusRow teeth={[...UR_D, ...UL_D]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="upper" isDeciduous />
+                  </div>
+                )}
                 <div className="text-[9px] text-gray-400 mb-1">下顎 MANDIBLE ← R</div>
+                {(toothMode === "deciduous" || toothMode === "both") && (
+                  <div className="flex justify-center overflow-x-auto mb-1">
+                    <StatusRow teeth={[...LR_D, ...LL_D]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="lower" isDeciduous />
+                  </div>
+                )}
                 <div className="flex justify-center overflow-x-auto">
-                  <StatusRow teeth={[...LR, ...LL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="lower" />
+                  {(toothMode === "permanent" || toothMode === "both") && (
+                    <StatusRow teeth={[...LR, ...LL]} tc={tc} sel={selectedTooth} setSel={setSelectedTooth} jaw="lower" />
+                  )}
                 </div>
               </>
             ) : (
