@@ -544,10 +544,49 @@ export default function ConsultationPage() {
 
       const canvas = document.createElement("canvas");
       canvas.width = width; canvas.height = height;
-      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
       if (isHeic) addLog(`📱 iPad形式を変換・リサイズ中...`);
 
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      // ── 画像前処理（X線読影精度向上） ──────────────────────────────────
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const pixels = imageData.data;
+
+      // 画像種別を自動判定（モニター撮影 vs X線直接）
+      let totalBrightness = 0;
+      let colorVariance = 0;
+      const sampleStep = Math.max(1, Math.floor(pixels.length / 4 / 10000));
+      let sampleCount = 0;
+      for (let i = 0; i < pixels.length; i += 4 * sampleStep) {
+        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+        totalBrightness += 0.299 * r + 0.587 * g + 0.114 * b;
+        colorVariance += Math.abs(r - g) + Math.abs(g - b) + Math.abs(r - b);
+        sampleCount++;
+      }
+      const avgBrightness = totalBrightness / sampleCount;
+      const avgColorVariance = colorVariance / sampleCount;
+      const isMonitorPhoto = avgColorVariance > 15 || avgBrightness > 180;
+      const isXray = avgColorVariance < 10 && avgBrightness < 160;
+
+      if (isMonitorPhoto) addLog(`📸 モニター撮影を検出 → コントラスト強調・グレースケール変換を適用`);
+      else if (isXray) addLog(`🦷 X線画像を検出 → コントラスト強調を適用`);
+
+      // ピクセル処理: グレースケール変換 + コントラスト強調 + ガンマ補正
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+        const contrastFactor = isMonitorPhoto ? 1.6 : isXray ? 1.4 : 1.2;
+        let enhanced = 128 + (gray - 128) * contrastFactor;
+        if (isMonitorPhoto) {
+          enhanced = 255 * Math.pow(Math.max(0, Math.min(255, enhanced)) / 255, 0.75);
+        }
+        const v = Math.round(Math.max(0, Math.min(255, enhanced)));
+        pixels[i] = v; pixels[i+1] = v; pixels[i+2] = v;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      // ── 前処理ここまで ────────────────────────────────────────────────
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
       const base64 = dataUrl.split(",")[1];
 
       const res = await fetch("/api/xray-analyze", {
@@ -579,7 +618,13 @@ export default function ConsultationPage() {
         setAiToothFindings(enrichedFindings);
         setXraySummary(data.summary || "");
         setXrayNotableFindings(data.analysis?.notable_findings || []);
-        addLog(`🦷 AI歯式解析完了: ${enrichedFindings.length}件の所見`);
+        const imageTypeLabel: Record<string, string> = {
+          panorama_xray: "パノラマX線", dental_xray: "デンタルX線",
+          monitor_photo: "モニター撮影", intraoral_photo: "口腔内写真",
+          screenshot: "スクリーンショット", unknown: "不明",
+        };
+        const imgType = imageTypeLabel[data.image_type] || data.image_type || "不明";
+        addLog(`🦷 AI歯式解析完了: ${enrichedFindings.length}件の所見（${imgType}として解析）`);
         // 写真パネルではなく確認ポップアップを開く
         if (enrichedFindings.length > 0) {
           setShowXrayConfirm(true);
