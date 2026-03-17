@@ -173,9 +173,10 @@ export default function PatientDetailPage() {
   const [expandedRecord, setExpandedRecord] = useState<string | null>(null);
   const [receiptHtml, setReceiptHtml] = useState<string | null>(null);
   const [imgLoading, setImgLoading] = useState(false);
-  const [showDocPanel, setShowDocPanel] = useState(false);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
 
+  // 右サイドパネル
+  const [rightPanel, setRightPanel] = useState<"untreated" | "tasks" | "documents" | "chat" | null>("untreated");
 
   // 患者基本情報モーダル
   const [showInfoModal, setShowInfoModal] = useState(false);
@@ -227,21 +228,18 @@ export default function PatientDetailPage() {
     if (t.data) setTH(t.data as ToothHistoryEntry[]);
     if (s.data) setPS(s.data as PerioSnapshot[]);
     if (img.data) setImages(img.data as PatientImage[]);
-    if (todayApt.data) setTodayAptId((todayApt.data as { id: string }).id);
+    if (todayApt.data) setTodayAptId(todayApt.data.id);
     setLoading(false);
   }, [pid]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
-    (async () => {
-      const { data: masterData } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
-      if (masterData) setDiagMaster(masterData as DiagnosisMaster[]);
-      try {
-        const { data: modData } = await supabase.from("diagnosis_modifiers").select("*").eq("is_active", true).order("sort_order");
-        if (modData) setDiagModifiers(modData as DiagnosisModifier[]);
-      } catch { /* テーブルがない場合はスキップ */ }
-    })();
+    supabase.from("diagnosis_master").select("code, name, category").order("sort_order")
+      .then(({ data }) => { if (data) setDiagMaster(data as DiagnosisMaster[]); });
+    supabase.from("diagnosis_modifiers").select("*").eq("is_active", true).order("sort_order")
+      .then(({ data }) => { if (data) setDiagModifiers(data as DiagnosisModifier[]); })
+      .catch(() => {}); // テーブルがない場合はスキップ
   }, []);
 
   // 年齢に応じた乳歯モード自動設定
@@ -484,14 +482,11 @@ export default function PatientDetailPage() {
 
       <main className="max-w-screen-2xl mx-auto px-4 py-4">
 
-        {/* ===== メインレイアウト（モックアップ準拠：左右2カラム） ===== */}
-        <div className="flex gap-4 items-start">
-
-          {/* ===== 左カラム：全顎チャート＋カルテ履歴 ===== */}
-          <div className="flex-1 min-w-0 flex flex-col gap-4">
+        {/* ===== 上段：全顎チャート ＋ 右サイドパネル ===== */}
+        <div className="flex gap-4 mb-4">
 
           {/* 全顎チャート */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex-1 bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-bold text-gray-900">● 全顎チャート</h2>
               <div className="flex items-center gap-3">
@@ -630,8 +625,170 @@ export default function PatientDetailPage() {
             })()}
           </div>
 
-          {/* カルテ履歴 */}
-                    <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+          {/* 右サイドパネル */}
+          <div className="w-72 shrink-0 flex flex-col gap-2">
+            {/* 未処置歯リスト */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <button onClick={() => setRightPanel(rightPanel === "untreated" ? null : "untreated")}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-800">📋 未処置歯リスト</span>
+                  {untreatedDiagnoses.length > 0 && (
+                    <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untreatedDiagnoses.length}歯</span>
+                  )}
+                </div>
+                <span className="text-gray-400 text-xs">{rightPanel === "untreated" ? "▲" : "▼"}</span>
+              </button>
+              {rightPanel === "untreated" && (
+                <div className="border-t border-gray-100">
+                  {untreatedDiagnoses.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-xs text-gray-400">未処置歯はありません</div>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
+                      {untreatedDiagnoses.map(d => {
+                        const current = d.session_current || 0;
+                        const total = d.session_total || 1;
+                        const pct = Math.round((current / total) * 100);
+                        const isActive = tc[d.tooth_number||""]?.status === "in_treatment";
+                        return (
+                          <div key={d.id} className={`px-4 py-2.5 ${isActive ? "bg-orange-50" : ""}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-1.5">
+                                {d.tooth_number && (
+                                  <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{d.tooth_number}番</span>
+                                )}
+                                <span className="text-xs font-bold text-gray-800">{d.diagnosis_name}</span>
+                              </div>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isActive ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>
+                                {isActive ? "治療中" : "計画中"}
+                              </span>
+                            </div>
+                            {total > 1 && (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                  <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-[9px] text-gray-400">{current}/{total}回</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="px-4 py-2 border-t border-gray-100">
+                    <button className="w-full text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2 rounded-lg transition-colors">
+                      ＋ 治療計画書作成
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* タスク一覧 */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <button onClick={() => setRightPanel(rightPanel === "tasks" ? null : "tasks")}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                <span className="text-sm font-bold text-gray-800">✅ タスク一覧</span>
+                <span className="text-gray-400 text-xs">{rightPanel === "tasks" ? "▲" : "▼"}</span>
+              </button>
+              {rightPanel === "tasks" && (
+                <div className="border-t border-gray-100 px-4 py-4 text-center text-xs text-gray-400">
+                  <p className="text-2xl mb-2">📌</p>
+                  <p>タスクはまだありません</p>
+                  <p className="text-[10px] mt-1 text-gray-300">Phase 4で実装予定</p>
+                </div>
+              )}
+            </div>
+
+            {/* 書類・資料 */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <button onClick={() => setRightPanel(rightPanel === "documents" ? null : "documents")}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-800">📄 書類・資料</span>
+                  {images.length > 0 && <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{images.length}</span>}
+                </div>
+                <span className="text-gray-400 text-xs">{rightPanel === "documents" ? "▲" : "▼"}</span>
+              </button>
+              {rightPanel === "documents" && (
+                <div className="border-t border-gray-100">
+                  {/* 画像アップロード */}
+                  <div className="px-4 py-3 border-b border-gray-50">
+                    <label className="flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-lg p-3 cursor-pointer hover:border-sky-400 hover:bg-sky-50 transition-all text-xs text-gray-500">
+                      <span>{imgLoading ? "⏳ アップロード中..." : "📤 画像をアップロード"}</span>
+                      <input type="file" accept="image/*" className="hidden" disabled={imgLoading}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0]; if (!file) return;
+                          setImgLoading(true);
+                          const formData = new FormData();
+                          formData.append("file", file); formData.append("patient_id", pid); formData.append("image_type", "panorama");
+                          const res = await fetch("/api/image-upload", { method: "POST", body: formData });
+                          const data = await res.json();
+                          if (data.success) await fetchData(); else alert("アップロード失敗: " + data.error);
+                          setImgLoading(false); e.target.value = "";
+                        }} />
+                    </label>
+                  </div>
+                  {/* 画像一覧 */}
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-50">
+                    {images.length === 0 ? (
+                      <div className="px-4 py-4 text-center text-xs text-gray-400">画像はまだありません</div>
+                    ) : images.map(img => {
+                      const pubUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL||""}/storage/v1/object/public/patient-images/${img.storage_path}`;
+                      const hasAi = img.ai_analysis && Object.keys(img.ai_analysis).length > 0;
+                      return (
+                        <div key={img.id} className="px-4 py-2 flex items-center gap-2">
+                          <img src={pubUrl} alt="" className="w-10 h-10 object-cover rounded border border-gray-200" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-bold text-gray-700 truncate">{img.file_name || img.image_type}</p>
+                            <p className="text-[9px] text-gray-400">{new Date(img.created_at).toLocaleDateString("ja-JP")}</p>
+                            {hasAi && <span className="text-[9px] text-green-600 font-bold">AI分析済</span>}
+                          </div>
+                          <button disabled={aiAnalyzing} onClick={async () => {
+                            setAiAnalyzing(true);
+                            const imgRes = await fetch(pubUrl); const blob = await imgRes.blob();
+                            const b64: string = await new Promise(res => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(blob); });
+                            const resp = await fetch("/api/xray-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64, patient_id: pid }) });
+                            const data = await resp.json();
+                            if (data.success) { await supabase.from("patient_images").update({ ai_analysis: data.analysis }).eq("id", img.id); await fetchData(); alert("AI分析完了: " + (data.summary||"")); }
+                            else alert("分析失敗: " + data.error);
+                            setAiAnalyzing(false);
+                          }} className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded hover:bg-purple-100 shrink-0">AI</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* 紹介状・同意書ボタン */}
+                  <div className="px-4 py-2 border-t border-gray-100 flex gap-2">
+                    <button className="flex-1 text-[10px] font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 py-1.5 rounded transition-colors">📋 紹介状</button>
+                    <button className="flex-1 text-[10px] font-bold text-green-600 bg-green-50 hover:bg-green-100 py-1.5 rounded transition-colors">✍️ 同意書</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* チャット */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <button onClick={() => setRightPanel(rightPanel === "chat" ? null : "chat")}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                <span className="text-sm font-bold text-gray-800">💬 チャット</span>
+                <span className="text-gray-400 text-xs">{rightPanel === "chat" ? "▲" : "▼"}</span>
+              </button>
+              {rightPanel === "chat" && (
+                <div className="border-t border-gray-100 px-4 py-4 text-center text-xs text-gray-400">
+                  <p className="text-2xl mb-2">💬</p>
+                  <p>患者とのチャット機能</p>
+                  <p className="text-[10px] mt-1 text-gray-300">Phase 4で実装予定</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ===== 下段：カルテ履歴 ===== */}
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">📋 カルテ履歴</h2>
             {/* 傷病名管理タブ */}
             <div className="flex items-center gap-2">
@@ -902,459 +1059,8 @@ export default function PatientDetailPage() {
                 </div>
               );
             })}
-          </div>  {/* カルテ履歴終了 */}
-
-          </div>{/* 左カラム終了 */}
-
-          {/* ===== 右カラム：未処置歯リスト＋タスク等（上から下まで） ===== */}
-          <div className="w-72 shrink-0 flex flex-col gap-3">
-
-            {/* 未処置歯リスト */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-gray-800">📋 未処置歯リスト</span>
-                  {untreatedDiagnoses.length > 0 && (
-                    <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">{untreatedDiagnoses.length}歯</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                {untreatedDiagnoses.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-xs text-gray-400">未処置歯はありません</div>
-                ) : (
-                  <div className="divide-y divide-gray-50">
-                    {untreatedDiagnoses.map(d => {
-                      const current = d.session_current || 0;
-                      const total = d.session_total || 1;
-                      const pct = Math.round((current / total) * 100);
-                      const isActive = tc[d.tooth_number||""]?.status === "in_treatment";
-                      return (
-                        <div key={d.id} className={`px-4 py-3 ${isActive ? "bg-orange-50" : ""}`}>
-                          <div className="flex items-start justify-between mb-1.5">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {d.tooth_number && (
-                                <span className="text-[11px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{d.tooth_number}番</span>
-                              )}
-                              <span className="text-xs font-bold text-gray-800">{d.diagnosis_name}</span>
-                            </div>
-                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ml-2 ${isActive ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"}`}>
-                              {isActive ? "治療中" : "計画中"}
-                            </span>
-                          </div>
-                          {total > 1 ? (
-                            <div className="flex items-center gap-2 mt-1">
-                              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="text-[9px] text-gray-400 shrink-0">{current}/{total}回</span>
-                            </div>
-                          ) : (
-                            <p className="text-[10px] text-gray-400 mt-0.5">
-                              {current === 0 ? "未開始" : `第${current}回`} / 全{total}回予定
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="px-4 py-3 border-t border-gray-100">
-                  <button className="w-full text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-lg transition-colors">
-                    ＋ 治療計画書作成
-                  </button>
-                </div>
-              </div>
-            </div>
-
-
-        </div>  {/* メインflex終了 */}
-      </main>
-
-      {/* ===== 患者基本情報モーダル ===== */}
-      {showInfoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h3 className="font-bold text-gray-900 text-lg">患者基本情報</h3>
-              <button onClick={() => setShowInfoModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-            {/* タブ */}
-            <div className="flex border-b px-6">
-              {([
-                { k: "basic" as const, l: "基本情報" },
-                { k: "insurance" as const, l: "保険情報" },
-                { k: "pub" as const, l: "公費" },
-                { k: "manage" as const, l: "管理情報" },
-              ]).map(t => (
-                <button key={t.k} onClick={() => setInfoTab(t.k)}
-                  className={`px-4 py-3 text-xs font-bold border-b-2 transition-colors ${infoTab===t.k ? "border-sky-500 text-sky-600" : "border-transparent text-gray-400 hover:text-gray-600"}`}>
-                  {t.l}
-                </button>
-              ))}
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {infoTab === "basic" && (
-                <div className="grid grid-cols-2 gap-4">
-                  <IR l="氏名（漢字）" v={patient.name_kanji} />
-                  <IR l="氏名（カナ）" v={patient.name_kana} />
-                  <IR l="生年月日" v={`${fd(patient.date_of_birth)} (${calcAge(patient.date_of_birth)})`} />
-                  <div><label className="text-[10px] text-gray-400 block mb-1">性別</label>
-                    <select value={String(infoForm.sex||"")} onChange={e => setInfoForm({...infoForm, sex: e.target.value})}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
-                      <option value="男">男</option><option value="女">女</option>
-                    </select>
-                  </div>
-                  <IR l="電話番号" v={patient.phone} />
-                  <IR l="メール" v={patient.email} />
-                  <div><label className="text-[10px] text-gray-400 block mb-1">郵便番号</label>
-                    <input value={String(infoForm.postal_code||"")} onChange={e => setInfoForm({...infoForm, postal_code: e.target.value})}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
-                  <div><label className="text-[10px] text-gray-400 block mb-1">住所</label>
-                    <input value={String(infoForm.address||"")} onChange={e => setInfoForm({...infoForm, address: e.target.value})}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
-                  <div><label className="text-[10px] text-gray-400 block mb-1">職業</label>
-                    <input value={String(infoForm.occupation||"")} onChange={e => setInfoForm({...infoForm, occupation: e.target.value})}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
-                  <div className="col-span-2"><label className="text-[10px] text-gray-400 block mb-1">備考</label>
-                    <textarea value={String(infoForm.notes||"")} onChange={e => setInfoForm({...infoForm, notes: e.target.value})} rows={3}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
-                </div>
-              )}
-              {infoTab === "insurance" && (
-                <div className="space-y-3">
-                  <div className="bg-sky-50 rounded-lg border border-sky-200 p-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] text-sky-700 font-bold">📷 保険証スキャン（OCR）</p>
-                      <label className="cursor-pointer">
-                        <span className="text-[10px] font-bold bg-sky-600 text-white px-3 py-1.5 rounded-lg hover:bg-sky-700">📸 保険証を撮影/選択</span>
-                        <input type="file" accept="image/*" capture="environment" className="hidden"
-                          onChange={async (ev) => {
-                            const file = ev.target.files?.[0]; if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = async () => {
-                              const b64 = (reader.result as string).split(",")[1];
-                              const res = await fetch("/api/insurance-ocr", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64 }) });
-                              const data = await res.json();
-                              if (data.success && data.ocr) {
-                                const o = data.ocr; const updates: Record<string, string | boolean | null> = {};
-                                if (o.insurance_type) updates.insurance_type = o.insurance_type;
-                                if (o.insurer_number) updates.insurer_number = o.insurer_number;
-                                if (o.insured_symbol) updates.insured_symbol = o.insured_symbol;
-                                if (o.insured_number) updates.insured_number = o.insured_number;
-                                setInfoForm(prev => ({ ...prev, ...updates }));
-                                alert(`✅ OCR完了 (${Math.round((o.confidence||0)*100)}%)`);
-                              } else alert("❌ " + (data.error || "OCR失敗"));
-                            };
-                            reader.readAsDataURL(file); ev.target.value = "";
-                          }} />
-                      </label>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <IR l="保険種別" v={patient.insurance_type} />
-                    <IR l="負担割合" v={patient.burden_ratio ? `${Math.round(patient.burden_ratio*10)}割` : null} />
-                    {[
-                      { l: "保険者番号", k: "insurer_number" }, { l: "被保険者記号", k: "insured_symbol" },
-                      { l: "被保険者番号", k: "insured_number" }, { l: "枝番", k: "insured_branch" },
-                      { l: "保険者名称", k: "insurer_name" }, { l: "保険者所在地", k: "insurer_address" },
-                      { l: "有効期限（開始）", k: "insurance_valid_from" }, { l: "有効期限（終了）", k: "insurance_valid_until" },
-                    ].map(({ l, k }) => (
-                      <div key={k}><label className="text-[10px] text-gray-400 block mb-1">{l}</label>
-                        <input value={String(infoForm[k]||"")} onChange={e => setInfoForm({...infoForm, [k]: e.target.value})}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {infoTab === "pub" && (
-                <div className="space-y-4">
-                  {[
-                    { title: "第一公費", ik: "public_insurer", rk: "public_recipient", vfk: "public_valid_from", vtk: "public_valid_until" },
-                    { title: "第二公費", ik: "public_insurer_2", rk: "public_recipient_2", vfk: "", vtk: "" },
-                    { title: "第三公費", ik: "public_insurer_3", rk: "public_recipient_3", vfk: "", vtk: "" },
-                  ].map(pub => (
-                    <div key={pub.title} className="bg-gray-50 rounded-lg p-3">
-                      <p className="text-xs font-bold text-gray-700 mb-2">{pub.title}</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><label className="text-[9px] text-gray-400 block mb-0.5">公費負担者番号</label>
-                          <input value={String(infoForm[pub.ik]||"")} onChange={e => setInfoForm({...infoForm, [pub.ik]: e.target.value})}
-                            className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" /></div>
-                        <div><label className="text-[9px] text-gray-400 block mb-0.5">受給者番号</label>
-                          <input value={String(infoForm[pub.rk]||"")} onChange={e => setInfoForm({...infoForm, [pub.rk]: e.target.value})}
-                            className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" /></div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {infoTab === "manage" && (
-                <div className="space-y-4">
-                  <div><label className="text-[10px] text-gray-400 block mb-1">🦠 感染症フラグ</label>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {["HBV","HCV","HIV","梅毒","MRSA","TB"].map(flag => {
-                        const active = String(infoForm.infection_flags||"").includes(flag);
-                        return (
-                          <button key={flag} onClick={() => {
-                            const cur = String(infoForm.infection_flags||"");
-                            const flags = cur.split(",").map(f => f.trim()).filter(Boolean);
-                            const newFlags = active ? flags.filter(f => f !== flag) : [...flags, flag];
-                            setInfoForm({...infoForm, infection_flags: newFlags.join(", ") || null});
-                          }} className={`text-[10px] px-2.5 py-1 rounded-full font-bold border transition-colors ${active ? "bg-red-100 border-red-300 text-red-700" : "bg-gray-50 border-gray-200 text-gray-400 hover:border-gray-300"}`}>
-                            {active ? "✓ " : ""}{flag}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div><label className="text-[10px] text-gray-400 block mb-1">📌 患者メモ・アラート（来院時にヘッダーに表示）</label>
-                    <textarea value={String(infoForm.alert_memo||"")} onChange={e => setInfoForm({...infoForm, alert_memo: e.target.value})}
-                      rows={2} placeholder="例: 車椅子、聴覚障害、要通訳"
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400" /></div>
-                  <div><label className="text-[10px] text-gray-400 block mb-1">📝 サブカルテ（自由記載）</label>
-                    <textarea value={String(infoForm.subchart_notes||"")} onChange={e => setInfoForm({...infoForm, subchart_notes: e.target.value})}
-                      rows={6} placeholder={"治療方針メモ・特記事項・家族情報など\n\n例:\n・補綴希望: 自費セラミック希望\n・性格: 説明を詳しく聞きたいタイプ"}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none" /></div>
-                  <div><label className="text-[10px] text-gray-400 block mb-1">👩‍⚕️ 担当DH</label>
-                    <select value={String(infoForm.assigned_dh_id||"")} onChange={e => setInfoForm({...infoForm, assigned_dh_id: e.target.value || null})}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
-                      <option value="">未割当</option>
-                      <option value="DH1">DH1</option><option value="DH2">DH2</option><option value="DH3">DH3</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-3">
-              <button onClick={() => setShowInfoModal(false)} className="px-5 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm font-bold hover:bg-gray-50">キャンセル</button>
-              <button onClick={saveInfo} disabled={saving}
-                className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-50">
-                {saving ? "保存中..." : "💾 保存"}
-              </button>
-            </div>
           </div>
         </div>
-      )}
-
-      {/* 領収書モーダル */}
-      {receiptHtml && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setReceiptHtml(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3 border-b">
-              <span className="font-bold text-sm">📄 領収書プレビュー</span>
-              <div className="flex gap-2">
-                <button onClick={() => { const pw = window.open("","_blank"); if(pw){pw.document.write(receiptHtml);pw.document.close();} }}
-                  className="bg-gray-900 text-white text-xs font-bold px-4 py-1.5 rounded-lg">🖨️ 印刷</button>
-                <button onClick={() => setReceiptHtml(null)} className="bg-gray-100 text-gray-600 text-xs font-bold px-4 py-1.5 rounded-lg">閉じる</button>
-              </div>
-            </div>
-            <iframe srcDoc={receiptHtml} className="flex-1 border-0 min-h-96" title="領収書" />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ==============================
-// サブコンポーネント
-// ==============================
-function StatusRow({ teeth, tc, sel, setSel, jaw, isDeciduous = false }: { teeth: string[]; tc: Record<string, ToothData>; sel: string | null; setSel: (t: string) => void; jaw: "upper" | "lower"; isDeciduous?: boolean }) {
-  return (
-    <div className="flex gap-[2px]">
-      {teeth.map(t => {
-        const d = tc[t]; const s = d?.status || "normal"; const c = TS[s] || TS.normal; const isSel = sel === t;
-        const size = isDeciduous ? "w-8 h-10" : "w-10 h-12";
-        const textColor = isDeciduous && s === "normal" ? "text-pink-300" : c.color;
-        return (
-          <button key={t} onClick={() => setSel(t === sel ? "" : t)}
-            className={`${size} rounded-lg border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105 ${c.cbg} ${c.border} ${textColor} ${isSel ? "ring-2 ring-sky-400 scale-110 shadow-md" : ""}`}>
-            {jaw === "upper" ? (
-              <><span className="text-[7px] text-gray-400 leading-none">{t}</span>
-                <span className="leading-tight">{s !== "normal" ? c.sl || c.label : ""}</span>
-                <span className="text-[7px] leading-none">{s !== "normal" ? c.label : ""}</span></>
-            ) : (
-              <><span className="text-[7px] leading-none">{s !== "normal" ? c.label : ""}</span>
-                <span className="leading-tight">{s !== "normal" ? c.sl || c.label : ""}</span>
-                <span className="text-[7px] text-gray-400 leading-none">{t}</span></>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function PerioChartView({ teeth, pc, tc, sel, setSel, jaw, label }: { teeth: string[]; pc: PerioChart; tc: Record<string, ToothData>; sel: string | null; setSel: (t: string) => void; jaw: "upper" | "lower"; label: string }) {
-  function pcl(v: number) { if (v >= 6) return "bg-red-500 text-white font-bold"; if (v >= 4) return "bg-red-200 text-red-800 font-bold"; return "text-gray-500"; }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse min-w-[700px]">
-        <tbody>
-          {jaw === "upper" && (
-            <tr className="h-5">
-              <td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
-              {teeth.map(t => { const pe = pc[t]; const m = pe?.mobility || 0; return (
-                <td key={t} className="text-center text-[9px]">
-                  <span className={m > 0 ? "text-amber-600 font-bold bg-amber-100 px-1 rounded" : "text-gray-300"}>{m > 0 ? m : ""}</span>
-                </td>); })}
-            </tr>
-          )}
-          <tr className="h-5">
-            <td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-            {teeth.map(t => { const pe = pc[t]; const b = pe?.buccal || []; const isMissing = (tc[t]?.status || "normal") === "missing"; return (
-              <td key={t} className="text-center px-0">
-                {isMissing ? <span className="text-[8px] text-gray-300">—</span> : (
-                  <div className="flex justify-center gap-[1px]">
-                    {b.map((v,i) => <span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${pcl(v)}`}>{v}</span>)}
-                  </div>
-                )}
-              </td>); })}
-          </tr>
-          <tr>
-            <td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">{label}</td>
-            {teeth.map(t => {
-              const d = tc[t]; const s = d?.status || "normal"; const c = TS[s] || TS.normal;
-              const pe = pc[t]; const isSel = sel === t; const isMissing = s === "missing";
-              const maxP = pe ? Math.max(...pe.buccal, ...pe.lingual) : 0;
-              return (
-                <td key={t} className="text-center px-[1px] py-[2px]">
-                  <button onClick={() => setSel(t === sel ? "" : t)}
-                    className={`w-full min-w-[38px] h-9 rounded border-2 flex flex-col items-center justify-center text-[9px] font-bold transition-all hover:scale-105
-                    ${isMissing ? "bg-gray-200 border-gray-300 text-gray-400" : s !== "normal" ? `${c.cbg} ${c.border} ${c.color}` : pe?.bop ? "bg-red-50 border-red-200" : maxP >= 4 ? "bg-red-50 border-red-200" : "bg-white border-gray-200 text-gray-600"}
-                    ${isSel ? "ring-2 ring-sky-400 scale-110" : ""}`}>
-                    <span className="leading-none">{s !== "normal" ? c.sl : ""}</span>
-                    <span className="text-[8px] text-gray-400">{t}</span>
-                    {s !== "normal" && <span className="text-[7px] leading-none">{c.label}</span>}
-                  </button>
-                </td>
-              );
-            })}
-          </tr>
-          <tr className="h-4">
-            <td></td>
-            {teeth.map(t => <td key={t} className="text-center text-[8px] text-gray-300">{t}</td>)}
-          </tr>
-          <tr className="h-5">
-            <td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">EPP</td>
-            {teeth.map(t => { const pe = pc[t]; const l = pe?.lingual || []; const isMissing = (tc[t]?.status || "normal") === "missing"; return (
-              <td key={t} className="text-center px-0">
-                {isMissing ? <span className="text-[8px] text-gray-300">—</span> : (
-                  <div className="flex justify-center gap-[1px]">
-                    {l.map((v,i) => <span key={i} className={`text-[8px] w-[13px] text-center rounded-sm ${pcl(v)}`}>{v}</span>)}
-                  </div>
-                )}
-              </td>); })}
-          </tr>
-          {jaw === "lower" && (
-            <tr className="h-5">
-              <td className="text-[9px] text-gray-400 font-bold w-10 pr-1 text-right">TM</td>
-              {teeth.map(t => { const pe = pc[t]; const m = pe?.mobility || 0; return (
-                <td key={t} className="text-center text-[9px]">
-                  <span className={m > 0 ? "text-amber-600 font-bold bg-amber-100 px-1 rounded" : "text-gray-300"}>{m > 0 ? m : ""}</span>
-                </td>); })}
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Leg({ c, t }: { c: string; t: string }) {
-  return <span className="flex items-center gap-1"><span className={`w-2.5 h-2.5 rounded border ${c}`}></span>{t}</span>;
-}
-function SB({ l, v, c, b }: { l: string; v: string; c: string; b: string }) {
-  return <span className={`${b} ${c} px-2 py-1 rounded-lg font-bold text-[11px]`}>■ {l} <span className="text-sm">{v}</span></span>;
-}
-function IR({ l, v }: { l: string; v: string | null | undefined }) {
-  return (
-    <div>
-      <label className="text-[10px] text-gray-400 block mb-0.5">{l}</label>
-      <p className="text-sm text-gray-700 font-medium">{v || "-"}</p>
-    </div>
-  );
-}
-
-            {/* タスク・書類・チャット */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
-                <span className="text-sm font-bold text-gray-800">✅ タスク一覧</span>
-                <span className="text-gray-400">›</span>
-              </button>
-
-              {/* 書類・資料（展開式） */}
-              <div className="border-t border-gray-100">
-                <button onClick={() => setShowDocPanel(!showDocPanel)}
-                  className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50 border-b border-gray-100">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-gray-800">📄 書類・資料</span>
-                    {images.length > 0 && <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{images.length}</span>}
-                  </div>
-                  <span className="text-gray-400">{showDocPanel ? "▼" : "›"}</span>
-                </button>
-                {showDocPanel && (
-                  <div className="border-b border-gray-100">
-                    <div className="px-4 py-3 border-b border-gray-50">
-                      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-lg p-3 cursor-pointer hover:border-sky-400 hover:bg-sky-50 transition-all text-xs text-gray-500">
-                        <span>{imgLoading ? "⏳ アップロード中..." : "📤 画像をアップロード"}</span>
-                        <input type="file" accept="image/*" className="hidden" disabled={imgLoading}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0]; if (!file) return;
-                            setImgLoading(true);
-                            const formData = new FormData();
-                            formData.append("file", file); formData.append("patient_id", pid); formData.append("image_type", "panorama");
-                            const res = await fetch("/api/image-upload", { method: "POST", body: formData });
-                            const data = await res.json();
-                            if (data.success) await fetchData(); else alert("アップロード失敗: " + data.error);
-                            setImgLoading(false); e.target.value = "";
-                          }} />
-                      </label>
-                    </div>
-                    <div className="max-h-40 overflow-y-auto divide-y divide-gray-50">
-                      {images.length === 0 ? (
-                        <div className="px-4 py-4 text-center text-xs text-gray-400">画像はまだありません</div>
-                      ) : images.map(img => {
-                        const pubUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL||""}/storage/v1/object/public/patient-images/${img.storage_path}`;
-                        const hasAi = img.ai_analysis && Object.keys(img.ai_analysis).length > 0;
-                        return (
-                          <div key={img.id} className="px-4 py-2 flex items-center gap-2">
-                            <img src={pubUrl} alt="" className="w-8 h-8 object-cover rounded border border-gray-200" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[10px] font-bold text-gray-700 truncate">{img.file_name || img.image_type}</p>
-                              {hasAi && <span className="text-[9px] text-green-600 font-bold">AI分析済</span>}
-                            </div>
-                            <button disabled={aiAnalyzing} onClick={async () => {
-                              setAiAnalyzing(true);
-                              const imgRes = await fetch(pubUrl); const blob = await imgRes.blob();
-                              const b64: string = await new Promise(res => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(blob); });
-                              const resp = await fetch("/api/xray-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64, patient_id: pid }) });
-                              const data = await resp.json();
-                              if (data.success) { await supabase.from("patient_images").update({ ai_analysis: data.analysis }).eq("id", img.id); await fetchData(); alert("AI分析完了: " + (data.summary||"")); }
-                              else alert("分析失敗: " + data.error);
-                              setAiAnalyzing(false);
-                            }} className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded hover:bg-purple-100 shrink-0">AI</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="px-4 py-2 flex gap-2">
-                      <button className="flex-1 text-[10px] font-bold text-sky-600 bg-sky-50 hover:bg-sky-100 py-1.5 rounded transition-colors">📋 紹介状</button>
-                      <button className="flex-1 text-[10px] font-bold text-green-600 bg-green-50 hover:bg-green-100 py-1.5 rounded transition-colors">✍️ 同意書</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {/* チャット */}
-              <button className="w-full flex items-center justify-between px-4 py-4 hover:bg-gray-50">
-                <span className="text-sm font-bold text-gray-800">💬 チャット</span>
-                <span className="text-gray-400">›</span>
-              </button>
-            </div>
-
-          </div>{/* 右カラム終了 */}
-
-        </div>{/* メインflex終了 */}
       </main>
 
       {/* ===== 患者基本情報モーダル ===== */}
