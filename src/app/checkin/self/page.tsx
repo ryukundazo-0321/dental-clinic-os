@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getClinicConfig, type ClinicConfig } from "@/lib/reservation-utils";
 
@@ -22,6 +23,7 @@ function getJSTDateStr() {
 }
 
 export default function SelfCheckinPage() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("input");
   const [config, setConfig] = useState<ClinicConfig | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,6 +32,8 @@ export default function SelfCheckinPage() {
   const [birthDate, setBirthDate] = useState("");
   const [matched, setMatched] = useState<MatchedAppointment | null>(null);
   const [queueNumber, setQueueNumber] = useState(0);
+  const [completedAptId, setCompletedAptId] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
     async function init() {
@@ -38,6 +42,23 @@ export default function SelfCheckinPage() {
     }
     init();
   }, []);
+
+  // チェックイン完了後のカウントダウン → 問診へ自動遷移
+  useEffect(() => {
+    if (step !== "complete" || !completedAptId) return;
+    setCountdown(5);
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          router.push(`/questionnaire?appointment_id=${completedAptId}`);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [step, completedAptId, router]);
 
   // 生年月日8桁 → YYYY-MM-DD変換
   function parseBirthDate(input: string): string | null {
@@ -65,14 +86,10 @@ export default function SelfCheckinPage() {
 
     const todayStr = getJSTDateStr();
 
-    // 患者照合: patient_number + date_of_birth
-    // P-00001 でも 00001 でも P00001 でもマッチするようにする
     let inputId = patientId.trim().toUpperCase();
-    // 数字のみの場合は P- プレフィックスを付与
     if (/^\d+$/.test(inputId)) {
       inputId = `P-${inputId.padStart(5, "0")}`;
     }
-    // P00001 → P-00001 に正規化
     if (/^P\d+$/.test(inputId)) {
       inputId = `P-${inputId.slice(1).padStart(5, "0")}`;
     }
@@ -90,7 +107,6 @@ export default function SelfCheckinPage() {
       return;
     }
 
-    // 今日の予約を検索
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
@@ -161,10 +177,9 @@ export default function SelfCheckinPage() {
     });
 
     setQueueNumber(nextNumber);
+    setCompletedAptId(matched.id);  // ← 問診遷移用にIDを保持
     setStep("complete");
     setLoading(false);
-
-    setTimeout(() => { reset(); }, 30000);
   }
 
   function formatTime(dateStr: string) {
@@ -178,9 +193,9 @@ export default function SelfCheckinPage() {
     setBirthDate("");
     setMatched(null);
     setQueueNumber(0);
+    setCompletedAptId(null);
   }
 
-  // 8桁入力のフォーマット表示
   function formatBirthDisplay(input: string): string {
     const digits = input.replace(/[^0-9]/g, "");
     if (digits.length <= 4) return digits;
@@ -207,7 +222,6 @@ export default function SelfCheckinPage() {
             </p>
 
             <div className="space-y-6">
-              {/* 診察券番号 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   診察券番号 <span className="text-red-500">*</span>
@@ -225,7 +239,6 @@ export default function SelfCheckinPage() {
                 </p>
               </div>
 
-              {/* 生年月日 8桁 */}
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   生年月日（8桁） <span className="text-red-500">*</span>
@@ -302,20 +315,35 @@ export default function SelfCheckinPage() {
           </div>
         )}
 
-        {/* ===== チェックイン完了 ===== */}
+        {/* ===== チェックイン完了 → 問診へ ===== */}
         {step === "complete" && (
           <div className="text-center py-4">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">チェックインが完了しました</h2>
-            <div className="bg-sky-50 border-2 border-sky-300 rounded-3xl p-8 my-8">
+            <div className="bg-sky-50 border-2 border-sky-300 rounded-3xl p-8 my-6">
               <p className="text-sm text-sky-600 mb-1">あなたの受付番号</p>
               <p className="text-8xl font-bold text-sky-600">{queueNumber}</p>
             </div>
-            <p className="text-gray-500 mb-2">待合室でお待ちください。</p>
-            <p className="text-gray-400 text-sm mb-8">モニターに番号が表示されたら診察室へお入りください。</p>
-            <button onClick={reset} className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-bold">
-              次の方の受付へ
-            </button>
+
+            {/* 問診へ誘導 */}
+            <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-5 mb-6">
+              <p className="text-sm font-bold text-orange-700 mb-1">📋 続けて問診にお答えください</p>
+              <p className="text-xs text-orange-500">このまま問診画面へ移動します</p>
+              <p className="text-3xl font-bold text-orange-600 mt-3">{countdown}</p>
+              <p className="text-xs text-orange-400">秒後に自動で移動します</p>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => completedAptId && router.push(`/questionnaire?appointment_id=${completedAptId}`)}
+                className="w-full bg-orange-500 text-white py-4 rounded-xl font-bold text-lg hover:bg-orange-600 active:scale-[0.98]"
+              >
+                今すぐ問診へ進む →
+              </button>
+              <button onClick={reset} className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-bold text-sm">
+                次の方の受付へ
+              </button>
+            </div>
           </div>
         )}
 
