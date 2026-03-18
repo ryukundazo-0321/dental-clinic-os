@@ -358,7 +358,5 @@ export default function Home() {
       {showNotifs && (
         <div className="fixed inset-0 z-40" onClick={() => setShowNotifs(false)} />
       )}
-    </div>
-  </div>
   );
 }
