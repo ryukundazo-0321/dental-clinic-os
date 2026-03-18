@@ -84,7 +84,7 @@ export default function Home() {
 
   async function fetchStats() {
     const { data } = await supabase.from("appointments").select("status")
-      .gte("scheduled_at", `${todayStr}T00:00:00+00`).lte("scheduled_at", `${todayStr}T23:59:59+00`).neq("status", "cancelled");
+      .gte("scheduled_at", todayStr + "T00:00:00+00").lte("scheduled_at", todayStr + "T23:59:59+00").neq("status", "cancelled");
     if (data) {
       setTodayStats({
         total: data.length,
@@ -98,7 +98,7 @@ export default function Home() {
 
   async function fetchTodayRevenue() {
     const { data } = await supabase.from("billing").select("total_points, patient_burden, created_at")
-      .gte("created_at", `${todayStr}T00:00:00+00`).lte("created_at", `${todayStr}T23:59:59+00`);
+      .gte("created_at", todayStr + "T00:00:00+00").lte("created_at", todayStr + "T23:59:59+00");
     if (data) {
       const points = data.reduce((s: number, r: BillingRow) => s + (r.total_points || 0), 0);
       const burden = data.reduce((s: number, r: BillingRow) => s + (r.patient_burden || 0), 0);
@@ -108,7 +108,7 @@ export default function Home() {
 
   async function fetchMonthlyRevenue() {
     const { data } = await supabase.from("billing").select("total_points, patient_burden, created_at")
-      .gte("created_at", `${monthStart}T00:00:00+00`).lte("created_at", `${todayStr}T23:59:59+00`);
+      .gte("created_at", monthStart + "T00:00:00+00").lte("created_at", todayStr + "T23:59:59+00");
     if (data) {
       const byDay = new Map<number, { points: number; burden: number }>();
       let totalPts = 0, totalBurden = 0;
@@ -140,7 +140,7 @@ export default function Home() {
     const { data: unconfirmed } = await supabase.from("medical_records").select("id").eq("doctor_confirmed", false).neq("status", "confirmed");
     if (unconfirmed && unconfirmed.length > 0) items.push({ type: "unconfirmed", label: "未確定カルテ", count: unconfirmed.length, href: "/chart?tab=unconfirmed", color: "text-orange-600 bg-orange-50", icon: "📋" });
     const { data: waitingApt } = await supabase.from("appointments").select("id").eq("status", "checked_in")
-      .gte("scheduled_at", `${todayStr}T00:00:00+00`).lte("scheduled_at", `${todayStr}T23:59:59+00`);
+      .gte("scheduled_at", todayStr + "T00:00:00+00").lte("scheduled_at", todayStr + "T23:59:59+00");
     if (waitingApt && waitingApt.length > 0) items.push({ type: "waiting", label: "診察待ち", count: waitingApt.length, href: "/consultation", color: "text-green-600 bg-green-50", icon: "🩺" });
     setAlerts(items);
   }
@@ -292,7 +292,7 @@ export default function Home() {
               return (
                 <div key={d.day} className="flex-1 flex flex-col items-center group relative">
                   <div className={`w-full rounded-t transition-all ${isToday ? "bg-sky-500" : d.points > 0 ? "bg-sky-300 hover:bg-sky-400" : "bg-gray-100"}`}
-                    style={{ height: `${Math.max(h, 2)}%` }} />
+                    style={{ height: Math.max(h, 2) + "%" }} />
                   {d.day % 5 === 1 && <span className="text-[8px] text-gray-400 mt-1">{d.day}</span>}
                   {d.points > 0 && (
                     <div className="absolute bottom-full mb-1 bg-gray-800 text-white text-[9px] px-2 py-1 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
@@ -358,5 +358,6 @@ export default function Home() {
       {showNotifs && (
         <div className="fixed inset-0 z-40" onClick={() => setShowNotifs(false)} />
       )}
+    </div>
   );
 }
