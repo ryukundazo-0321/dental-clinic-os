@@ -9,20 +9,15 @@ import {
 
 type Step = "select_type" | "new_patient_info" | "returning_lookup" | "treatment_summary" | "select_date" | "select_time" | "confirm" | "complete";
 
-// 治療サマリー情報の型
 type TreatmentSummary = {
-  // 現在の傷病名
   diagnoses: { name: string; tooth_number: string; start_date: string }[];
-  // 前回の来院情報
   lastVisit: {
     date: string;
-    soap_p: string;  // 処置内容
-    soap_a: string;  // 評価
+    soap_p: string;
+    soap_a: string;
     procedures: string[];
   } | null;
-  // 次回予定（前回P欄から）
   nextPlan: string;
-  // 治療中の歯番号
   activeTeeth: string[];
 };
 
@@ -40,10 +35,9 @@ export default function PatientBookingPage() {
   const [lookupForm, setLookupForm] = useState({ name_kanji: "", date_of_birth: "", phone: "" });
   const [matchedPatient, setMatchedPatient] = useState<{ id: string; name_kanji: string } | null>(null);
 
-  // 治療サマリー
   const [treatmentSummary, setTreatmentSummary] = useState<TreatmentSummary | null>(null);
-  const [visitReason, setVisitReason] = useState<"continuing" | "new_complaint" | "">(""); // 継続治療 or 新しい主訴
-  const [newComplaint, setNewComplaint] = useState(""); // 新しい主訴の内容
+  const [visitReason, setVisitReason] = useState<"continuing" | "new_complaint" | "">("");
+  const [newComplaint, setNewComplaint] = useState("");
 
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
@@ -51,8 +45,8 @@ export default function PatientBookingPage() {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [createdAppointmentId, setCreatedAppointmentId] = useState("");
+  const [bookedPatientId, setBookedPatientId] = useState<string | null>(null);
 
-  // カレンダー用state
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -69,7 +63,6 @@ export default function PatientBookingPage() {
     loadConfig();
   }, []);
 
-  // ===== カレンダー生成 =====
   function generateCalendarDays(year: number, month: number) {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -93,7 +86,7 @@ export default function PatientBookingPage() {
 
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(year, month, d);
-      const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const iso = year + "-" + String(month + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
       const isToday = date.getTime() === today.getTime();
       const isPast = date < today;
       const isClosed = config ? config.closedDays.includes(date.getDay()) : false;
@@ -123,7 +116,7 @@ export default function PatientBookingPage() {
   }
 
   const calendarDays = generateCalendarDays(calendarMonth.year, calendarMonth.month);
-  const monthLabel = `${calendarMonth.year}年${calendarMonth.month + 1}月`;
+  const monthLabel = calendarMonth.year + "年" + (calendarMonth.month + 1) + "月";
   const weekdayLabels = ["日", "月", "火", "水", "木", "金", "土"];
 
   async function onSelectDate(date: string) {
@@ -138,13 +131,9 @@ export default function PatientBookingPage() {
     setStep("select_time");
   }
 
-  // ============================================================
-  // 通院患者照合 + 治療サマリー取得
-  // ============================================================
   async function lookupPatient() {
     setLoading(true); setError("");
     try {
-      // 1. 患者照合
       const { data: patient, error: err } = await supabase.from("patients").select("id, name_kanji")
         .eq("name_kanji", lookupForm.name_kanji).eq("date_of_birth", lookupForm.date_of_birth).eq("phone", lookupForm.phone).single();
       if (err || !patient) {
@@ -152,12 +141,8 @@ export default function PatientBookingPage() {
         setLoading(false); return;
       }
       setMatchedPatient(patient);
-
-      // 2. 治療サマリー取得
       const summary = await fetchTreatmentSummary(patient.id);
       setTreatmentSummary(summary);
-
-      // 3. 治療サマリー画面へ遷移
       setStep("treatment_summary");
     } catch {
       setError("エラーが発生しました。");
@@ -165,11 +150,7 @@ export default function PatientBookingPage() {
     setLoading(false);
   }
 
-  // ============================================================
-  // 治療サマリー情報をDBから取得
-  // ============================================================
   async function fetchTreatmentSummary(patientId: string): Promise<TreatmentSummary> {
-    // (a) 現在の傷病名（outcome が null = 治療中）
     const { data: diagData } = await supabase
       .from("patient_diagnoses")
       .select("diagnosis_name, tooth_number, start_date, outcome")
@@ -183,12 +164,10 @@ export default function PatientBookingPage() {
       start_date: d.start_date || "",
     }));
 
-    // 治療中の歯番号を抽出
     const activeTeeth = Array.from(
       new Set(diagnoses.map((d: { tooth_number: string }) => d.tooth_number).filter(Boolean))
     );
 
-    // (b) 前回の来院情報（completed の最新1件）
     const { data: lastApt } = await supabase
       .from("appointments")
       .select("scheduled_at, medical_records ( soap_a, soap_p, procedures_text )")
@@ -205,32 +184,19 @@ export default function PatientBookingPage() {
       const mr = (lastApt.medical_records as unknown as { soap_a: string; soap_p: string; procedures_text: string }[])?.[0];
       const soapP = mr?.soap_p || "";
       const soapA = mr?.soap_a || "";
-
-      // P欄から「次回」以降のテキストを抽出
       const nextMatch = soapP.match(/次回[：:\s]*(.+)/);
       nextPlan = nextMatch ? nextMatch[1].trim() : "";
-
-      // P欄から処置内容を抽出（「次回」より前の部分）
       const proceduresPart = nextMatch ? soapP.substring(0, nextMatch.index) : soapP;
       const procedures = proceduresPart
         .split(/[・、,\s]+/)
         .map((s: string) => s.trim())
         .filter((s: string) => s && s !== "次回" && s.length < 20);
-
-      lastVisit = {
-        date: lastApt.scheduled_at,
-        soap_p: soapP,
-        soap_a: soapA,
-        procedures,
-      };
+      lastVisit = { date: lastApt.scheduled_at, soap_p: soapP, soap_a: soapA, procedures };
     }
 
     return { diagnoses, lastVisit, nextPlan, activeTeeth };
   }
 
-  // ============================================================
-  // 予約確定
-  // ============================================================
   async function confirmBooking() {
     setLoading(true); setError("");
     try {
@@ -244,14 +210,14 @@ export default function PatientBookingPage() {
         if (patientErr || !newPatient) { setError("登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
         patientId = newPatient.id;
       }
-      const scheduledAt = `${selectedDate}T${selectedTime}:00`;
+
+      const scheduledAt = selectedDate + "T" + selectedTime + ":00";
       const slotDur = config?.slotDurationMin || 30;
 
-      // ダブルブッキング最終チェック（同一時間帯の予約数）
       const { data: existingApts } = await supabase.from("appointments")
         .select("id")
-        .gte("scheduled_at", `${selectedDate}T00:00:00`)
-        .lte("scheduled_at", `${selectedDate}T23:59:59`)
+        .gte("scheduled_at", selectedDate + "T00:00:00")
+        .lte("scheduled_at", selectedDate + "T23:59:59")
         .eq("scheduled_at", scheduledAt)
         .neq("status", "cancelled");
       if (existingApts && config && existingApts.length >= config.maxPatientsPerSlot) {
@@ -260,28 +226,39 @@ export default function PatientBookingPage() {
         return;
       }
 
+      const aptNotes = patientType === "returning" && visitReason === "new_complaint" && newComplaint
+        ? { notes: "【新しい主訴】" + newComplaint }
+        : patientType === "returning" && visitReason === "continuing" && treatmentSummary?.nextPlan
+        ? { notes: "【継続治療】" + treatmentSummary.nextPlan }
+        : {};
+
       const { data: appointment, error: aptErr } = await supabase.from("appointments").insert({
         patient_id: patientId, clinic_id: config?.clinicId, doctor_id: selectedDoctor || null,
         scheduled_at: scheduledAt, patient_type: patientType === "new" ? "new" : "returning",
         status: "reserved", duration_min: slotDur,
-        // 通院中の場合、来院目的をメモとして保存
-        ...(patientType === "returning" && visitReason === "new_complaint" && newComplaint
-          ? { notes: `【新しい主訴】${newComplaint}` }
-          : patientType === "returning" && visitReason === "continuing" && treatmentSummary?.nextPlan
-          ? { notes: `【継続治療】${treatmentSummary.nextPlan}` }
-          : {}),
+        ...aptNotes,
       }).select("id").single();
       if (aptErr || !appointment) { setError("予約の登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
 
-      // medical_record作成 — 継続の場合は前回のP欄を引き継ぎ
       const mrData: Record<string, unknown> = {
         appointment_id: appointment.id, patient_id: patientId, status: "draft",
       };
       if (patientType === "returning" && visitReason === "new_complaint" && newComplaint) {
-        mrData.soap_s = `【主訴】${newComplaint}`;
+        mrData.soap_s = "【主訴】" + newComplaint;
       }
       await supabase.from("medical_records").insert(mrData);
 
+      // ===== 通知書き込み（追加）=====
+      const patientName = patientType === "new" ? form.name_kanji : matchedPatient?.name_kanji || "患者";
+      await supabase.from("notifications").insert({
+        type: "booking",
+        title: patientName + "さんがWeb予約しました（" + (patientType === "new" ? "初診" : "再診") + "）",
+        body: selectedDate + " " + selectedTime,
+        patient_id: patientId || null,
+      });
+      // ===== 通知書き込みここまで =====
+
+      setBookedPatientId(patientId || null);
       setCreatedAppointmentId(appointment.id);
       setStep("complete");
     } catch { setError("エラーが発生しました。お電話にてご予約ください。"); }
@@ -303,7 +280,6 @@ export default function PatientBookingPage() {
     return d.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
   }
 
-  // FDI歯番号を日本語で表示
   function toothLabel(tooth: string) {
     if (!tooth) return "";
     const num = parseInt(tooth);
@@ -311,7 +287,7 @@ export default function PatientBookingPage() {
     const quadrant = Math.floor(num / 10);
     const position = num % 10;
     const qLabel = quadrant === 1 ? "右上" : quadrant === 2 ? "左上" : quadrant === 3 ? "左下" : quadrant === 4 ? "右下" : "";
-    return `${qLabel}${position}番`;
+    return qLabel + position + "番";
   }
 
   if (configLoading) return <div className="min-h-screen bg-white flex items-center justify-center"><p className="text-gray-400">読み込み中...</p></div>;
@@ -327,11 +303,10 @@ export default function PatientBookingPage() {
       </header>
 
       {step !== "complete" && (
-        <div className="w-full bg-gray-100 h-1"><div className="bg-sky-500 h-1 transition-all duration-300" style={{ width: `${getProgress()}%` }} /></div>
+        <div className="w-full bg-gray-100 h-1"><div className="bg-sky-500 h-1 transition-all duration-300" style={{ width: getProgress() + "%" }} /></div>
       )}
 
       <main className="max-w-lg mx-auto px-4 py-6">
-        {/* ===== はじめて or 通院 ===== */}
         {step === "select_type" && (
           <div>
             <h2 className="text-xl font-bold text-gray-900 text-center mb-2">ご予約はこちらから</h2>
@@ -355,7 +330,6 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ===== 新規患者：情報入力 ===== */}
         {step === "new_patient_info" && (
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-1">患者さま情報のご入力</h2>
@@ -409,7 +383,6 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ===== 通院患者：照合 ===== */}
         {step === "returning_lookup" && (
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-1">患者情報の確認</h2>
@@ -440,12 +413,8 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ============================================================ */}
-        {/* ===== 治療サマリー + 継続/新規分岐（★新規追加）===== */}
-        {/* ============================================================ */}
         {step === "treatment_summary" && treatmentSummary && (
           <div>
-            {/* 患者確認ヘッダー */}
             <div className="bg-green-50 border border-green-200 rounded-2xl p-4 mb-5">
               <div className="flex items-center gap-3">
                 <div className="bg-green-100 w-11 h-11 rounded-full flex items-center justify-center text-xl">✅</div>
@@ -456,14 +425,11 @@ export default function PatientBookingPage() {
               </div>
             </div>
 
-            {/* 治療サマリーカード */}
             <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden mb-5">
               <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
                 <p className="text-sm font-bold text-gray-900">📋 現在の治療状況</p>
               </div>
-
               <div className="p-4 space-y-4">
-                {/* 現在の傷病名 */}
                 {treatmentSummary.diagnoses.length > 0 ? (
                   <div>
                     <p className="text-xs font-bold text-gray-400 mb-2">治療中の症状</p>
@@ -472,7 +438,7 @@ export default function PatientBookingPage() {
                         <div key={i} className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
                           {d.tooth_number && (
                             <span className="bg-orange-200 text-orange-800 text-xs font-bold px-2 py-0.5 rounded">
-                              #{d.tooth_number} {toothLabel(d.tooth_number)}
+                              {"#" + d.tooth_number + " " + toothLabel(d.tooth_number)}
                             </span>
                           )}
                           <span className="text-sm font-bold text-gray-800">{d.name}</span>
@@ -486,14 +452,11 @@ export default function PatientBookingPage() {
                   </div>
                 )}
 
-                {/* 前回の来院 */}
                 {treatmentSummary.lastVisit && (
                   <div className="border-t border-gray-100 pt-3">
                     <p className="text-xs font-bold text-gray-400 mb-2">前回のご来院</p>
                     <div className="bg-sky-50 border border-sky-100 rounded-lg px-3 py-2.5">
-                      <p className="text-xs text-sky-600 mb-1">
-                        {formatDateJP(treatmentSummary.lastVisit.date)}
-                      </p>
+                      <p className="text-xs text-sky-600 mb-1">{formatDateJP(treatmentSummary.lastVisit.date)}</p>
                       {treatmentSummary.lastVisit.procedures.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-1">
                           {treatmentSummary.lastVisit.procedures.slice(0, 5).map((p, i) => (
@@ -508,7 +471,6 @@ export default function PatientBookingPage() {
                   </div>
                 )}
 
-                {/* 次回の予定 */}
                 {treatmentSummary.nextPlan && (
                   <div className="border-t border-gray-100 pt-3">
                     <p className="text-xs font-bold text-gray-400 mb-2">次回の予定</p>
@@ -520,20 +482,16 @@ export default function PatientBookingPage() {
               </div>
             </div>
 
-            {/* 来院目的の選択 */}
             <h3 className="text-base font-bold text-gray-900 mb-3">今回のご来院の目的を選んでください</h3>
             <div className="space-y-3 mb-5">
-              {/* 継続治療 */}
               <button onClick={() => { setVisitReason("continuing"); setNewComplaint(""); }}
-                className={`w-full text-left border-2 rounded-2xl p-4 transition-all active:scale-[0.98] ${
-                  visitReason === "continuing" ? "border-sky-400 bg-sky-50" : "border-gray-200 bg-white hover:border-sky-300"}`}>
+                className={"w-full text-left border-2 rounded-2xl p-4 transition-all active:scale-[0.98] " + (visitReason === "continuing" ? "border-sky-400 bg-sky-50" : "border-gray-200 bg-white hover:border-sky-300")}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${
-                    visitReason === "continuing" ? "bg-sky-200" : "bg-gray-100"}`}>🔄</div>
+                  <div className={"w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0 " + (visitReason === "continuing" ? "bg-sky-200" : "bg-gray-100")}>🔄</div>
                   <div>
                     <p className="font-bold text-gray-900 text-sm">前回の治療の続き</p>
                     {treatmentSummary.nextPlan ? (
-                      <p className="text-xs text-gray-500 mt-0.5">予定: {treatmentSummary.nextPlan}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{"予定: " + treatmentSummary.nextPlan}</p>
                     ) : (
                       <p className="text-xs text-gray-500 mt-0.5">前回からの継続治療</p>
                     )}
@@ -544,13 +502,10 @@ export default function PatientBookingPage() {
                 </div>
               </button>
 
-              {/* 新しい主訴 */}
               <button onClick={() => setVisitReason("new_complaint")}
-                className={`w-full text-left border-2 rounded-2xl p-4 transition-all active:scale-[0.98] ${
-                  visitReason === "new_complaint" ? "border-sky-400 bg-sky-50" : "border-gray-200 bg-white hover:border-sky-300"}`}>
+                className={"w-full text-left border-2 rounded-2xl p-4 transition-all active:scale-[0.98] " + (visitReason === "new_complaint" ? "border-sky-400 bg-sky-50" : "border-gray-200 bg-white hover:border-sky-300")}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${
-                    visitReason === "new_complaint" ? "bg-sky-200" : "bg-gray-100"}`}>🆕</div>
+                  <div className={"w-10 h-10 rounded-full flex items-center justify-center text-lg flex-shrink-0 " + (visitReason === "new_complaint" ? "bg-sky-200" : "bg-gray-100")}>🆕</div>
                   <div>
                     <p className="font-bold text-gray-900 text-sm">別の場所が気になる・新しい症状</p>
                     <p className="text-xs text-gray-500 mt-0.5">治療中の内容とは別のご相談</p>
@@ -562,7 +517,6 @@ export default function PatientBookingPage() {
               </button>
             </div>
 
-            {/* 新しい主訴の場合：具体的な内容入力 */}
             {visitReason === "new_complaint" && (
               <div className="mb-5">
                 <label className="block text-sm font-bold text-gray-700 mb-1.5">具体的な症状を教えてください</label>
@@ -588,7 +542,6 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ===== 日付選択：カレンダー形式 ===== */}
         {step === "select_date" && (
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-1">ご希望の日付を選択</h2>
@@ -603,23 +556,23 @@ export default function PatientBookingPage() {
 
               <div className="grid grid-cols-7 border-b border-gray-100">
                 {weekdayLabels.map((w, i) => (
-                  <div key={w} className={`py-2 text-center text-xs font-bold ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-gray-400"}`}>{w}</div>
+                  <div key={w} className={"py-2 text-center text-xs font-bold " + (i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-gray-400")}>{w}</div>
                 ))}
               </div>
 
               <div className="grid grid-cols-7 p-1">
                 {calendarDays.map((d, idx) => {
-                  if (!d.date) return <div key={`empty-${idx}`} className="p-1" />;
+                  if (!d.date) return <div key={"empty-" + idx} className="p-1" />;
                   const isDisabled = d.isPast || d.isClosed || d.isBeyondMax;
                   const dayOfWeek = d.date.getDay();
                   return (
                     <div key={d.iso} className="p-0.5">
                       <button disabled={isDisabled} onClick={() => onSelectDate(d.iso)}
-                        className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all ${
+                        className={"w-full aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all " + (
                           isDisabled ? "text-gray-200 cursor-not-allowed"
                             : d.isToday ? "bg-sky-50 text-sky-600 border-2 border-sky-300 hover:bg-sky-100"
                             : "hover:bg-sky-50 hover:text-sky-600 active:scale-[0.93]"
-                        } ${!isDisabled && dayOfWeek === 0 ? "text-red-500" : !isDisabled && dayOfWeek === 6 ? "text-blue-500" : !isDisabled ? "text-gray-800" : ""}`}>
+                        ) + " " + (!isDisabled && dayOfWeek === 0 ? "text-red-500" : !isDisabled && dayOfWeek === 6 ? "text-blue-500" : !isDisabled ? "text-gray-800" : "")}>
                         <span>{d.day}</span>
                         {d.isClosed && !d.isPast && <span className="text-[8px] text-red-300 leading-none mt-0.5">休</span>}
                         {d.isToday && <span className="text-[8px] text-sky-400 leading-none mt-0.5">今日</span>}
@@ -641,7 +594,6 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ===== 時間選択 ===== */}
         {step === "select_time" && (
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-1">ご希望の時間を選択</h2>
@@ -654,10 +606,10 @@ export default function PatientBookingPage() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">担当医（任意）</p>
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={() => setSelectedDoctor("")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${!selectedDoctor ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-500"}`}>指定なし</button>
+                    className={"px-3 py-1.5 rounded-lg text-xs font-bold transition-colors " + (!selectedDoctor ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-500")}>指定なし</button>
                   {doctors.map((doc) => (
                     <button key={doc.id} onClick={() => setSelectedDoctor(doc.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${selectedDoctor === doc.id ? "text-white" : "bg-white border border-gray-200 text-gray-500"}`}
+                      className={"px-3 py-1.5 rounded-lg text-xs font-bold transition-colors " + (selectedDoctor === doc.id ? "text-white" : "bg-white border border-gray-200 text-gray-500")}
                       style={selectedDoctor === doc.id ? { backgroundColor: doc.color } : {}}>
                       {doc.name}
                     </button>
@@ -676,7 +628,7 @@ export default function PatientBookingPage() {
                     <div className="grid grid-cols-3 gap-2 mb-5">
                       {timeSlots.filter((s) => s.period === "morning").map((slot) => (
                         <button key={slot.time} disabled={slot.isFull} onClick={() => { setSelectedTime(slot.time); setStep("confirm"); }}
-                          className={`rounded-xl py-3 text-center font-bold transition-all active:scale-[0.97] ${slot.isFull ? "bg-gray-100 text-gray-300 cursor-not-allowed" : "bg-white border border-gray-200 text-gray-900 hover:border-sky-400 hover:bg-sky-50"}`}>
+                          className={"rounded-xl py-3 text-center font-bold transition-all active:scale-[0.97] " + (slot.isFull ? "bg-gray-100 text-gray-300 cursor-not-allowed" : "bg-white border border-gray-200 text-gray-900 hover:border-sky-400 hover:bg-sky-50")}>
                           <span className="text-sm">{slot.time}</span>
                           {slot.isFull ? <p className="text-[10px] text-red-400 mt-0.5">✕ 満枠</p> : <p className="text-[10px] text-green-500 mt-0.5">◎ 空きあり</p>}
                         </button>
@@ -690,7 +642,7 @@ export default function PatientBookingPage() {
                     <div className="grid grid-cols-3 gap-2">
                       {timeSlots.filter((s) => s.period === "afternoon").map((slot) => (
                         <button key={slot.time} disabled={slot.isFull} onClick={() => { setSelectedTime(slot.time); setStep("confirm"); }}
-                          className={`rounded-xl py-3 text-center font-bold transition-all active:scale-[0.97] ${slot.isFull ? "bg-gray-100 text-gray-300 cursor-not-allowed" : "bg-white border border-gray-200 text-gray-900 hover:border-sky-400 hover:bg-sky-50"}`}>
+                          className={"rounded-xl py-3 text-center font-bold transition-all active:scale-[0.97] " + (slot.isFull ? "bg-gray-100 text-gray-300 cursor-not-allowed" : "bg-white border border-gray-200 text-gray-900 hover:border-sky-400 hover:bg-sky-50")}>
                           <span className="text-sm">{slot.time}</span>
                           {slot.isFull ? <p className="text-[10px] text-red-400 mt-0.5">✕ 満枠</p> : <p className="text-[10px] text-green-500 mt-0.5">◎ 空きあり</p>}
                         </button>
@@ -705,7 +657,6 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ===== 確認 ===== */}
         {step === "confirm" && (
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-6">ご予約内容の確認</h2>
@@ -720,7 +671,6 @@ export default function PatientBookingPage() {
                 <div className="border-t border-gray-200 pt-4"><p className="text-xs text-gray-400 mb-0.5">担当医</p><p className="font-bold text-gray-900">{doctors.find((d) => d.id === selectedDoctor)?.name}</p></div>
               )}
               <div className="border-t border-gray-200 pt-4"><p className="text-xs text-gray-400 mb-0.5">区分</p><p className="font-bold text-gray-900">{patientType === "new" ? "初診" : "再診"}</p></div>
-              {/* 通院中の場合：来院目的を表示 */}
               {patientType === "returning" && visitReason && (
                 <div className="border-t border-gray-200 pt-4">
                   <p className="text-xs text-gray-400 mb-0.5">来院目的</p>
@@ -728,7 +678,7 @@ export default function PatientBookingPage() {
                     <div>
                       <p className="font-bold text-gray-900">前回の治療の続き</p>
                       {treatmentSummary?.nextPlan && (
-                        <p className="text-sm text-purple-600 mt-0.5">予定: {treatmentSummary.nextPlan}</p>
+                        <p className="text-sm text-purple-600 mt-0.5">{"予定: " + treatmentSummary.nextPlan}</p>
                       )}
                     </div>
                   ) : (
@@ -749,7 +699,6 @@ export default function PatientBookingPage() {
           </div>
         )}
 
-        {/* ===== 完了 ===== */}
         {step === "complete" && (
           <div className="text-center py-8">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
@@ -775,7 +724,7 @@ export default function PatientBookingPage() {
               <div className="bg-sky-50 border border-sky-200 rounded-2xl p-5 mb-6">
                 <p className="text-sm font-bold text-sky-900 mb-2">📋 WEB問診票にご回答ください</p>
                 <p className="text-xs text-sky-700 mb-4">ご来院前に問診票にご回答いただくと、よりスムーズに診察を受けていただけます。</p>
-                <a href={`/questionnaire?appointment_id=${createdAppointmentId}`}
+                <a href={"/questionnaire?appointment_id=" + createdAppointmentId}
                   className="block w-full bg-sky-600 text-white py-3 rounded-xl font-bold text-base hover:bg-sky-700 active:scale-[0.98] text-center">
                   問診票に回答する →
                 </a>
