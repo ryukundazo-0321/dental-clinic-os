@@ -44,7 +44,6 @@ export default function SelfCheckinPage() {
     init();
   }, []);
 
-  // チェックイン完了後のカウントダウン → 問診へ自動遷移
   useEffect(() => {
     if (step !== "complete" || !completedAptId) return;
     setCountdown(5);
@@ -64,7 +63,6 @@ export default function SelfCheckinPage() {
     return () => clearInterval(timer);
   }, [step, completedAptId, router]);
 
-  // 生年月日8桁 → YYYY-MM-DD変換
   function parseBirthDate(input: string): string | null {
     const digits = input.replace(/[^0-9]/g, "");
     if (digits.length !== 8) return null;
@@ -180,9 +178,16 @@ export default function SelfCheckinPage() {
       checked_in_at: new Date().toISOString(),
     });
 
+    await supabase.from("notifications").insert({
+      type: "checkin",
+      title: matched.patient_name + "さんがチェックインしました",
+      body: "受付番号 " + nextNumber + "番・" + (matched.patient_type === "new" ? "初診" : "再診"),
+      patient_id: matched.id,
+    });
+
     setQueueNumber(nextNumber);
-    setCompletedAptId(matched.id);  // ← 問診遷移用にIDを保持
-    setCompletedPatientType(matched.patient_type);  // ← 初診/再診判定
+    setCompletedAptId(matched.id);
+    setCompletedPatientType(matched.patient_type);
     setStep("complete");
     setLoading(false);
   }
@@ -219,14 +224,12 @@ export default function SelfCheckinPage() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-8 flex-1 w-full">
-        {/* ===== 入力画面 ===== */}
         {step === "input" && (
           <div>
             <h2 className="text-xl font-bold text-gray-900 text-center mb-2">受付</h2>
             <p className="text-sm text-gray-500 text-center mb-8">
               診察券番号と生年月日を入力してください
             </p>
-
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -244,7 +247,6 @@ export default function SelfCheckinPage() {
                   診察券に記載されている番号をご入力ください
                 </p>
               </div>
-
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   生年月日（8桁） <span className="text-red-500">*</span>
@@ -271,7 +273,6 @@ export default function SelfCheckinPage() {
                   西暦で8桁入力（例: 1990年1月1日 → 19900101）
                 </p>
               </div>
-
               <button
                 onClick={handleLookup}
                 disabled={!patientId.trim() || birthDate.length !== 8}
@@ -283,7 +284,6 @@ export default function SelfCheckinPage() {
           </div>
         )}
 
-        {/* ===== 照合中 ===== */}
         {step === "checking" && (
           <div className="text-center py-16">
             <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
@@ -291,7 +291,6 @@ export default function SelfCheckinPage() {
           </div>
         )}
 
-        {/* ===== 予約確認 ===== */}
         {step === "confirm" && matched && (
           <div className="text-center">
             <h2 className="text-xl font-bold text-gray-900 mb-6">ご予約を確認しました</h2>
@@ -321,7 +320,6 @@ export default function SelfCheckinPage() {
           </div>
         )}
 
-        {/* ===== チェックイン完了 → 問診へ ===== */}
         {step === "complete" && (
           <div className="text-center py-4">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
@@ -330,15 +328,12 @@ export default function SelfCheckinPage() {
               <p className="text-sm text-sky-600 mb-1">あなたの受付番号</p>
               <p className="text-8xl font-bold text-sky-600">{queueNumber}</p>
             </div>
-
-            {/* 問診へ誘導 */}
             <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-5 mb-6">
               <p className="text-sm font-bold text-orange-700 mb-1">📋 続けて問診にお答えください</p>
               <p className="text-xs text-orange-500">このまま問診画面へ移動します</p>
               <p className="text-3xl font-bold text-orange-600 mt-3">{countdown}</p>
               <p className="text-xs text-orange-400">秒後に自動で移動します</p>
             </div>
-
             <div className="space-y-3">
               <button
                 onClick={() => {
@@ -359,7 +354,6 @@ export default function SelfCheckinPage() {
           </div>
         )}
 
-        {/* ===== 予約なし ===== */}
         {step === "not_found" && (
           <div className="text-center py-8">
             <div className="bg-yellow-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">⚠️</div>
@@ -377,7 +371,6 @@ export default function SelfCheckinPage() {
           </div>
         )}
 
-        {/* ===== チェックイン済み ===== */}
         {step === "already_done" && (
           <div className="text-center py-8">
             <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✅</div>
