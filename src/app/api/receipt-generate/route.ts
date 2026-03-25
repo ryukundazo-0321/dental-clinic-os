@@ -269,54 +269,66 @@ export async function POST(request: NextRequest) {
         billings.map((b: { patient_id: string }) => b.patient_id)
       )
     );
-    const { data: patientsData } = await supabase
-      .from("patients")
-      .select("*")
-      .in("id", patientIds);
-    const patientLookup = new Map(
-      (patientsData || []).map((p: { id: string }) => [p.id, p])
-    );
+    let patientLookup = new Map<string, Record<string, unknown>>();
+    try {
+      const { data: patientsData } = await supabase
+        .from("patients")
+        .select("*")
+        .in("id", patientIds);
+      patientLookup = new Map(
+        (patientsData || []).map((p: { id: string }) => [p.id, p as Record<string, unknown>])
+      );
+    } catch (e) {
+      console.error("患者情報取得エラー:", e);
+    }
 
-    // DB上のreceipt_codeマッピング（CODE_MAPに無い場合のフォールバック）
-    const { data: receiptMap } = await supabase
-      .from("fee_master_receipt")
-      .select("kubun_code, sub_code, receipt_code, shinryo_shikibetsu");
-    const dbLookup = new Map(
-      (receiptMap || []).map(
-        (r: { kubun_code: string; sub_code: string; receipt_code: string; shinryo_shikibetsu: string }) => [
-          `${r.kubun_code}__${r.sub_code}`,
-          { rc: r.receipt_code, sk: r.shinryo_shikibetsu },
-        ]
-      )
-    );
+    // fee_master_receiptはPHASE 4（4-0a）でbilling_patternsのfee_codesを
+    // 公式コードに統一後に再設計予定。現在はCODE_MAPのみで動作する。
+    const dbLookup = new Map<string, { rc: string; sk: string }>();
 
-    // [A-4] 傷病名マスタ（公式コード変換用）をDBから取得
-    const { data: diagMasterData } = await supabase
-      .from("diagnosis_master")
-      .select("code, icd_code, name, name_kana");
-    const diagMasterByName = new Map(
-      (diagMasterData || []).map((d: { name: string; code: string; icd_code: string }) => [d.name, d])
-    );
-    const diagMasterByCode = new Map(
-      (diagMasterData || []).map((d: { code: string; icd_code: string; name: string }) => [d.code, d])
-    );
+    // 傷病名マスタ（公式コード変換用）をm_diagnosesから取得
+    let diagMasterByName = new Map<string, { diagnosis_name: string; diagnosis_code: string; icd10_code: string }>();
+    let diagMasterByCode = new Map<string, { diagnosis_code: string; icd10_code: string; diagnosis_name: string }>();
+    try {
+      const { data: diagMasterData } = await supabase
+        .from("m_diagnoses")
+        .select("diagnosis_code, icd10_code, diagnosis_name")
+        .eq("is_active", true);
+      diagMasterByName = new Map(
+        (diagMasterData || []).map((d: { diagnosis_name: string; diagnosis_code: string; icd10_code: string }) => [d.diagnosis_name, d])
+      );
+      diagMasterByCode = new Map(
+        (diagMasterData || []).map((d: { diagnosis_code: string; icd10_code: string; diagnosis_name: string }) => [d.diagnosis_code, d])
+      );
+    } catch (e) {
+      console.error("傷病名マスタ取得エラー:", e);
+    }
 
     // クリニック情報
-    const { data: settings } = await supabase
-      .from("clinic_settings")
-      .select("*")
-      .limit(1)
-      .single();
-    const { data: clinicInfo } = await supabase
-      .from("clinics")
-      .select("name, phone")
-      .limit(1)
-      .single();
-    const clinicCode = settings?.clinic_code || "3101471";
-    const clinicPref = settings?.prefecture_code || "23";
-    const clinicPhone = clinicInfo?.phone || "0000-00-0000";
-    const clinicName = clinicInfo?.name || "";
-    const facilityCode = settings?.facility_code || "0117";
+    let clinicCode = "3101471";
+    let clinicPref = "23";
+    let clinicPhone = "0000-00-0000";
+    let clinicName = "";
+    let facilityCode = "0117";
+    try {
+      const { data: settings } = await supabase
+        .from("clinic_settings")
+        .select("*")
+        .limit(1)
+        .single();
+      const { data: clinicInfo } = await supabase
+        .from("clinics")
+        .select("name, phone, clinic_code, prefecture_code")
+        .limit(1)
+        .single();
+      clinicCode = clinicInfo?.clinic_code || "3101471";
+      clinicPref = clinicInfo?.prefecture_code || "23";
+      clinicPhone = clinicInfo?.phone || "0000-00-0000";
+      clinicName = clinicInfo?.name || "";
+      facilityCode = settings?.facility_code || "0117";
+    } catch (e) {
+      console.error("クリニック情報取得エラー:", e);
+    }
 
     // ============================================================
     // [A-1] 同一患者の月内billing統合
@@ -441,39 +453,45 @@ export async function POST(request: NextRequest) {
       // patient_diagnosesのdiagnosis_codeを公式コードに変換する
       // 独自コードのままだと全レセプト返戻リスクあり
       // ============================================================
-      const { data: diagData } = await supabase
-        .from("patient_diagnoses")
-        .select("*")
-        .eq("patient_id", patientId);
+      let diagData: Record<string, unknown>[] = [];
+      try {
+        const { data: diagResult } = await supabase
+          .from("receipt_diagnoses")
+          .select("*")
+          .eq("patient_id", patientId);
+        diagData = diagResult || [];
+      } catch (e) {
+        console.error("傷病名取得エラー:", e);
+      }
       if (diagData && diagData.length > 0) {
         for (const d of diagData) {
           const outcomeCode =
             d.outcome === "cured" ? "1" :
             d.outcome === "suspended" ? "3" :
             d.outcome === "died" ? "2" : "";
-          const startYM = d.start_date
-            ? d.start_date.replace(/-/g, "").substring(0, 6)
+          const startYM = d.started_at
+            ? d.started_at.replace(/-/g, "").substring(0, 6)
             : yearMonth;
-          const endYM = d.end_date
-            ? d.end_date.replace(/-/g, "").substring(0, 6)
+          const endYM = d.ended_at
+            ? d.ended_at.replace(/-/g, "").substring(0, 6)
             : "";
 
           // [A-4] 傷病名コードの公式マスタ変換
           let diagCode = d.diagnosis_code || "";
           const diagName = d.diagnosis_name || "";
 
-          // まず diagnosis_master で公式コードを検索
+          // まず m_diagnoses で公式コードを検索
           // 1) コードでマスタを検索
           const masterByCode = diagMasterByCode.get(diagCode);
-          if (masterByCode && masterByCode.icd_code) {
+          if (masterByCode && masterByCode.icd10_code) {
             // マスタにICD-10コードがあればそれを使用
-            diagCode = masterByCode.code;
+            diagCode = masterByCode.diagnosis_code;
           }
           // 2) コードで見つからなければ名称でマスタを検索
           if (!masterByCode) {
             const masterByName = diagMasterByName.get(diagName);
             if (masterByName) {
-              diagCode = masterByName.code;
+              diagCode = masterByName.diagnosis_code;
             } else {
               // マスタに見つからない場合は警告
               warnings.push(`傷病名マスタ未登録: "${diagName}" (code: ${d.diagnosis_code})`);
@@ -481,10 +499,10 @@ export async function POST(request: NextRequest) {
           }
 
           // 歯番号の#除去
-          const toothNum = (d.tooth_number || "").replace(/#/g, "");
+          const toothNum = (d.tooth_number_display || "").replace(/#/g, "");
 
           lines.push(
-            `SY,${diagCode},${diagName},${startYM},${outcomeCode},${endYM},${d.modifier_code || ""},${toothNum}`
+            `SY,${diagCode},${diagName},${startYM},${outcomeCode},${endYM},${d.modifier_codes || ""},${toothNum}`
           );
         }
       }
@@ -522,23 +540,11 @@ export async function POST(request: NextRequest) {
           // F-yaku-1は薬剤料のプレースホルダー（0pt）、IYレコードで出力済みのためスキップ
           if (proc.code === "F-yaku-1") continue;
 
-          // 1) DBから検索（最優先・3,192件の公式データ）
+          // 1) CODE_MAPから検索（billing_patternsのfee_codesを公式コードに統一後、
+          //    4-0aでfee_master_receipt VIEWを再構築してdbLookupに戻す予定）
           let receiptCode = "";
           let shikibetsu = "";
           {
-            const codeParts = proc.code.split("-");
-            const kubun = codeParts[0];
-            const sub = codeParts.slice(1).join("-") || "";
-            const dbKey = `${kubun}__${sub}`;
-            const dbFound = dbLookup.get(dbKey);
-            if (dbFound) {
-              receiptCode = dbFound.rc;
-              shikibetsu = dbFound.sk;
-            }
-          }
-
-          // 2) CODE_MAPから検索（DBにないコード用のフォールバック）
-          if (!receiptCode) {
             const mapped = CODE_MAP[proc.code];
             if (mapped) {
               receiptCode = mapped.rc;
@@ -546,16 +552,10 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // 3) 9桁数字コードの場合はそのまま使用
+          // 2) 9桁数字コードの場合はそのまま使用
           if (!receiptCode && /^\d{9}$/.test(proc.code)) {
             receiptCode = proc.code;
-            let dbFound = dbLookup.get(`__${proc.code}`);
-            if (!dbFound) {
-              const entries = Array.from(dbLookup.entries());
-              const match = entries.find(([, v]) => v.rc === proc.code);
-              if (match) dbFound = match[1];
-            }
-            shikibetsu = dbFound?.sk || "80";
+            shikibetsu = "80";
           }
 
           // 4) 最終フォールバック（警告付き）
@@ -606,15 +606,20 @@ export async function POST(request: NextRequest) {
       // IY,診療識別(21=内服,23=外用,25=頓服),負担区分,医薬品コード,使用量,点数,回数
       // ============================================================
       if (drugProcs.length > 0) {
-        // drug_masterからreceipt_codeを取得するためにDBを参照
+        // m_drugsからreceipt_codeを取得
         const drugYjCodes = drugProcs.map(dp => dp.code.replace("DRUG-", ""));
-        const { data: drugMasterData } = await supabase
-          .from("drug_master")
-          .select("yj_code, receipt_code, dosage_form, name, unit_price, unit")
-          .in("yj_code", drugYjCodes);
-        const drugMasterMap = new Map(
-          (drugMasterData || []).map((d: { yj_code: string; receipt_code: string; dosage_form: string; name: string; unit_price: number; unit: string }) => [d.yj_code, d])
-        );
+        let drugMasterMap = new Map<string, { yj_code: string; receipt_code: string; dosage_form: string; name: string; unit_price: number; unit: string }>();
+        try {
+          const { data: drugMasterData } = await supabase
+            .from("m_drugs")
+            .select("yj_code, receipt_code, dosage_form, name, unit_price, unit")
+            .in("yj_code", drugYjCodes);
+          drugMasterMap = new Map(
+            (drugMasterData || []).map((d: { yj_code: string; receipt_code: string; dosage_form: string; name: string; unit_price: number; unit: string }) => [d.yj_code, d])
+          );
+        } catch (e) {
+          console.error("薬剤マスタ取得エラー:", e);
+        }
 
         const futanKubun = hasPublicExpense ? futanKubunAll : "";
 
@@ -667,15 +672,20 @@ export async function POST(request: NextRequest) {
       }
 
       if (matProcs.length > 0) {
-        // material_masterからreceipt_codeを取得
+        // m_materialsから器材情報を取得
         const matCodes = matProcs.map(mp => mp.code.replace("MAT-", ""));
-        const { data: matMasterData } = await supabase
-          .from("material_master")
-          .select("material_code, receipt_code, shinryo_shikibetsu, unit, unit_price, default_quantity")
-          .in("material_code", matCodes);
-        const matMasterMap = new Map(
-          (matMasterData || []).map((m: { material_code: string; receipt_code: string; shinryo_shikibetsu: string; unit: string; unit_price: number; default_quantity: number }) => [m.material_code, m])
-        );
+        let matMasterMap = new Map<string, { material_code: string; shinryo_shikibetsu: string; unit: string; unit_price: number; default_quantity: number }>();
+        try {
+          const { data: matMasterData } = await supabase
+            .from("m_materials")
+            .select("material_code, shinryo_shikibetsu, unit, unit_price, default_quantity")
+            .in("material_code", matCodes);
+          matMasterMap = new Map(
+            (matMasterData || []).map((m: { material_code: string; shinryo_shikibetsu: string; unit: string; unit_price: number; default_quantity: number }) => [m.material_code, m])
+          );
+        } catch (e) {
+          console.error("器材マスタ取得エラー:", e);
+        }
 
         const futanKubun = hasPublicExpense ? futanKubunAll : "";
 
@@ -684,7 +694,7 @@ export async function POST(request: NextRequest) {
           const matInfo = matMasterMap.get(matCode);
 
           const matShikibetsu = matInfo?.shinryo_shikibetsu || "70";
-          const matReceiptCode = matInfo?.receipt_code || matCode;
+          const matReceiptCode = matInfo?.material_code || matCode;
           const matQuantity = matInfo?.default_quantity || 1;
           const matUnitPrice = matInfo?.unit_price || 0;
 
