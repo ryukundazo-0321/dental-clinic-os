@@ -54,10 +54,10 @@ interface DrugItem {
   unit_price: number;
   unit: string;
   dosage_form: string;
-  default_dose: string;
-  default_frequency: string;
-  default_days: number;
-  drug_category: string;
+  default_dose: string | null;
+  default_frequency: string | null;
+  default_days: number | null;
+  drug_category: string | null;
   receipt_code: string;
 }
 
@@ -346,12 +346,17 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // [B-1] 医薬品マスタ取得
+    // [B-1] 医薬品マスタ取得 (m_drugs)
     // ============================================================
-    const { data: drugItems } = await supabase
-      .from("drug_master")
-      .select("*")
+    const { data: drugItems, error: drugErr } = await supabase
+      .from("m_drugs")
+      .select("yj_code, name, unit_price, unit, dosage_form, default_dose, default_frequency, default_days, drug_category, receipt_code")
       .eq("is_active", true);
+
+    if (drugErr) {
+      return NextResponse.json({ error: "医薬品マスタ取得失敗", detail: drugErr.message }, { status: 500 });
+    }
+
     const drugByName = new Map<string, DrugItem>(
       (drugItems || []).map((d: DrugItem) => [d.name, d])
     );
@@ -706,14 +711,14 @@ export async function POST(request: NextRequest) {
         const matched = preset.keywords.some(kw => soapAll.includes(kw.toLowerCase()));
         if (!matched) continue;
 
-        // マッチした薬をdrug_masterから検索
+        // マッチした薬をm_drugsから検索
         for (const drugName of preset.drugNames) {
           const drug = drugByName.get(drugName);
           if (drug) {
             prescribedDrugs.push({
               drug,
               quantity: 1,
-              days: drug.default_days,
+              days: drug.default_days ?? 3,
               dosageForm: drug.dosage_form,
             });
 
@@ -724,7 +729,7 @@ export async function POST(request: NextRequest) {
                 prescribedDrugs.push({
                   drug: stomachDrug,
                   quantity: 1,
-                  days: stomachDrug.default_days,
+                  days: stomachDrug.default_days ?? 3,
                   dosageForm: stomachDrug.dosage_form,
                 });
               }
@@ -757,7 +762,7 @@ export async function POST(request: NextRequest) {
             points: drugPoints,
             category: "投薬",
             count: 1,
-            note: `${pd.drug.default_dose} ${pd.drug.default_frequency} ${pd.days}日分 (${pd.drug.unit_price}円/${pd.drug.unit})`,
+            note: `${pd.drug.default_dose ?? "用量未設定"} ${pd.drug.default_frequency ?? "用法未設定"} ${pd.days}日分 (${pd.drug.unit_price}円/${pd.drug.unit})`,
             tooth_numbers: [],
           });
         }
@@ -862,13 +867,16 @@ export async function POST(request: NextRequest) {
     }
 
     // ============================================================
-    // [B-2] 特定器材（材料）の自動算定
-    // 算定された処置コードに基づき、必要な材料を自動追加する
+    // [B-2] 特定器材（材料）の自動算定 (m_materials)
     // ============================================================
-    const { data: materialItems } = await supabase
-      .from("material_master")
-      .select("*")
+    const { data: materialItems, error: materialErr } = await supabase
+      .from("m_materials")
+      .select("material_code, name, unit_price, unit, default_quantity, related_fee_codes, material_category, procedure_category")
       .eq("is_active", true);
+
+    if (materialErr) {
+      return NextResponse.json({ error: "特定器材マスタ取得失敗", detail: materialErr.message }, { status: 500 });
+    }
 
     if (materialItems && materialItems.length > 0) {
       // 算定済みの処置コードを収集
@@ -891,12 +899,11 @@ export async function POST(request: NextRequest) {
         addedMaterials.add(matKey);
 
         // 材料費の点数計算: 単価 × 数量 / 10（五捨五超入）
-        const matTotalPrice = mat.unit_price * mat.default_quantity;
+        const matTotalPrice = mat.unit_price * (mat.default_quantity ?? 1);
         const materialPoints = matTotalPrice <= 15 ? (matTotalPrice > 0 ? 1 : 0) : Math.round(matTotalPrice / 10);
 
         // 金パラ（金属）は薬価基準で変動するため、点数0で注意を促す
         if (mat.unit_price === 0) {
-          // 金属材料は時価のため、手動設定が必要
           continue; // 単価0の金属は自動追加しない（手動で設定してもらう）
         }
 
@@ -909,7 +916,7 @@ export async function POST(request: NextRequest) {
             points: materialPoints,
             category: "特定器材",
             count: 1,
-            note: `${mat.default_quantity}${mat.unit} × ${mat.unit_price}円/${mat.unit}`,
+            note: `${mat.default_quantity ?? 1}${mat.unit} × ${mat.unit_price}円/${mat.unit}`,
             tooth_numbers: [],
           });
         }
@@ -973,16 +980,8 @@ export async function POST(request: NextRequest) {
 
     // ============================================================
     // [B-3] コメント自動付与（公式コード準拠）
-    // 支払基金「別表Ⅰ（歯科）」に基づき、必須コメントのみ自動生成
-    // ※一般的な処置（CR、抜髄、抜歯、FMC等）では部位コメント不要
-    //   （SIレコードの歯式コードで部位を表現するため）
     // ============================================================
     const autoComments: { code: string; text: string; kubun: string }[] = [];
-
-    // 再度初診料を算定する場合（前回の歯管算定患者が再初診の場合）
-    // → 850100296: 前回治療年月日が必要
-    // ※この判定は前回の治療終了日を参照する必要があるため、
-    //   現時点では手動入力を想定（将来的に自動化検討）
 
     // 訪問診療の場合のコメント
     if (soapAll.includes("訪問診療") || soapAll.includes("訪問")) {
