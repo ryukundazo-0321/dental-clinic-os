@@ -105,39 +105,81 @@ export default function SettingsPage() {
   useEffect(() => { initializeData(); }, []);
 
   async function initializeData() {
-    let { data: clinics } = await supabase.from("clinics").select("*").limit(1);
+    // clinicsの取得・なければ自動作成
     let currentClinicId: string;
-    if (!clinics || clinics.length === 0) {
-      const { data: newClinic } = await supabase.from("clinics").insert({ name: "マイクリニック" }).select("*").single();
-      if (newClinic) { currentClinicId = newClinic.id; setClinic(newClinic); } else return;
-    } else { currentClinicId = clinics[0].id; setClinic(clinics[0]); }
-    setClinicId(currentClinicId);
+    try {
+      let { data: clinics } = await supabase.from("clinics").select("*").limit(1);
+      if (!clinics || clinics.length === 0) {
+        const { data: newClinic } = await supabase.from("clinics").insert({ name: "マイクリニック" }).select("*").single();
+        if (!newClinic) return;
+        currentClinicId = newClinic.id;
+        setClinic(newClinic);
+      } else {
+        currentClinicId = clinics[0].id;
+        setClinic(clinics[0]);
+      }
+      setClinicId(currentClinicId);
+    } catch (e) {
+      console.error("clinics取得エラー", e);
+      return;
+    }
 
-    let { data: settingsData } = await supabase.from("clinic_settings").select("*").eq("clinic_id", currentClinicId).limit(1);
-    if (!settingsData || settingsData.length === 0) {
-      const { data: newSettings } = await supabase.from("clinic_settings").insert({ clinic_id: currentClinicId }).select("*").single();
-      if (newSettings) setSettings(newSettings);
-    } else { setSettings(settingsData[0]); }
+    // clinic_settingsの取得・なければ自動作成
+    try {
+      const { data: settingsData } = await supabase.from("clinic_settings").select("*").eq("clinic_id", currentClinicId).limit(1);
+      if (!settingsData || settingsData.length === 0) {
+        const { data: newSettings } = await supabase.from("clinic_settings").insert({ clinic_id: currentClinicId }).select("*").single();
+        if (newSettings) setSettings(newSettings);
+      } else {
+        setSettings(settingsData[0]);
+      }
+    } catch (e) {
+      console.error("clinic_settings取得エラー", e);
+    }
 
-    const { data: unitsData } = await supabase.from("units").select("*").eq("clinic_id", currentClinicId).order("sort_order", { ascending: true });
-    if (unitsData) setUnits(unitsData);
+    // ユニット取得
+    try {
+      const { data: unitsData } = await supabase.from("units").select("*").eq("clinic_id", currentClinicId).order("sort_order", { ascending: true });
+      if (unitsData) setUnits(unitsData);
+    } catch (e) {
+      console.error("units取得エラー", e);
+    }
 
-    const { data: staffData } = await supabase.from("staff").select("*").eq("clinic_id", currentClinicId).order("sort_order", { ascending: true });
-    if (staffData) setStaffList(staffData);
+    // スタッフ取得
+    try {
+      const { data: staffData } = await supabase.from("staff").select("*").eq("clinic_id", currentClinicId).order("sort_order", { ascending: true });
+      if (staffData) setStaffList(staffData);
+    } catch (e) {
+      console.error("staff取得エラー", e);
+    }
 
-    const { data: facilityData } = await supabase.from("m_facility_standards").select("*").eq("is_active", true).order("level_group").order("level");
-    if (facilityData) setFacilities(facilityData as FacilityStandard[]);
+    // 施設基準取得
+    try {
+      const { data: facilityData } = await supabase.from("m_facility_standards").select("*").eq("is_active", true).order("level_group", { ascending: true }).order("level", { ascending: true });
+      if (facilityData) setFacilities(facilityData as FacilityStandard[]);
+    } catch (e) {
+      console.error("m_facility_standards取得エラー", e);
+    }
 
-    // シャッター取得
-    const { data: blockData } = await supabase.from("clinic_blocks").select("*").order("created_at", { ascending: false });
-    if (blockData) setBlocks(blockData as ClinicBlock[]);
+    // 予約シャッター取得
+    try {
+      const { data: blockData } = await supabase.from("clinic_blocks").select("*").order("created_at", { ascending: false });
+      if (blockData) setBlocks(blockData as ClinicBlock[]);
+    } catch (e) {
+      console.error("clinic_blocks取得エラー", e);
+    }
   }
 
   async function toggleFacility(standard_code: string, currentValue: boolean) {
     setFacilitySaving(true);
-    await supabase.from("m_facility_standards").update({ is_registered: !currentValue }).eq("standard_code", standard_code);
-    setFacilities(prev => prev.map(f => f.standard_code === standard_code ? { ...f, is_registered: !currentValue } : f));
-    setFacilitySaving(false);
+    try {
+      await supabase.from("m_facility_standards").update({ is_registered: !currentValue }).eq("standard_code", standard_code);
+      setFacilities(prev => prev.map(f => f.standard_code === standard_code ? { ...f, is_registered: !currentValue } : f));
+    } catch (e) {
+      console.error("施設基準更新エラー:", e);
+    } finally {
+      setFacilitySaving(false);
+    }
   }
 
   // level_groupごとにグループ化して表示
@@ -157,71 +199,102 @@ export default function SettingsPage() {
 
   async function saveClinic() {
     setSaving(true);
-    await supabase.from("clinics").update({
-      name: clinic.name, address: clinic.address, phone: clinic.phone,
-      postal_code: clinic.postal_code, email: clinic.email, website: clinic.website,
-      clinic_code: clinic.clinic_code || "", prefecture_code: clinic.prefecture_code || "",
-      director_name: clinic.director_name || "",
-      doctor_license_number: clinic.doctor_license_number || "",
-      insurance_facility_number: clinic.insurance_facility_number || "",
-      medical_subjects: clinic.medical_subjects || "",
-    }).eq("id", clinicId);
-    await supabase.from("clinic_settings").update({
-      morning_start: settings.morning_start, morning_end: settings.morning_end,
-      afternoon_start: settings.afternoon_start, afternoon_end: settings.afternoon_end,
-      slot_duration_min: settings.slot_duration_min, closed_days: settings.closed_days,
-      max_patients_per_slot: settings.max_patients_per_slot,
-    }).eq("clinic_id", clinicId);
-    setSaveMsg("保存しました ✅");
-    setTimeout(() => setSaveMsg(""), 2000);
-    setSaving(false);
+    try {
+      await supabase.from("clinics").update({
+        name: clinic.name, address: clinic.address, phone: clinic.phone,
+        postal_code: clinic.postal_code, email: clinic.email, website: clinic.website,
+        clinic_code: clinic.clinic_code || "", prefecture_code: clinic.prefecture_code || "",
+        director_name: clinic.director_name || "",
+        doctor_license_number: clinic.doctor_license_number || "",
+        insurance_facility_number: clinic.insurance_facility_number || "",
+        medical_subjects: clinic.medical_subjects || "",
+      }).eq("id", clinicId);
+      await supabase.from("clinic_settings").update({
+        morning_start: settings.morning_start, morning_end: settings.morning_end,
+        afternoon_start: settings.afternoon_start, afternoon_end: settings.afternoon_end,
+        slot_duration_min: settings.slot_duration_min, closed_days: settings.closed_days,
+        max_patients_per_slot: settings.max_patients_per_slot,
+      }).eq("clinic_id", clinicId);
+      setSaveMsg("保存しました ✅");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch (e) {
+      console.error("クリニック情報保存エラー:", e);
+      setSaveMsg("保存に失敗しました ❌");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function addUnit() {
     const nextNumber = units.length + 1;
-    const { data } = await supabase.from("units").insert({
-      clinic_id: clinicId, unit_number: nextNumber,
-      name: newUnit.name || `チェア${nextNumber}`,
-      unit_type: newUnit.unit_type, sort_order: nextNumber, is_active: true,
-    }).select("*").single();
-    if (data) { setUnits([...units, data]); setNewUnit({ name: "", unit_type: "general" }); setShowAddUnit(false); }
+    try {
+      const { data } = await supabase.from("units").insert({
+        clinic_id: clinicId, unit_number: nextNumber,
+        name: newUnit.name || `チェア${nextNumber}`,
+        unit_type: newUnit.unit_type, sort_order: nextNumber, is_active: true,
+      }).select("*").single();
+      if (data) { setUnits([...units, data]); setNewUnit({ name: "", unit_type: "general" }); setShowAddUnit(false); }
+    } catch (e) {
+      console.error("ユニット追加エラー:", e);
+    }
   }
 
   async function toggleUnit(unit: Unit) {
-    await supabase.from("units").update({ is_active: !unit.is_active }).eq("id", unit.id);
-    setUnits(units.map(u => u.id === unit.id ? { ...u, is_active: !u.is_active } : u));
+    try {
+      await supabase.from("units").update({ is_active: !unit.is_active }).eq("id", unit.id);
+      setUnits(units.map(u => u.id === unit.id ? { ...u, is_active: !u.is_active } : u));
+    } catch (e) {
+      console.error("ユニット更新エラー:", e);
+    }
   }
 
   async function deleteUnit(unitId: string) {
     if (!confirm("このユニットを削除しますか？")) return;
-    await supabase.from("units").delete().eq("id", unitId);
-    setUnits(units.filter(u => u.id !== unitId));
+    try {
+      await supabase.from("units").delete().eq("id", unitId);
+      setUnits(units.filter(u => u.id !== unitId));
+    } catch (e) {
+      console.error("ユニット削除エラー:", e);
+    }
   }
 
   async function addStaff() {
     if (!newStaff.name) return;
-    const { data } = await supabase.from("staff").insert({
-      clinic_id: clinicId, name: newStaff.name, role: newStaff.role,
-      email: newStaff.email || null, phone: newStaff.phone || null,
-      license_number: newStaff.license_number || null,
-      color: newStaff.color, is_active: true, sort_order: staffList.length + 1,
-    }).select("*").single();
-    if (data) {
-      setStaffList([...staffList, data]);
-      setNewStaff({ name: "", role: "doctor", email: "", phone: "", license_number: "", color: "#0ea5e9" });
-      setShowAddStaff(false);
+    try {
+      const { data } = await supabase.from("staff").insert({
+        clinic_id: clinicId, name: newStaff.name, role: newStaff.role,
+        email: newStaff.email || null, phone: newStaff.phone || null,
+        license_number: newStaff.license_number || null,
+        color: newStaff.color, is_active: true, sort_order: staffList.length + 1,
+      }).select("*").single();
+      if (data) {
+        setStaffList([...staffList, data]);
+        setNewStaff({ name: "", role: "doctor", email: "", phone: "", license_number: "", color: "#0ea5e9" });
+        setShowAddStaff(false);
+      }
+    } catch (e) {
+      console.error("スタッフ追加エラー:", e);
     }
   }
 
   async function toggleStaff(staff: Staff) {
-    await supabase.from("staff").update({ is_active: !staff.is_active }).eq("id", staff.id);
-    setStaffList(staffList.map(s => s.id === staff.id ? { ...s, is_active: !s.is_active } : s));
+    try {
+      await supabase.from("staff").update({ is_active: !staff.is_active }).eq("id", staff.id);
+      setStaffList(staffList.map(s => s.id === staff.id ? { ...s, is_active: !s.is_active } : s));
+    } catch (e) {
+      console.error("スタッフ更新エラー:", e);
+    }
   }
 
   async function deleteStaff(staffId: string) {
     if (!confirm("このスタッフを削除しますか？")) return;
-    await supabase.from("staff").delete().eq("id", staffId);
-    setStaffList(staffList.filter(s => s.id !== staffId));
+    try {
+      await supabase.from("staff").delete().eq("id", staffId);
+      setStaffList(staffList.filter(s => s.id !== staffId));
+    } catch (e) {
+      console.error("スタッフ削除エラー:", e);
+    }
   }
 
   function toggleClosedDay(day: number) {
@@ -259,24 +332,37 @@ export default function SettingsPage() {
       if (newBlock.time_from) payload.time_from = newBlock.time_from;
       if (newBlock.time_to) payload.time_to = newBlock.time_to;
     }
-    const { data } = await supabase.from("clinic_blocks").insert(payload).select("*").single();
-    if (data) {
-      setBlocks([data as ClinicBlock, ...blocks]);
-      setNewBlock({ block_type: "date", block_date: "", day_of_week: "0", time_from: "", time_to: "", reason: "" });
-      setShowAddBlock(false);
+    try {
+      const { data } = await supabase.from("clinic_blocks").insert(payload).select("*").single();
+      if (data) {
+        setBlocks([data as ClinicBlock, ...blocks]);
+        setNewBlock({ block_type: "date", block_date: "", day_of_week: "0", time_from: "", time_to: "", reason: "" });
+        setShowAddBlock(false);
+      }
+    } catch (e) {
+      console.error("シャッター追加エラー:", e);
+    } finally {
+      setBlockSaving(false);
     }
-    setBlockSaving(false);
   }
 
   async function toggleBlock(block: ClinicBlock) {
-    await supabase.from("clinic_blocks").update({ is_active: !block.is_active }).eq("id", block.id);
-    setBlocks(blocks.map(b => b.id === block.id ? { ...b, is_active: !block.is_active } : b));
+    try {
+      await supabase.from("clinic_blocks").update({ is_active: !block.is_active }).eq("id", block.id);
+      setBlocks(blocks.map(b => b.id === block.id ? { ...b, is_active: !block.is_active } : b));
+    } catch (e) {
+      console.error("シャッター更新エラー:", e);
+    }
   }
 
   async function deleteBlock(id: string) {
     if (!confirm("このシャッターを削除しますか？")) return;
-    await supabase.from("clinic_blocks").delete().eq("id", id);
-    setBlocks(blocks.filter(b => b.id !== id));
+    try {
+      await supabase.from("clinic_blocks").delete().eq("id", id);
+      setBlocks(blocks.filter(b => b.id !== id));
+    } catch (e) {
+      console.error("シャッター削除エラー:", e);
+    }
   }
 
   function blockLabel(block: ClinicBlock): string {
