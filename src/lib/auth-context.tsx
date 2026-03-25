@@ -37,7 +37,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 初期セッション取得
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);
       setUser(s?.user ?? null);
@@ -45,7 +44,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       else setLoading(false);
     });
 
-    // セッション変更を監視
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
@@ -60,13 +58,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function loadStaff(authUserId: string) {
-    const { data } = await supabase
-      .from("staff")
-      .select("id, name, role, email, color")
-      .eq("auth_user_id", authUserId)
-      .single();
-    if (data) setStaff(data);
-    setLoading(false);
+    try {
+      const { data, error } = await supabase
+        .from("staff")
+        .select("id, name, role, email, color")
+        .eq("auth_user_id", authUserId)
+        .single();
+      if (data) setStaff(data);
+      if (error) console.error("スタッフ情報取得エラー:", error.message);
+    } catch (e) {
+      console.error("loadStaffエラー:", e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function signIn(email: string, password: string) {
