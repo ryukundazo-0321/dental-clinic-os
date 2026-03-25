@@ -9,6 +9,9 @@ type Tab = "clinic" | "units" | "staff" | "slots" | "facility";
 type Clinic = {
   id: string; name: string; address: string; phone: string;
   postal_code: string; email: string; website: string;
+  clinic_code?: string; prefecture_code?: string;
+  director_name?: string; doctor_license_number?: string;
+  insurance_facility_number?: string; medical_subjects?: string;
 };
 
 type ClinicSettings = {
@@ -17,7 +20,6 @@ type ClinicSettings = {
   afternoon_start: string; afternoon_end: string;
   slot_duration_min: number; closed_days: number[];
   max_patients_per_slot: number;
-  clinic_code?: string; prefecture_code?: string;
 };
 
 type Unit = {
@@ -25,15 +27,14 @@ type Unit = {
   default_doctor_id: string | null; is_active: boolean; sort_order: number;
 };
 
-type FacilityStandard = {
-  id: string; code: string; name: string; category: string;
-  level: number; description: string; requirements: Record<string, unknown>;
-  is_registered: boolean; sort_order: number;
+type FacilityBonus = {
+  fee_code: string; points: number; label: string;
 };
 
-type FacilityBonus = {
-  id: string; facility_code: string; target_kubun: string;
-  bonus_points: number; bonus_type: string; condition: string;
+type FacilityStandard = {
+  id: string; standard_code: string; standard_name: string;
+  description: string; level: number; level_group: string;
+  bonuses: FacilityBonus[]; is_registered: boolean; is_active: boolean;
 };
 
 type Staff = {
@@ -79,7 +80,6 @@ export default function SettingsPage() {
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [newStaff, setNewStaff] = useState({ name: "", role: "doctor", email: "", phone: "", license_number: "", color: "#0ea5e9" });
   const [facilities, setFacilities] = useState<FacilityStandard[]>([]);
-  const [bonuses, setBonuses] = useState<FacilityBonus[]>([]);
   const [facilitySaving, setFacilitySaving] = useState(false);
 
   // 予約シャッター
@@ -125,52 +125,52 @@ export default function SettingsPage() {
     const { data: staffData } = await supabase.from("staff").select("*").eq("clinic_id", currentClinicId).order("sort_order", { ascending: true });
     if (staffData) setStaffList(staffData);
 
-    const { data: facilityData } = await supabase.from("facility_standards").select("*").order("sort_order", { ascending: true });
+    const { data: facilityData } = await supabase.from("m_facility_standards").select("*").eq("is_active", true).order("level_group").order("level");
     if (facilityData) setFacilities(facilityData as FacilityStandard[]);
-
-    const { data: bonusData } = await supabase.from("facility_bonus").select("*").eq("is_active", true);
-    if (bonusData) setBonuses(bonusData as FacilityBonus[]);
 
     // シャッター取得
     const { data: blockData } = await supabase.from("clinic_blocks").select("*").order("created_at", { ascending: false });
     if (blockData) setBlocks(blockData as ClinicBlock[]);
   }
 
-  async function toggleFacility(code: string, currentValue: boolean) {
+  async function toggleFacility(standard_code: string, currentValue: boolean) {
     setFacilitySaving(true);
-    await supabase.from("facility_standards").update({ is_registered: !currentValue }).eq("code", code);
-    setFacilities(prev => prev.map(f => f.code === code ? { ...f, is_registered: !currentValue } : f));
+    await supabase.from("m_facility_standards").update({ is_registered: !currentValue }).eq("standard_code", standard_code);
+    setFacilities(prev => prev.map(f => f.standard_code === standard_code ? { ...f, is_registered: !currentValue } : f));
     setFacilitySaving(false);
   }
 
-  const categoryNames: Record<string, string> = {
-    basic: "基本", safety: "医療安全", infection: "感染対策",
-    management: "管理体制", home_care: "在宅", dx: "医療DX",
-    prosth: "補綴", equipment: "設備", cooperation: "連携",
-  };
+  // level_groupごとにグループ化して表示
+  const facilityGroups = facilities.reduce((acc, f) => {
+    const group = f.level_group || "その他";
+    if (!acc[group]) acc[group] = [];
+    acc[group].push(f);
+    return acc;
+  }, {} as Record<string, FacilityStandard[]>);
 
-  function getBonusesForFacility(code: string) {
-    return bonuses.filter(b => b.facility_code === code);
-  }
-
-  const registeredBonusTotal = facilities.filter(f => f.is_registered).reduce((sum, f) => {
-    const bs = getBonusesForFacility(f.code);
-    const shoshinBonus = bs.find(b => b.target_kubun === "A000" && b.bonus_type === "add");
-    return sum + (shoshinBonus?.bonus_points || 0);
-  }, 0);
+  const registeredBonusTotal = facilities
+    .filter(f => f.is_registered)
+    .reduce((sum, f) => {
+      const shoshinBonus = (f.bonuses || []).find(b => b.fee_code === "A000-1");
+      return sum + (shoshinBonus?.points || 0);
+    }, 0);
 
   async function saveClinic() {
     setSaving(true);
     await supabase.from("clinics").update({
       name: clinic.name, address: clinic.address, phone: clinic.phone,
       postal_code: clinic.postal_code, email: clinic.email, website: clinic.website,
+      clinic_code: clinic.clinic_code || "", prefecture_code: clinic.prefecture_code || "",
+      director_name: clinic.director_name || "",
+      doctor_license_number: clinic.doctor_license_number || "",
+      insurance_facility_number: clinic.insurance_facility_number || "",
+      medical_subjects: clinic.medical_subjects || "",
     }).eq("id", clinicId);
     await supabase.from("clinic_settings").update({
       morning_start: settings.morning_start, morning_end: settings.morning_end,
       afternoon_start: settings.afternoon_start, afternoon_end: settings.afternoon_end,
       slot_duration_min: settings.slot_duration_min, closed_days: settings.closed_days,
       max_patients_per_slot: settings.max_patients_per_slot,
-      clinic_code: settings.clinic_code || "", prefecture_code: settings.prefecture_code || "",
     }).eq("clinic_id", clinicId);
     setSaveMsg("保存しました ✅");
     setTimeout(() => setSaveMsg(""), 2000);
@@ -387,13 +387,37 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">医療機関コード <span className="text-xs text-gray-400">（レセ電用）</span></label>
-                    <input type="text" value={settings.clinic_code || ""} onChange={e => setSettings({ ...settings, clinic_code: e.target.value })}
+                    <input type="text" value={clinic.clinic_code || ""} onChange={e => setClinic({ ...clinic, clinic_code: e.target.value })}
                       placeholder="3101471" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">都道府県コード <span className="text-xs text-gray-400">（レセ電用）</span></label>
-                    <input type="text" value={settings.prefecture_code || ""} onChange={e => setSettings({ ...settings, prefecture_code: e.target.value })}
+                    <input type="text" value={clinic.prefecture_code || ""} onChange={e => setClinic({ ...clinic, prefecture_code: e.target.value })}
                       placeholder="23" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">保険医療機関指定番号 <span className="text-xs text-gray-400">（レセ電用・10桁）</span></label>
+                    <input type="text" value={clinic.insurance_facility_number || ""} onChange={e => setClinic({ ...clinic, insurance_facility_number: e.target.value })}
+                      placeholder="1234567890" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">標榜科目 <span className="text-xs text-gray-400">（レセ電用）</span></label>
+                    <input type="text" value={clinic.medical_subjects || ""} onChange={e => setClinic({ ...clinic, medical_subjects: e.target.value })}
+                      placeholder="歯科・小児歯科" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">院長名</label>
+                    <input type="text" value={clinic.director_name || ""} onChange={e => setClinic({ ...clinic, director_name: e.target.value })}
+                      placeholder="山田 太郎" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">保険医登録番号</label>
+                    <input type="text" value={clinic.doctor_license_number || ""} onChange={e => setClinic({ ...clinic, doctor_license_number: e.target.value })}
+                      placeholder="第123456号" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400" />
                   </div>
                 </div>
               </div>
@@ -742,7 +766,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* ========== 施設基準タブ ========== */}
         {activeTab === "facility" && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -763,49 +786,39 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-            {Object.entries(categoryNames).map(([catKey, catName]) => {
-              const catFacilities = facilities.filter(f => f.category === catKey);
-              if (catFacilities.length === 0) return null;
-              return (
-                <div key={catKey} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                    <h3 className="text-sm font-bold text-gray-700">{catName}</h3>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {catFacilities.map(f => {
-                      const fBonuses = getBonusesForFacility(f.code);
-                      return (
-                        <div key={f.id} className={`px-4 py-3 flex items-center gap-4 ${f.is_registered ? "bg-sky-50/30" : ""}`}>
-                          <label className="flex items-center gap-3 flex-1 cursor-pointer">
-                            <input type="checkbox" checked={f.is_registered} onChange={() => toggleFacility(f.code, f.is_registered)}
-                              disabled={facilitySaving} className="w-5 h-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
-                            <div className="flex-1">
-                              <p className={`text-sm font-bold ${f.is_registered ? "text-gray-900" : "text-gray-400"}`}>
-                                {f.name}
-                                {f.level > 0 && <span className="ml-1 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Lv.{f.level}</span>}
-                              </p>
-                              <p className="text-[11px] text-gray-400 mt-0.5">{f.description}</p>
-                            </div>
-                          </label>
-                          {fBonuses.length > 0 && (
-                            <div className="text-right shrink-0">
-                              {fBonuses.filter(b => b.bonus_type === "add").map((b, i) => (
-                                <p key={i} className={`text-xs font-bold ${f.is_registered ? "text-sky-600" : "text-gray-300"}`}>
-                                  +{b.bonus_points}点<span className="text-[10px] font-normal text-gray-400 ml-1">{b.condition}</span>
-                                </p>
-                              ))}
-                              {fBonuses.filter(b => b.bonus_type === "unlock").map((b, i) => (
-                                <p key={"u"+i} className={`text-[10px] ${f.is_registered ? "text-emerald-500" : "text-gray-300"}`}>🔓 {b.condition}</p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+            {Object.entries(facilityGroups).map(([groupName, groupFacilities]) => (
+              <div key={groupName} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                  <h3 className="text-sm font-bold text-gray-700">{groupName}</h3>
                 </div>
-              );
-            })}
+                <div className="divide-y divide-gray-100">
+                  {groupFacilities.map(f => (
+                    <div key={f.id} className={`px-4 py-3 flex items-center gap-4 ${f.is_registered ? "bg-sky-50/30" : ""}`}>
+                      <label className="flex items-center gap-3 flex-1 cursor-pointer">
+                        <input type="checkbox" checked={f.is_registered} onChange={() => toggleFacility(f.standard_code, f.is_registered)}
+                          disabled={facilitySaving} className="w-5 h-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
+                        <div className="flex-1">
+                          <p className={`text-sm font-bold ${f.is_registered ? "text-gray-900" : "text-gray-400"}`}>
+                            {f.standard_name}
+                            {f.level > 1 && <span className="ml-1 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Lv.{f.level}</span>}
+                          </p>
+                          <p className="text-[11px] text-gray-400 mt-0.5">{f.description}</p>
+                        </div>
+                      </label>
+                      {(f.bonuses || []).length > 0 && (
+                        <div className="text-right shrink-0">
+                          {(f.bonuses || []).map((b, i) => (
+                            <p key={i} className={`text-xs font-bold ${f.is_registered ? "text-sky-600" : "text-gray-300"}`}>
+                              +{b.points}点<span className="text-[10px] font-normal text-gray-400 ml-1">{b.label}</span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </main>
