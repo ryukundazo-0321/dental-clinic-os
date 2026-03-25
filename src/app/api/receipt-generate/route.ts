@@ -269,14 +269,34 @@ export async function POST(request: NextRequest) {
         billings.map((b: { patient_id: string }) => b.patient_id)
       )
     );
-    let patientLookup = new Map<string, Record<string, unknown>>();
+    type Patient = {
+      id: string;
+      name_kanji: string | null;
+      name_kana: string | null;
+      sex: string | null;
+      date_of_birth: string | null;
+      insurance_type: string | null;
+      burden_ratio: number | null;
+      insurer_number: string | null;
+      insured_symbol: string | null;
+      insured_number: string | null;
+      public_insurer: string | null;
+      public_recipient: string | null;
+      public_insurer_2: string | null;
+      public_recipient_2: string | null;
+      public_insurer_3: string | null;
+      public_recipient_3: string | null;
+      public_insurer_4: string | null;
+      public_recipient_4: string | null;
+    };
+    let patientLookup = new Map<string, Patient>();
     try {
       const { data: patientsData } = await supabase
         .from("patients")
         .select("*")
         .in("id", patientIds);
       patientLookup = new Map(
-        (patientsData || []).map((p: { id: string }) => [p.id, p as Record<string, unknown>])
+        (patientsData || []).map((p: Patient) => [p.id, p])
       );
     } catch (e) {
       console.error("患者情報取得エラー:", e);
@@ -362,7 +382,7 @@ export async function POST(request: NextRequest) {
     for (const patientId of patientKeys) {
       const pBillings = patientMap.get(patientId)!;
       receiptNo++;
-      const pat = patientLookup.get(patientId) as Record<string, unknown> | undefined;
+      const pat = patientLookup.get(patientId);
       if (!pat) continue;
 
       const insType = String(pat.insurance_type || "社保");
@@ -453,13 +473,25 @@ export async function POST(request: NextRequest) {
       // patient_diagnosesのdiagnosis_codeを公式コードに変換する
       // 独自コードのままだと全レセプト返戻リスクあり
       // ============================================================
-      let diagData: Record<string, unknown>[] = [];
+      type ReceiptDiagnosis = {
+        id: string;
+        patient_id: string;
+        diagnosis_code: string;
+        diagnosis_name: string;
+        outcome: string | null;
+        started_at: string | null;
+        ended_at: string | null;
+        tooth_number_display: string | null;
+        modifier_codes: string | null;
+        is_primary: boolean;
+      };
+      let diagData: ReceiptDiagnosis[] = [];
       try {
         const { data: diagResult } = await supabase
           .from("receipt_diagnoses")
           .select("*")
           .eq("patient_id", patientId);
-        diagData = diagResult || [];
+        diagData = (diagResult || []) as ReceiptDiagnosis[];
       } catch (e) {
         console.error("傷病名取得エラー:", e);
       }
