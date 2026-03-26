@@ -54,10 +54,10 @@ interface DrugItem {
   unit_price: number;
   unit: string;
   dosage_form: string;
-  default_dose: string;
-  default_frequency: string;
-  default_days: number;
-  drug_category: string;
+  default_dose: string | null;
+  default_frequency: string | null;
+  default_days: number | null;
+  drug_category: string | null;
   receipt_code: string;
 }
 
@@ -349,7 +349,7 @@ export async function POST(request: NextRequest) {
     // [B-1] 医薬品マスタ取得
     // ============================================================
     const { data: drugItems } = await supabase
-      .from("drug_master")
+      .from("m_drugs")
       .select("*")
       .eq("is_active", true);
     const drugByName = new Map<string, DrugItem>(
@@ -713,7 +713,7 @@ export async function POST(request: NextRequest) {
             prescribedDrugs.push({
               drug,
               quantity: 1,
-              days: drug.default_days,
+              days: drug.default_days ?? 3,
               dosageForm: drug.dosage_form,
             });
 
@@ -724,7 +724,7 @@ export async function POST(request: NextRequest) {
                 prescribedDrugs.push({
                   drug: stomachDrug,
                   quantity: 1,
-                  days: stomachDrug.default_days,
+                  days: stomachDrug.default_days ?? 3,
                   dosageForm: stomachDrug.dosage_form,
                 });
               }
@@ -757,7 +757,7 @@ export async function POST(request: NextRequest) {
             points: drugPoints,
             category: "投薬",
             count: 1,
-            note: `${pd.drug.default_dose} ${pd.drug.default_frequency} ${pd.days}日分 (${pd.drug.unit_price}円/${pd.drug.unit})`,
+            note: `${pd.drug.default_dose ?? "用量未設定"} ${pd.drug.default_frequency ?? "用法未設定"} ${pd.days}日分 (${pd.drug.unit_price}円/${pd.drug.unit})`,
             tooth_numbers: [],
           });
         }
@@ -866,7 +866,7 @@ export async function POST(request: NextRequest) {
     // 算定された処置コードに基づき、必要な材料を自動追加する
     // ============================================================
     const { data: materialItems } = await supabase
-      .from("material_master")
+      .from("m_materials")
       .select("*")
       .eq("is_active", true);
 
