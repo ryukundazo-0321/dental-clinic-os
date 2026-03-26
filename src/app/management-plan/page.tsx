@@ -11,8 +11,8 @@ type Patient = {
 };
 
 type Diagnosis = {
-  id: string; diagnosis_name: string; tooth_number: string;
-  start_date: string; outcome: string;
+  id: string; diagnosis_name: string; tooth_number_display: string;
+  started_at: string; outcome: string;
 };
 
 type MedicalRecord = {
@@ -78,9 +78,9 @@ function ManagementPlanContent() {
 
       // 傷病名
       const { data: diags } = await supabase
-        .from("patient_diagnoses").select("*")
+        .from("receipt_diagnoses").select("*")
         .eq("patient_id", patientId).eq("outcome", "continuing")
-        .order("start_date", { ascending: false });
+        .order("started_at", { ascending: false });
 
       // 最新カルテ
       const { data: records } = await supabase
@@ -100,7 +100,6 @@ function ManagementPlanContent() {
 
       // SOAPからデータを推測
       const latestSOAP = recList[0];
-      const soapS = latestSOAP?.soap_s || "";
       const soapO = latestSOAP?.soap_o || "";
       const soapA = latestSOAP?.soap_a || "";
       const soapP = latestSOAP?.soap_p || "";
@@ -121,7 +120,7 @@ function ManagementPlanContent() {
         periodontal: soapO || "",
         missingTeeth: "",
         oralFunction: "",
-        diagnoses: diagList.map(d => d.diagnosis_name + (d.tooth_number ? `（#${d.tooth_number}）` : "")).join("、") || "",
+        diagnoses: diagList.map(d => d.diagnosis_name + (d.tooth_number_display ? `（#${d.tooth_number_display}）` : "")).join("、") || "",
         examResults: soapO || "",
         treatmentPlan: soapA ? `${soapA}\n${soapP || ""}` : soapP || "",
         managementSchedule: "",
