@@ -18,7 +18,7 @@ type AuditLog = {
 
 const TABLE_LABELS: Record<string, string> = {
   medical_records: "📋 カルテ",
-  patient_diagnoses: "🏷️ 傷病名",
+  receipt_diagnoses: "🏷️ 傷病名",
   billing: "💰 会計",
   patients: "👤 患者",
   appointments: "📅 予約",
@@ -69,7 +69,7 @@ export default function AuditPage() {
     if (log.action === "UPDATE" && log.changed_fields && log.changed_fields.length > 0) {
       return `${tbl} ${act}: ${log.changed_fields.join(", ")}`;
     }
-    if (log.action === "INSERT" && log.table_name === "patient_diagnoses" && log.new_data) {
+    if (log.action === "INSERT" && log.table_name === "receipt_diagnoses" && log.new_data) {
       return `${tbl} ${act}: ${(log.new_data as Record<string, string>).diagnosis_name || ""}`;
     }
     if (log.action === "INSERT" && log.table_name === "patients" && log.new_data) {
@@ -154,7 +154,7 @@ export default function AuditPage() {
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
               <option value="all">すべて</option>
               <option value="medical_records">📋 カルテ</option>
-              <option value="patient_diagnoses">🏷️ 傷病名</option>
+              <option value="receipt_diagnoses">🏷️ 傷病名</option>
               <option value="billing">💰 会計</option>
               <option value="patients">👤 患者</option>
               <option value="appointments">📅 予約</option>
