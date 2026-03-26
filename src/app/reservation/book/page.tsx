@@ -10,7 +10,7 @@ import {
 type Step = "select_type" | "new_patient_info" | "returning_lookup" | "treatment_summary" | "select_date" | "select_time" | "confirm" | "complete";
 
 type TreatmentSummary = {
-  diagnoses: { name: string; tooth_number: string; start_date: string }[];
+  diagnoses: { name: string; tooth_number_display: string; started_at: string }[];
   lastVisit: {
     date: string;
     soap_p: string;
@@ -152,20 +152,20 @@ export default function PatientBookingPage() {
 
   async function fetchTreatmentSummary(patientId: string): Promise<TreatmentSummary> {
     const { data: diagData } = await supabase
-      .from("patient_diagnoses")
-      .select("diagnosis_name, tooth_number, start_date, outcome")
+      .from("receipt_diagnoses")
+      .select("diagnosis_name, tooth_number_display, started_at, outcome")
       .eq("patient_id", patientId)
-      .is("outcome", null)
-      .order("start_date", { ascending: false });
+      .eq("outcome", "continuing")
+      .order("started_at", { ascending: false });
 
-    const diagnoses = (diagData || []).map((d: { diagnosis_name: string; tooth_number: string; start_date: string }) => ({
+    const diagnoses = (diagData || []).map((d: { diagnosis_name: string; tooth_number_display: string; started_at: string }) => ({
       name: d.diagnosis_name,
-      tooth_number: d.tooth_number || "",
-      start_date: d.start_date || "",
+      tooth_number_display: d.tooth_number_display || "",
+      started_at: d.started_at || "",
     }));
 
     const activeTeeth = Array.from(
-      new Set(diagnoses.map((d: { tooth_number: string }) => d.tooth_number).filter(Boolean))
+      new Set(diagnoses.map((d: { tooth_number_display: string }) => d.tooth_number_display).filter(Boolean))
     );
 
     const { data: lastApt } = await supabase
@@ -436,9 +436,9 @@ export default function PatientBookingPage() {
                     <div className="space-y-1.5">
                       {treatmentSummary.diagnoses.map((d, i) => (
                         <div key={i} className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
-                          {d.tooth_number && (
+                          {d.tooth_number_display && (
                             <span className="bg-orange-200 text-orange-800 text-xs font-bold px-2 py-0.5 rounded">
-                              {"#" + d.tooth_number + " " + toothLabel(d.tooth_number)}
+                              {"#" + d.tooth_number_display + " " + toothLabel(d.tooth_number_display)}
                             </span>
                           )}
                           <span className="text-sm font-bold text-gray-800">{d.name}</span>
