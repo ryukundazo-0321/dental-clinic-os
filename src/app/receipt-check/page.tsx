@@ -285,7 +285,7 @@ export default function ReceiptCheckPage() {
         if (!billing) continue;
 
         const { data: patientDiags } = await supabase
-          .from("patient_diagnoses")
+          .from("receipt_diagnoses")
           .select("*")
           .eq("patient_id", billing.patient_id);
 
@@ -299,7 +299,7 @@ export default function ReceiptCheckPage() {
 ${procs.map(p => `- ${p.name}(${p.code}) ${p.points}点×${p.count}回${p.tooth_numbers?.length ? " 歯:" + p.tooth_numbers.join(",") : ""}`).join("\n")}
 
 【傷病名】
-${(patientDiags || []).map((d: { diagnosis_name: string; diagnosis_code: string; tooth_number: string; outcome: string }) => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.tooth_number} 転帰:${d.outcome}`).join("\n") || "なし"}
+${(patientDiags || []).map((d: { diagnosis_name: string; diagnosis_code: string; tooth_number_display: string; outcome: string }) => `- ${d.diagnosis_name}(${d.diagnosis_code}) 歯:${d.tooth_number_display} 転帰:${d.outcome}`).join("\n") || "なし"}
 
 【ルールチェック結果】
 エラー: ${target.errors.join("; ") || "なし"}
@@ -661,13 +661,13 @@ ${(patientDiags || []).map((d: { diagnosis_name: string; diagnosis_code: string;
                                     e.stopPropagation();
                                     const tooth = prompt(`${d.name}の対象歯番号を入力（例: 46）`);
                                     if (!tooth) return;
-                                    await supabase.from("patient_diagnoses").insert({
+                                    await supabase.from("receipt_diagnoses").insert({
                                       patient_id: r.patient_id,
                                       diagnosis_code: d.code,
                                       diagnosis_name: d.name,
-                                      tooth_number: tooth,
-                                      start_date: new Date().toISOString().split("T")[0],
-                                      outcome: "ongoing",
+                                      tooth_number_display: tooth,
+                                      started_at: new Date().toISOString().split("T")[0],
+                                      outcome: "continuing",
                                       is_primary: true,
                                     });
                                     recheckOne(r.billing_id);
