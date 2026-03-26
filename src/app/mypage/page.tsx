@@ -46,8 +46,8 @@ type MedicalRecord = {
 type PatientDiagnosis = {
   id: string;
   diagnosis_name: string;
-  tooth_number: string | null;
-  start_date: string;
+  tooth_number_display: string | null;
+  started_at: string;
   outcome: string;
   session_total: number | null;
   session_current: number | null;
@@ -185,7 +185,7 @@ export default function MyPage() {
     const [pRes, aRes, dRes, imgRes, blockRes] = await Promise.all([
       supabase.from("patients").select("id,patient_number,name_kanji,name_kana,date_of_birth,sex,phone,insurance_type,burden_ratio,allergies,current_tooth_chart,notes").eq("id", patientId).single(),
       supabase.from("appointments").select("id,scheduled_at,status,patient_type,medical_records(soap_s,soap_o,soap_a,soap_p,doctor_confirmed)").eq("patient_id", patientId).order("scheduled_at", { ascending: false }),
-      supabase.from("patient_diagnoses").select("id,diagnosis_name,tooth_number,start_date,outcome,session_total,session_current").eq("patient_id", patientId).eq("outcome", "continuing").order("start_date", { ascending: false }),
+      supabase.from("receipt_diagnoses").select("id,diagnosis_name,tooth_number_display,started_at,outcome,session_total,session_current").eq("patient_id", patientId).eq("outcome", "continuing").order("started_at", { ascending: false }),
       supabase.from("patient_images").select("id,image_type,file_name,storage_path,created_at").eq("patient_id", patientId).order("created_at", { ascending: false }),
       supabase.from("clinic_blocks").select("*").eq("is_active", true),
     ]);
@@ -585,7 +585,7 @@ export default function MyPage() {
                       <div key={d.id} className="bg-orange-50 rounded-xl border border-orange-100 p-3">
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
-                            {d.tooth_number && <span className="text-[10px] bg-orange-200 text-orange-800 px-1.5 py-0.5 rounded font-bold">{d.tooth_number}番</span>}
+                            {d.tooth_number_display && <span className="text-[10px] bg-orange-200 text-orange-800 px-1.5 py-0.5 rounded font-bold">{d.tooth_number_display}番</span>}
                             <span className="text-sm font-bold text-gray-800">{d.diagnosis_name}</span>
                           </div>
                           <span className="text-[10px] text-orange-600 font-bold">治療中</span>
