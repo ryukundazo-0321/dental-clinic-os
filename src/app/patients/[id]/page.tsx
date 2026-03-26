@@ -42,12 +42,12 @@ type MedicalRecord = {
 type StructuredProcedure = { id: string; procedure_name: string; points: number; diagnosis_name?: string; tooth?: string; category?: string };
 type PatientDiagnosis = {
   id: string; patient_id: string; diagnosis_code: string; diagnosis_name: string;
-  tooth_number: string | null; start_date: string; end_date: string | null;
+  tooth_number_display: string | null; started_at: string; ended_at: string | null;
   outcome: string; is_primary: boolean; notes: string | null;
   session_total?: number | null; session_current?: number | null;
 };
 type ToothMode = "permanent" | "deciduous" | "both";
-type DiagnosisMaster = { code: string; name: string; category: string };
+type DiagnosisMaster = { diagnosis_code: string; diagnosis_name: string; category: string };
 type DiagnosisModifier = { id: string; modifier_code: string; modifier_name: string; modifier_position: string };
 type ToothHistoryEntry = {
   id: string; tooth_number: string; change_type: string;
@@ -196,7 +196,14 @@ export default function PatientDetailPage() {
   const [selectedPrefix, setSelectedPrefix] = useState("");
   const [selectedSuffix, setSelectedSuffix] = useState("");
   const [baseDiagName, setBaseDiagName] = useState("");
-  const [newDiag, setNewDiag] = useState({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false });
+  const [newDiag, setNewDiag] = useState({
+    diagnosis_code: "",
+    diagnosis_name: "",
+    tooth_number_display: "",
+    started_at: new Date().toISOString().split("T")[0],
+    outcome: "continuing",
+    is_primary: false,
+  });
 
   // カルテ編集（カルテ履歴クリックで展開・SOAP編集）
   const [editingRecord, setEditingRecord] = useState<MedicalRecord | null>(null);
@@ -210,7 +217,7 @@ export default function PatientDetailPage() {
       supabase.from("medical_records")
         .select("*, appointments(scheduled_at, patient_type, status, doctor_id)")
         .eq("patient_id", pid).order("created_at", { ascending: false }),
-      supabase.from("patient_diagnoses").select("*").eq("patient_id", pid).order("start_date", { ascending: false }),
+      supabase.from("receipt_diagnoses").select("*").eq("patient_id", pid).order("started_at", { ascending: false }),
       supabase.from("tooth_history").select("*").eq("patient_id", pid).order("created_at", { ascending: false }),
       supabase.from("perio_snapshots").select("*").eq("patient_id", pid).order("created_at", { ascending: false }),
       supabase.from("patient_images").select("*").eq("patient_id", pid).order("created_at", { ascending: false }),
@@ -282,10 +289,16 @@ export default function PatientDetailPage() {
 
   useEffect(() => {
     (async () => {
-      const { data: masterData } = await supabase.from("diagnosis_master").select("code, name, category").order("sort_order");
+      const { data: masterData } = await supabase
+        .from("m_diagnoses")
+        .select("diagnosis_code, diagnosis_name, category")
+        .eq("is_active", true);
       if (masterData) setDiagMaster(masterData as DiagnosisMaster[]);
       try {
-        const { data: modData } = await supabase.from("diagnosis_modifiers").select("*").eq("is_active", true).order("sort_order");
+        const { data: modData } = await supabase
+          .from("m_diagnosis_modifiers")
+          .select("*")
+          .eq("is_active", true);
         if (modData) setDiagModifiers(modData as DiagnosisModifier[]);
       } catch { /* テーブルがない場合はスキップ */ }
     })();
@@ -314,26 +327,57 @@ export default function PatientDetailPage() {
   async function addDiagnosis() {
     if (!newDiag.diagnosis_name) return;
     setSaving(true);
-    await supabase.from("patient_diagnoses").insert({ patient_id: pid, ...newDiag });
-    const { data } = await supabase.from("patient_diagnoses").select("*").eq("patient_id", pid).order("start_date", { ascending: false });
-    if (data) setDiagnoses(data as PatientDiagnosis[]);
-    setNewDiag({ diagnosis_code: "", diagnosis_name: "", tooth_number: "", start_date: new Date().toISOString().split("T")[0], outcome: "continuing", is_primary: false });
-    setShowDiagForm(false); setDiagSearch("");
-    setSaving(false);
+    try {
+      const { error: insertErr } = await supabase.from("receipt_diagnoses").insert({ patient_id: pid, ...newDiag });
+      if (insertErr) throw new Error(insertErr.message);
+      const { data, error: selectErr } = await supabase
+        .from("receipt_diagnoses")
+        .select("*")
+        .eq("patient_id", pid)
+        .order("started_at", { ascending: false });
+      if (selectErr) throw new Error(selectErr.message);
+      if (data) setDiagnoses(data as PatientDiagnosis[]);
+      setNewDiag({
+        diagnosis_code: "",
+        diagnosis_name: "",
+        tooth_number_display: "",
+        started_at: new Date().toISOString().split("T")[0],
+        outcome: "continuing",
+        is_primary: false,
+      });
+      setShowDiagForm(false); setDiagSearch("");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "不明なエラー";
+      alert("傷病名の追加に失敗しました: " + msg);
+    } finally {
+      setSaving(false);
+    }
   }
 
   // 傷病名outcome更新
   async function updateOutcome(id: string, outcome: string) {
     const endDate = outcome !== "continuing" ? new Date().toISOString().split("T")[0] : null;
-    await supabase.from("patient_diagnoses").update({ outcome, end_date: endDate }).eq("id", id);
-    setDiagnoses(prev => prev.map(d => d.id === id ? { ...d, outcome, end_date: endDate } : d));
+    try {
+      const { error } = await supabase.from("receipt_diagnoses").update({ outcome, ended_at: endDate }).eq("id", id);
+      if (error) throw new Error(error.message);
+      setDiagnoses(prev => prev.map(d => d.id === id ? { ...d, outcome, ended_at: endDate } : d));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "不明なエラー";
+      alert("傷病名の更新に失敗しました: " + msg);
+    }
   }
 
   // 傷病名削除
   async function deleteDiagnosis(id: string) {
     if (!confirm("この傷病名を削除しますか？")) return;
-    await supabase.from("patient_diagnoses").delete().eq("id", id);
-    setDiagnoses(prev => prev.filter(d => d.id !== id));
+    try {
+      const { error } = await supabase.from("receipt_diagnoses").delete().eq("id", id);
+      if (error) throw new Error(error.message);
+      setDiagnoses(prev => prev.filter(d => d.id !== id));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "不明なエラー";
+      alert("傷病名の削除に失敗しました: " + msg);
+    }
   }
 
   // カルテSOAP保存
@@ -697,13 +741,13 @@ export default function PatientDetailPage() {
                         const current = d.session_current || 0;
                         const total = d.session_total || 1;
                         const pct = Math.round((current / total) * 100);
-                        const isActive = tc[d.tooth_number||""]?.status === "in_treatment";
+                        const isActive = tc[d.tooth_number_display||""]?.status === "in_treatment";
                         return (
                           <div key={d.id} className={`px-4 py-2.5 ${isActive ? "bg-orange-50" : ""}`}>
                             <div className="flex items-center justify-between mb-1">
                               <div className="flex items-center gap-1.5">
-                                {d.tooth_number && (
-                                  <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{d.tooth_number}番</span>
+                                {d.tooth_number_display && (
+                                  <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{d.tooth_number_display}番</span>
                                 )}
                                 <span className="text-xs font-bold text-gray-800">{d.diagnosis_name}</span>
                               </div>
@@ -834,7 +878,6 @@ export default function PatientDetailPage() {
                 <div className="border-t border-gray-100 px-4 py-3">
                   <button onClick={async () => {
                     setShowChat(true);
-                    // 患者からの未読メッセージを既読にする
                     const unreadIds = chatMessages.filter(m => !m.is_read && m.sender_type === "patient").map(m => m.id);
                     if (unreadIds.length > 0) {
                       await supabase.from("chat_messages").update({ is_read: true }).in("id", unreadIds);
@@ -859,7 +902,6 @@ export default function PatientDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-bold text-gray-900">📋 カルテ履歴</h2>
-            {/* 傷病名管理タブ */}
             <div className="flex items-center gap-2">
               <button onClick={() => setShowDiagForm(!showDiagForm)}
                 className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors ${showDiagForm ? "bg-gray-200 text-gray-600" : "bg-sky-100 text-sky-700 hover:bg-sky-200"}`}>
@@ -886,8 +928,8 @@ export default function PatientDetailPage() {
                             <div className="flex items-center gap-2">
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${oc.color}`}>{oc.text}</span>
                               <span className="text-xs font-bold text-gray-800">{d.diagnosis_name}</span>
-                              {d.tooth_number && <span className="text-[10px] text-sky-600">{d.tooth_number}番</span>}
-                              <span className="text-[10px] text-gray-400">{d.start_date}</span>
+                              {d.tooth_number_display && <span className="text-[10px] text-sky-600">{d.tooth_number_display}番</span>}
+                              <span className="text-[10px] text-gray-400">{d.started_at}</span>
                             </div>
                             <div className="flex items-center gap-1">
                               <select value={d.outcome} onChange={e => updateOutcome(d.id, e.target.value)}
@@ -911,12 +953,16 @@ export default function PatientDetailPage() {
                     placeholder="傷病名を検索..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs mb-2 focus:outline-none focus:border-sky-400" />
                   {diagSearch.length > 0 && (
                     <div className="max-h-28 overflow-y-auto bg-gray-50 rounded-lg border border-gray-200 mb-2">
-                      {diagMaster.filter(d => d.name.includes(diagSearch) || d.code.includes(diagSearch)).slice(0, 10).map(d => (
-                        <button key={d.code} onClick={() => { setBaseDiagName(d.name); setSelectedPrefix(""); setSelectedSuffix("");
-                          setNewDiag(prev => ({ ...prev, diagnosis_code: d.code, diagnosis_name: d.name })); setDiagSearch(""); }}
+                      {diagMaster.filter(d => d.diagnosis_name.includes(diagSearch) || d.diagnosis_code.includes(diagSearch)).slice(0, 10).map(d => (
+                        <button key={d.diagnosis_code} onClick={() => {
+                          setBaseDiagName(d.diagnosis_name);
+                          setSelectedPrefix(""); setSelectedSuffix("");
+                          setNewDiag(prev => ({ ...prev, diagnosis_code: d.diagnosis_code, diagnosis_name: d.diagnosis_name }));
+                          setDiagSearch("");
+                        }}
                           className="w-full text-left px-3 py-1.5 text-xs hover:bg-sky-50 border-b border-gray-100 last:border-0">
-                          <span className="text-gray-400 mr-2">{d.code}</span>
-                          <span className="font-bold text-gray-700">{d.name}</span>
+                          <span className="text-gray-400 mr-2">{d.diagnosis_code}</span>
+                          <span className="font-bold text-gray-700">{d.diagnosis_name}</span>
                         </button>
                       ))}
                     </div>
@@ -924,7 +970,6 @@ export default function PatientDetailPage() {
                   {newDiag.diagnosis_name && (
                     <>
                       <div className="bg-sky-50 rounded-lg px-2 py-1.5 mb-2 text-xs font-bold text-sky-700">{newDiag.diagnosis_name}</div>
-                      {/* 修飾語 */}
                       {diagModifiers.length > 0 && (() => {
                         const prefixes = diagModifiers.filter(m => m.modifier_position === "prefix");
                         const suffixes = diagModifiers.filter(m => m.modifier_position === "suffix");
@@ -969,10 +1014,10 @@ export default function PatientDetailPage() {
                       })()}
                       <div className="grid grid-cols-2 gap-2 mb-2">
                         <div><label className="text-[9px] text-gray-400 block mb-0.5">歯番</label>
-                          <input value={newDiag.tooth_number} onChange={e => setNewDiag({...newDiag, tooth_number: e.target.value})}
+                          <input value={newDiag.tooth_number_display} onChange={e => setNewDiag({...newDiag, tooth_number_display: e.target.value})}
                             placeholder="#46" className="w-full border border-gray-200 rounded px-2 py-1 text-xs" /></div>
                         <div><label className="text-[9px] text-gray-400 block mb-0.5">開始日</label>
-                          <input type="date" value={newDiag.start_date} onChange={e => setNewDiag({...newDiag, start_date: e.target.value})}
+                          <input type="date" value={newDiag.started_at} onChange={e => setNewDiag({...newDiag, started_at: e.target.value})}
                             className="w-full border border-gray-200 rounded px-2 py-1 text-xs" /></div>
                       </div>
                       <button onClick={addDiagnosis} disabled={saving}
@@ -996,7 +1041,6 @@ export default function PatientDetailPage() {
               const bill = billingMap[r.id];
               return (
                 <div key={r.id}>
-                  {/* カルテ行 */}
                   <div className="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors cursor-pointer"
                     onClick={() => {
                       if (isExpanded) {
@@ -1019,7 +1063,6 @@ export default function PatientDetailPage() {
                         ? <span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-bold">✓ 確定</span>
                         : <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-bold">未確定</span>
                       }
-                      {/* 処置サマリー */}
                       {r.soap_s && <span className="text-xs text-gray-400 truncate max-w-xs hidden md:block">{r.soap_s.slice(0, 40)}</span>}
                     </div>
                     <div className="flex items-center gap-3">
@@ -1040,10 +1083,8 @@ export default function PatientDetailPage() {
                     </div>
                   </div>
 
-                  {/* 展開：SOAP編集エリア */}
                   {isExpanded && editingRecord && isEditing && (
                     <div className="px-5 pb-5 bg-gray-50 border-t border-gray-100">
-                      {/* 操作ボタン */}
                       <div className="flex items-center justify-between py-3">
                         <div className="flex items-center gap-2">
                           <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${editingRecord.status === "confirmed" ? "bg-green-100 text-green-700" : editingRecord.status === "soap_complete" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>
@@ -1075,7 +1116,6 @@ export default function PatientDetailPage() {
                         </div>
                       </div>
 
-                      {/* SOAP */}
                       <div className="grid grid-cols-2 gap-3">
                         {([
                           { key: "soap_s" as const, l: "S", t: "主訴", c: "text-pink-600" },
@@ -1100,7 +1140,6 @@ export default function PatientDetailPage() {
                         ))}
                       </div>
 
-                      {/* 処置記録 */}
                       {bill?.procedures_detail && (bill.procedures_detail as { name: string; points: number; count: number }[]).length > 0 && (
                         <div className="mt-3">
                           <p className="text-xs font-bold text-gray-500 mb-2">処置内容</p>
@@ -1130,7 +1169,6 @@ export default function PatientDetailPage() {
               <h3 className="font-bold text-gray-900 text-lg">患者基本情報</h3>
               <button onClick={() => setShowInfoModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
             </div>
-            {/* タブ */}
             <div className="flex border-b px-6">
               {([
                 { k: "basic" as const, l: "基本情報" },
@@ -1291,7 +1329,6 @@ export default function PatientDetailPage() {
       {showChat && (
         <div className="fixed inset-0 z-50 flex items-end justify-end p-4 pointer-events-none">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm h-[520px] flex flex-col pointer-events-auto border border-gray-200">
-            {/* ヘッダー */}
             <div className="flex items-center justify-between px-4 py-3 bg-sky-600 rounded-t-2xl">
               <div className="flex items-center gap-2">
                 <span className="text-white text-sm">💬</span>
@@ -1299,8 +1336,6 @@ export default function PatientDetailPage() {
               </div>
               <button onClick={() => setShowChat(false)} className="text-sky-200 hover:text-white text-lg">✕</button>
             </div>
-
-            {/* メッセージ一覧 */}
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
               {chatMessages.length === 0 ? (
                 <div className="text-center py-8 text-xs text-gray-400">
@@ -1324,8 +1359,6 @@ export default function PatientDetailPage() {
               ))}
               <div ref={chatBottomRef} />
             </div>
-
-            {/* 入力エリア */}
             <div className="px-3 py-3 border-t border-gray-200 flex items-end gap-2">
               <textarea
                 value={chatInput}
