@@ -100,7 +100,7 @@ interface DetectedDiagnosis {
 
 interface PatientDiagnosis {
   id: string;
-  tooth_number: string | null;
+  tooth_number_display: string | null;
   diagnosis_code: string;
   diagnosis_name: string;
   outcome: "continuing" | "completed" | "discontinued";
@@ -271,7 +271,7 @@ export default function ConsultationPage() {
   const [editingTooth, setEditingTooth] = useState<number | null>(null);
   const [toothChartDraft, setToothChartDraft] = useState<Record<string, ToothStatus>>({});
   const [diagnosisSearch, setDiagnosisSearch] = useState("");
-  const [diagnosisMaster, setDiagnosisMaster] = useState<Array<{ code: string; name: string; category: string }>>([]);
+  const [diagnosisMaster, setDiagnosisMaster] = useState<Array<{ diagnosis_code: string; diagnosis_name: string; category: string }>>([]);
   const [selectedTooth, setSelectedTooth] = useState("");
   const [focusStep, setFocusStep] = useState<"photo" | "perio" | "voice" | "diagnosis" | "treatment" | "billing" | null>(null);
 
@@ -296,11 +296,11 @@ export default function ConsultationPage() {
           setFocusStep("photo");
           addLog("🦷 問診票から傷病名候補" + mr.predicted_diagnoses.length + "件を検出");
         }
-        const { data: currentDiags } = await supabase.from("patient_diagnoses").select("*").eq("medical_record_id", mr.id).order("created_at");
+        const { data: currentDiags } = await supabase.from("receipt_diagnoses").select("*").eq("medical_record_id", mr.id).order("created_at");
         if (currentDiags && currentDiags.length > 0) {
           setPatientDiagnoses(currentDiags);
           setConfirmedDiagnosesList(currentDiags.map((d: PatientDiagnosis) => ({
-            tooth: d.tooth_number || "", code: d.diagnosis_code, name: d.diagnosis_name, short: d.diagnosis_code, confidence: 1, reason: "カルテより",
+            tooth: d.tooth_number_display || "", code: d.diagnosis_code, name: d.diagnosis_name, short: d.diagnosis_code, confidence: 1, reason: "カルテより",
           })));
         }
       }
@@ -312,7 +312,7 @@ export default function ConsultationPage() {
         .eq("patient_id", appt.patient_id).neq("appointment_id", appointmentId)
         .order("created_at", { ascending: false }).limit(1);
       if (pastMrList && pastMrList.length > 0) {
-        const { data: pastDiags } = await supabase.from("patient_diagnoses").select("*").eq("medical_record_id", pastMrList[0].id);
+        const { data: pastDiags } = await supabase.from("receipt_diagnoses").select("*").eq("medical_record_id", pastMrList[0].id);
         setPastPatientDiagnoses(pastDiags || []);
         if (pastMrList[0].treatment_schedule) setPrevTreatmentSchedule(pastMrList[0].treatment_schedule);
       }
@@ -333,7 +333,10 @@ export default function ConsultationPage() {
         setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
         addLog("💰 " + feeProc.procedure_name + "（" + feeProc.points + "点）を自動追加");
       }
-      const { data: dm } = await supabase.from("diagnosis_master").select("code, name, category").order("category");
+      const { data: dm } = await supabase
+        .from("m_diagnoses")
+        .select("diagnosis_code, diagnosis_name, category")
+        .eq("is_active", true);
       setDiagnosisMaster(dm || []);
       addLog("カルテを読み込みました");
     } catch (err) {
@@ -532,15 +535,26 @@ export default function ConsultationPage() {
       return [...prev, { tooth: diag.tooth, code: diag.code, name: diag.name, short: diag.short, confidence: diag.confidence, reason: diag.reason }];
     });
     addLog("✅ 傷病名確定: " + (diag.tooth ? diag.tooth + "番 " : "") + diag.name);
-    const { data: insertedDiag } = await supabase.from("patient_diagnoses").insert({
-      patient_id: patient.id, medical_record_id: medicalRecord.id,
-      tooth_number: diag.tooth || null, diagnosis_code: diag.code, diagnosis_name: diag.name, outcome: "continuing",
-    }).select().single();
-    if (insertedDiag) {
-      setPatientDiagnoses(prev => {
-        const exists = prev.some(d => d.tooth_number === insertedDiag.tooth_number && d.diagnosis_code === insertedDiag.diagnosis_code);
-        return exists ? prev : [...prev, insertedDiag];
-      });
+    try {
+      const { data: insertedDiag, error } = await supabase.from("receipt_diagnoses").insert({
+        patient_id: patient.id,
+        medical_record_id: medicalRecord.id,
+        tooth_number_display: diag.tooth || null,
+        diagnosis_code: diag.code,
+        diagnosis_name: diag.name,
+        outcome: "continuing",
+        started_at: new Date().toISOString().split("T")[0],
+      }).select().single();
+      if (error) throw new Error(error.message);
+      if (insertedDiag) {
+        setPatientDiagnoses(prev => {
+          const exists = prev.some(d => d.tooth_number_display === insertedDiag.tooth_number_display && d.diagnosis_code === insertedDiag.diagnosis_code);
+          return exists ? prev : [...prev, insertedDiag];
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      addLog("⚠️ 傷病名の保存に失敗しました: " + msg);
     }
     setFocusStep("treatment");
     await fetchTreatmentPatterns(diag.short || diag.code);
@@ -941,7 +955,7 @@ export default function ConsultationPage() {
                     {pastPatientDiagnoses.slice(0, 5).map((d, i) => (
                       <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
                         <div className="flex items-center gap-2">
-                          {d.tooth_number && <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded">{d.tooth_number}番</span>}
+                          {d.tooth_number_display && <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded">{d.tooth_number_display}番</span>}
                           <span className="text-sm font-medium text-gray-800">{d.diagnosis_name}</span>
                         </div>
                         <span className={"text-xs px-2 py-0.5 rounded-full font-bold " + (d.outcome === "continuing" ? "bg-orange-100 text-orange-700" : d.outcome === "completed" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600")}>
@@ -1774,9 +1788,9 @@ export default function ConsultationPage() {
                     </div>
                     <div className="space-y-1 max-h-80 overflow-y-auto">
                       {diagnosisSearch.length >= 1 ? (
-                        diagnosisMaster.filter((d) => d.name.includes(diagnosisSearch) || d.code.toLowerCase().includes(diagnosisSearch.toLowerCase())).slice(0, 20).map((d) => (
-                          <button key={d.code} onClick={() => { confirmDiagnosis({ tooth: selectedTooth, code: d.code, name: d.name, confidence: 1.0, reason: "手動選択" }); setPopup(null); setDiagnosisSearch(""); }} className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 flex items-center justify-between">
-                            <span>{d.name}</span><span className="text-xs text-gray-400">{d.code}</span>
+                        diagnosisMaster.filter((d) => d.diagnosis_name.includes(diagnosisSearch) || d.diagnosis_code.toLowerCase().includes(diagnosisSearch.toLowerCase())).slice(0, 20).map((d) => (
+                          <button key={d.diagnosis_code} onClick={() => { confirmDiagnosis({ tooth: selectedTooth, code: d.diagnosis_code, name: d.diagnosis_name, confidence: 1.0, reason: "手動選択" }); setPopup(null); setDiagnosisSearch(""); }} className="w-full text-left px-3 py-2 text-sm border rounded hover:bg-blue-50 flex items-center justify-between">
+                            <span>{d.diagnosis_name}</span><span className="text-xs text-gray-400">{d.diagnosis_code}</span>
                           </button>
                         ))
                       ) : (
