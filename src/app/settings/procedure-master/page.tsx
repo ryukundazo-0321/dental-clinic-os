@@ -94,7 +94,7 @@ export default function ProcedureMasterPage() {
   }
 
   async function loadFeeCount() {
-    const { count } = await supabase.from("fee_master_v2").select("*", { count: "exact", head: true });
+    const { count } = await supabase.from("m_fees").select("*", { count: "exact", head: true }).eq("is_active", true);
     if (count) setFeeCount(count);
   }
 

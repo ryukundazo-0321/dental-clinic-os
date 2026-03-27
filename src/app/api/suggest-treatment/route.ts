@@ -4,33 +4,60 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-/**
- * procedure_masterのfee_itemsのcode を
- * fee_master_v2の { kubun_code, sub_code } に分解する
- *
- * ルール: 最初の"-"の前がkubun_code、後ろがsub_code
- *
- * 例:
- *   "I005-309002110"  → kubun="I005",    sub="309002110"
- *   "B000-302000110"  → kubun="B000",    sub="302000110"
- *   "MADJ-600090010"  → kubun="MADJ",    sub="600090010"
- *   "MDEBOND-600080010" → kubun="MDEBOND", sub="600080010"
- *   "MKEISEI-313001210" → kubun="MKEISEI", sub="313001210"
- *   "B0008-113009010" → kubun="B0008",   sub="113009010"
- *   "I020"            → kubun="I020",    sub=""
- *   "F400"            → kubun="F400",    sub=""
- */
-function parseCode(code: string): { kubun: string; sub: string } {
-  const firstDash = code.indexOf("-");
-  if (firstDash === -1) {
-    return { kubun: code, sub: "" };
-  }
-  return {
-    kubun: code.substring(0, firstDash),
-    sub: code.substring(firstDash + 1),
-  };
+// ============================================================
+// 型定義
+// ============================================================
+interface FeeItem {
+  code: string;
+  name: string;
+  points?: number;
+  count: number;
 }
 
+interface MFee {
+  sub_code: string;
+  name: string;
+  points: number;
+}
+
+// ============================================================
+// fee_itemsのcodeから9桁のsub_codeを抽出する
+//
+// m_fees.sub_codeが正しい9桁の公式コード。
+// fee_itemsのcodeは以下の2パターンが混在している：
+//   ① "I011-309004810" → "-"以降が9桁 → "309004810"
+//   ② "K001--1", "M-ADJ" → 独自コード → 9桁なし（未対応）
+//
+// ※ 4-0a-①完了後はfee_itemsが全て9桁に統一されるため
+//   この関数はシンプルになる
+// ============================================================
+function extractSubCode(code: string): string | null {
+  // DRUG- / MAT- / BONUS- はスキップ
+  if (code.startsWith("DRUG-") || code.startsWith("MAT-") || code.startsWith("BONUS-")) {
+    return null;
+  }
+  // すでに9桁数字ならそのまま使用
+  if (/^\d{9}$/.test(code)) return code;
+
+  // "区分コード-9桁数字" 形式なら9桁部分を抽出
+  // 例: "I011-309004810" → "309004810"
+  // 例: "M003-313003310" → "313003310"
+  const dashIdx = code.indexOf("-");
+  if (dashIdx !== -1) {
+    const maybeSub = code.substring(dashIdx + 1);
+    if (/^\d{9}$/.test(maybeSub)) return maybeSub;
+  }
+
+  // "--数字" 形式（独自コード）は未対応 → nullを返す
+  // 例: "K001--1", "I005--1", "M009--1"
+  // → fee_itemsに記載されているpoints/nameをそのまま使う
+  return null;
+}
+
+// ============================================================
+// POST /api/suggest-treatment
+// 傷病名から対応する治療パターン一覧を返す
+// ============================================================
 export async function POST(request: NextRequest) {
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -42,11 +69,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 1. procedure_masterからapplicable_diagnosesにマッチする処置を取得
-    const { data: procedures } = await supabase
+    const { data: procedures, error: procError } = await supabase
       .from("procedure_master")
       .select("id, procedure_name, category, subcategory, fee_items, soap_keywords, applicable_diagnoses, is_default, display_order, notes")
       .eq("is_active", true)
       .order("display_order");
+
+    if (procError) {
+      return NextResponse.json({ error: "procedure_master取得失敗", detail: procError.message }, { status: 500 });
+    }
 
     if (!procedures || procedures.length === 0) {
       return NextResponse.json({ treatments: [], message: "No procedures found" });
@@ -60,50 +91,57 @@ export async function POST(request: NextRequest) {
       );
     });
 
-    // 3. fee_master_v2から点数とreceipt_codeを取得
-    // fee_itemsのcodeをkubun_codeに変換して一括検索
-    const allKubunCodes = new Set<string>();
+    if (matched.length === 0) {
+      return NextResponse.json({
+        treatments: [],
+        diagnosis: { code: diagnosis_code, short: diagnosis_short, tooth },
+        count: 0,
+      });
+    }
+
+    // 3. fee_itemsから9桁のsub_codeを全部収集してm_feesで一括取得
+    const allSubCodes = new Set<string>();
     for (const proc of matched) {
-      if (proc.fee_items) {
-        for (const item of proc.fee_items as { code: string; name: string; points?: number; count: number }[]) {
-          const { kubun } = parseCode(item.code);
-          if (kubun) allKubunCodes.add(kubun);
-        }
+      if (!proc.fee_items) continue;
+      for (const item of proc.fee_items as FeeItem[]) {
+        const sub = extractSubCode(item.code);
+        if (sub) allSubCodes.add(sub);
       }
     }
 
-    // fee_master_v2からkubun_codeで一括取得
-    // キー: "kubun_code|sub_code" で一意に特定
-    const feeMap: Record<string, { name: string; points: number; receipt_code: string }> = {};
-    if (allKubunCodes.size > 0) {
-      const kubunArray = Array.from(allKubunCodes);
-      const { data: fees } = await supabase
-        .from("fee_master_v2")
-        .select("kubun_code, sub_code, name, name_short, points, receipt_code")
-        .in("kubun_code", kubunArray);
+    // m_feesからsub_codeで一括取得（旧fee_master_v2に替えてm_feesを使用）
+    // sub_codeが公式の9桁コードであり、UKEファイルのSSレコードに入れる値
+    const feeMap = new Map<string, { name: string; points: number }>();
+    if (allSubCodes.size > 0) {
+      const { data: fees, error: feeError } = await supabase
+        .from("m_fees")
+        .select("sub_code, name, points")
+        .in("sub_code", Array.from(allSubCodes))
+        .eq("is_active", true);
 
-      if (fees) {
-        for (const f of fees) {
-          const key = `${f.kubun_code}|${f.sub_code || ""}`;
-          feeMap[key] = {
-            name: f.name_short || f.name,
-            points: Number(f.points) || 0,
-            receipt_code: f.receipt_code || "",
-          };
-        }
+      if (feeError) {
+        return NextResponse.json({ error: "m_fees取得失敗", detail: feeError.message }, { status: 500 });
+      }
+
+      for (const f of (fees || []) as MFee[]) {
+        feeMap.set(f.sub_code, {
+          name: f.name,
+          points: Number(f.points) || 0,
+        });
       }
     }
 
     // 4. 結果を整形
     const treatments = matched.map(proc => {
-      const feeItems = (proc.fee_items as { code: string; name: string; points?: number; count: number }[] || []).map(item => {
-        const { kubun, sub } = parseCode(item.code);
-        const key = `${kubun}|${sub}`;
-        const feeInfo = feeMap[key];
+      const feeItems = (proc.fee_items as FeeItem[] || []).map(item => {
+        const subCode = extractSubCode(item.code);
+        const feeInfo = subCode ? feeMap.get(subCode) : null;
 
         return {
           code: item.code,
-          receipt_code: feeInfo?.receipt_code || "",  // UKEファイル用の9桁コード
+          // sub_codeが取得できた場合はそれをUKE用の9桁コードとして使用
+          // 取得できない場合（独自コード）は空文字（4-0a-①完了後に解消）
+          receipt_code: subCode || "",
           name: feeInfo?.name || item.name,
           points: feeInfo?.points ?? Number(item.points) ?? 0,
           count: item.count || 1,
@@ -130,8 +168,9 @@ export async function POST(request: NextRequest) {
       diagnosis: { code: diagnosis_code, short: diagnosis_short, tooth },
       count: treatments.length,
     });
-  } catch (e) {
-    console.error("suggest-treatment error:", e);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: "suggest-treatment エラー", detail: msg }, { status: 500 });
   }
 }

@@ -6,10 +6,7 @@ const supabaseServiceKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// ─── branch_answers を医師が読める自然言語に変換 ──────────────────────────
-// コードに「この値=この病名」は一切書かない。
-// GPT-4oに渡すための読みやすいサマリーを作るだけ。
-
+// ─── branch_answers を医師が読める自然言語に変換 ────────────────────────────
 const CHIEF_COMPLAINT_LABEL: Record<string, string> = {
   shimi: "冷たいものがしみる",
   kamu_ita: "噛むと痛い",
@@ -72,26 +69,20 @@ function buildSymptomSummary(
   const lines: string[] = [];
   lines.push(`主訴: ${CHIEF_COMPLAINT_LABEL[chiefComplaint] || chiefComplaint}`);
   lines.push("詳細問診の回答:");
-
   for (const [key, val] of Object.entries(branchAnswers)) {
     if (!val) continue;
     if (Array.isArray(val)) {
-      const labels = val
-        .map((v) => ANSWER_LABELS[key]?.[v] || v)
-        .filter(Boolean)
-        .join("、");
+      const labels = val.map((v) => ANSWER_LABELS[key]?.[v] || v).filter(Boolean).join("、");
       if (labels) lines.push(`  - ${key}: ${labels}`);
     } else {
       const label = ANSWER_LABELS[key]?.[String(val)] || String(val);
       lines.push(`  - ${key}: ${label}`);
     }
   }
-
   return lines.join("\n");
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────
-
 export async function POST(request: NextRequest) {
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -126,34 +117,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ predictions: [], message: "Non-diagnostic branch" });
     }
 
-    // 1. symptom_diagnosis_mapping から候補を全件取得（母集合）
-    const { data: mappings } = await supabase
-      .from("symptom_diagnosis_mapping")
-      .select("*")
-      .eq("is_active", true);
-
-    // 候補一覧をGPT-4oへ渡すテキストに整形
-    const candidateLines: string[] = [];
-    if (mappings && mappings.length > 0) {
-      const seen = new Set<string>();
-      for (const m of mappings) {
-        const candidates = m.candidate_diagnoses as {
-          code: string; name: string; short: string;
-        }[];
-        for (const c of candidates) {
-          if (!seen.has(c.code)) {
-            seen.add(c.code);
-            candidateLines.push(`  ${c.short}（${c.name}）code:${c.code}`);
-          }
-        }
-      }
-    }
-
-    // 2. 症状サマリーを自然言語に変換
+    // symptom_diagnosis_mappingは廃止。
+    // m_diagnosesから歯科傷病名を取得してGPT-4oの候補として使用する
     const symptomSummary = buildSymptomSummary(
       chief_complaint || "",
       branch_answers || {}
     );
+
+    // m_diagnosesから歯科傷病名を候補として取得
+    // 歯科傷病名はICD10コードのK00〜K14（口腔・唾液腺・顎の疾患）が中心
+    const { data: diagnosisData } = await supabase
+      .from("m_diagnoses")
+      .select("diagnosis_code, diagnosis_name, abbreviation, icd10_code")
+      .eq("is_active", true)
+      .or("icd10_code.like.K0%,icd10_code.like.K1%,icd10_code.like.S0%")
+      .limit(300);
+
+    const candidateLines: string[] = [];
+    if (diagnosisData && diagnosisData.length > 0) {
+      for (const d of diagnosisData) {
+        const short = d.abbreviation || d.diagnosis_name;
+        candidateLines.push(`  ${short}（${d.diagnosis_name}）code:${d.diagnosis_code}`);
+      }
+    }
 
     const extras: string[] = [];
     if (pain_types && pain_types.length > 0) extras.push(`痛みの種類: ${pain_types.join("、")}`);
@@ -190,12 +176,12 @@ export async function POST(request: NextRequest) {
 ${symptomSummary}
 ${extras.length > 0 ? "\n補足情報:\n" + extras.map((e) => "  " + e).join("\n") : ""}
 
-参考にできる傷病名候補一覧（symptom_diagnosis_mappingより）:
-${candidateLines.length > 0 ? candidateLines.join("\n") : "（データなし）"}
+参考にできる傷病名候補一覧（m_diagnosesより・歯科関連）:
+${candidateLines.length > 0 ? candidateLines.slice(0, 150).join("\n") : "（データなし）"}
 
 上記候補から最も可能性の高いものを最大5つ選び、確率と理由を付けてJSON形式で返してください。`;
 
-    // 3. GPT-4oで傷病名を動的判断（fetchで直接呼び出し）
+    // GPT-4oで傷病名を動的判断（fetchで直接呼び出し・SDKは使わない）
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -224,15 +210,11 @@ ${candidateLines.length > 0 ? candidateLines.join("\n") : "（データなし）
         const parsed = JSON.parse(rawText);
         predictions = parsed.predictions || [];
       } catch {
-        console.error("GPT-4o parse error:", rawText);
-        predictions = fallbackMatch(chief_complaint, pain_types, mappings || []);
+        predictions = [];
       }
-    } else {
-      console.error("OpenAI API error:", await openaiRes.text());
-      predictions = fallbackMatch(chief_complaint, pain_types, mappings || []);
     }
 
-    // 4. 部位推定
+    // 部位推定
     let estimatedArea = "";
     if (pain_location) {
       const locs = Array.isArray(pain_location) ? pain_location : [pain_location];
@@ -246,40 +228,9 @@ ${candidateLines.length > 0 ? candidateLines.join("\n") : "（データなし）
       estimated_area: estimatedArea,
       input: { chief_complaint, pain_types, pain_location, pain_level, symptom_onset },
     });
-  } catch (e) {
-    console.error("predict-diagnosis error:", e);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ error: "predict-diagnosis エラー", detail: msg }, { status: 500 });
   }
-}
-
-// ─── フォールバック（GPT-4o失敗時） ──────────────────────────────────────
-
-function fallbackMatch(
-  chiefComplaint: string | undefined,
-  painTypes: string[] | undefined,
-  mappings: Record<string, unknown>[]
-): { code: string; name: string; short: string; probability: number }[] {
-  const scoreMap: Record<string, { code: string; name: string; short: string; probability: number }> = {};
-  const searchTexts = [chiefComplaint, ...(painTypes || [])].filter(Boolean) as string[];
-  const searchAll = searchTexts.join(" ").toLowerCase();
-
-  for (const mapping of mappings) {
-    const keyword = (mapping.symptom_keyword as string).toLowerCase();
-    if (!searchAll.includes(keyword) && !keyword.includes(searchAll)) continue;
-
-    const candidates = mapping.candidate_diagnoses as {
-      code: string; name: string; short: string; probability: number;
-    }[];
-    for (const c of candidates) {
-      if (!scoreMap[c.code]) {
-        scoreMap[c.code] = { code: c.code, name: c.name, short: c.short, probability: 0 };
-      }
-      scoreMap[c.code].probability += c.probability;
-    }
-  }
-
-  return Object.values(scoreMap)
-    .sort((a, b) => b.probability - a.probability)
-    .slice(0, 5)
-    .map((p) => ({ ...p, probability: Math.min(Math.round(p.probability * 100) / 100, 0.99) }));
 }

@@ -88,15 +88,26 @@ function ManagementPlanContent() {
         .eq("patient_id", patientId)
         .order("created_at", { ascending: false }).limit(3);
 
-      // クリニック情報
-      const { data: clinicConfig } = await supabase
-        .from("clinic_insurance_config").select("config_value")
-        .eq("config_key", "clinic_info").single();
+      // クリニック情報（clinic_insurance_configは廃止。clinic_settingsとclinicsで代替）
+      const { data: clinicSettings } = await supabase
+        .from("clinic_settings")
+        .select("setting_value")
+        .eq("setting_key", "clinic_info")
+        .single();
+
+      const { data: clinicData } = await supabase
+        .from("clinics")
+        .select("name, director_name")
+        .single();
 
       const p = patient as Patient | null;
       const diagList = (diags || []) as Diagnosis[];
       const recList = (records || []) as MedicalRecord[];
-      const clinic = clinicConfig?.config_value as Record<string, string> | null;
+      const clinicInfo = clinicSettings?.setting_value as Record<string, string> | null;
+      const clinic = {
+        name: clinicData?.name || clinicInfo?.name || "",
+        director: clinicData?.director_name || clinicInfo?.director || "",
+      };
 
       // SOAPからデータを推測
       const latestSOAP = recList[0];
@@ -108,8 +119,8 @@ function ManagementPlanContent() {
         patientName: p?.name_kanji || "",
         dateOfBirth: p ? formatBirthDate(p.date_of_birth) : "",
         sex: p?.sex || "",
-        clinicName: clinic?.name || "",
-        doctorName: clinic?.director || "",
+        clinicName: clinic.name,
+        doctorName: clinic.director,
         planDate: formatDate(new Date().toISOString()),
         isFirstTime: recList.length <= 1,
         systemicDiseases: "",
