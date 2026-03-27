@@ -52,6 +52,9 @@ export default function RevisitQuestionnairePage() {
       questionnaire_type: "revisit",
       responses: form,
       soap_s_generated: soapS,
+      // 新しい症状があるかどうかをhas_new_symptomカラムに保存（4-10）
+      // 診察ページのfetchAll()で参照して初診/再診フローを切り替える
+      has_new_symptom: form.new_symptoms.length > 0,
     });
 
     if (aptId) {

@@ -370,6 +370,9 @@ export default function QuestionnairePage() {
             branch_answers: finalAnswers.branch_answers,
           },
           profile_answers: finalAnswers.profile,
+          // 全身問診14問の回答をDBに保存（4-11）
+          // 診察ページ・患者詳細ページで参照できるようにする
+          medical_answers: finalAnswers.medical,
           submitted_at: new Date().toISOString(),
         })
         .select()
