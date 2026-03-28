@@ -19,6 +19,7 @@ interface Patient {
   insurance_type: string;
   current_tooth_chart: Record<string, ToothStatus> | null;
   personality_profile?: PersonalityProfile | null;
+  medical_safety_info?: MedicalSafetyInfo | null;
 }
 
 // パーソナリティープロファイル（analyze-personality APIの出力）
@@ -31,8 +32,25 @@ interface PersonalityProfile {
   comm_label?: string;
   action_tips?: string[];
   one_line?: string;
-  safety_alerts?: string[];
   analyzed_at?: string;
+}
+interface MedicalSafetyInfo {
+  medications?: string;
+  medication_names?: string;
+  blood_thinner?: string;
+  diseases?: string[];
+  osteoporosis_drug?: string;
+  drug_allergy?: string;
+  allergy_detail?: string;
+  anesthesia_bad?: string;
+  bleeding_hard?: string;
+  pregnancy?: string;
+  breastfeeding?: string;
+  infection?: string[];
+  smoking?: string;
+  condition_today?: string;
+  safety_alerts: string[];
+  updated_at: string;
 }
 
 interface Appointment {
@@ -1812,11 +1830,11 @@ export default function ConsultationPage() {
                 )}
 
                 {/* 医療安全アラート */}
-                {profile.safety_alerts && profile.safety_alerts.length > 0 && (
+                {patient.medical_safety_info?.safety_alerts && patient.medical_safety_info.safety_alerts.length > 0 && (
                   <div>
                     <div className="text-xs font-bold text-red-600 mb-1">⚠️ 医療安全アラート</div>
                     <div className="space-y-1">
-                      {profile.safety_alerts.map((alert, i) => (
+                      {patient.medical_safety_info!.safety_alerts.map((alert, i) => (
                         <div key={i} className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
                           {alert}
                         </div>

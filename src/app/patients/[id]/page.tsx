@@ -7,6 +7,24 @@ import { supabase } from "@/lib/supabase";
 // ==============================
 // 型定義
 // ==============================
+interface MedicalSafetyInfo {
+  medications?: string;
+  medication_names?: string;
+  blood_thinner?: string;
+  diseases?: string[];
+  osteoporosis_drug?: string;
+  drug_allergy?: string;
+  allergy_detail?: string;
+  anesthesia_bad?: string;
+  bleeding_hard?: string;
+  pregnancy?: string;
+  breastfeeding?: string;
+  infection?: string[];
+  smoking?: string;
+  condition_today?: string;
+  safety_alerts: string[];
+  updated_at: string;
+}
 type Patient = {
   id: string; patient_number: string | null; name_kanji: string; name_kana: string;
   date_of_birth: string | null; sex: string | null; phone: string | null; email: string | null;
@@ -26,6 +44,7 @@ type Patient = {
   high_cost_medical?: boolean; income_category?: string | null; disability_flag?: boolean;
   infection_flags?: string | null; alert_memo?: string | null;
   assigned_dh_id?: string | null; subchart_notes?: string | null;
+  medical_safety_info?: MedicalSafetyInfo | null;
 };
 type ToothData = { status?: string; pocket?: { buccal?: number[]; lingual?: number[] }; bop?: boolean; mobility?: number; note?: string };
 type PerioEntry = { buccal: number[]; lingual: number[]; bop: boolean; mobility: number };
@@ -523,6 +542,13 @@ export default function PatientDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             {hd(patient.allergies) && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold">⚠ アレルギー</span>}
+            {patient.medical_safety_info?.safety_alerts && patient.medical_safety_info.safety_alerts.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {patient.medical_safety_info.safety_alerts.map((alert, i) => (
+                  <span key={i} className="text-[10px] bg-red-100 text-red-700 px-2 py-1 rounded font-bold">⚠️ {alert}</span>
+                ))}
+              </div>
+            )}
             {patient.infection_flags && <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">🦠 {patient.infection_flags}</span>}
             {patient.alert_memo && <span className="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-1 rounded font-bold max-w-[160px] truncate">📌 {patient.alert_memo}</span>}
             {/* ステータスバッジ */}
