@@ -171,48 +171,18 @@ const CODE_MAP: Record<string, { rc: string; sk: string }> = {
 };
 
 
-// ============================================================
-// [A-2] 歯式コード6桁変換テーブル
-// 支払基金はSIレコードの歯式を6桁で要求する
-// 例: "46" → "004600", "A" (乳歯) → 乳歯コード
-// ============================================================
-const TOOTH_6DIGIT_MAP: Record<string, string> = {
-  // === 永久歯（上顎右: 11-18, 上顎左: 21-28, 下顎左: 31-38, 下顎右: 41-48） ===
-  "11": "001100", "12": "001200", "13": "001300", "14": "001400",
-  "15": "001500", "16": "001600", "17": "001700", "18": "001800",
-  "21": "002100", "22": "002200", "23": "002300", "24": "002400",
-  "25": "002500", "26": "002600", "27": "002700", "28": "002800",
-  "31": "003100", "32": "003200", "33": "003300", "34": "003400",
-  "35": "003500", "36": "003600", "37": "003700", "38": "003800",
-  "41": "004100", "42": "004200", "43": "004300", "44": "004400",
-  "45": "004500", "46": "004600", "47": "004700", "48": "004800",
-  // === 乳歯（上顎右: 51-55, 上顎左: 61-65, 下顎左: 71-75, 下顎右: 81-85） ===
-  "51": "005100", "52": "005200", "53": "005300", "54": "005400", "55": "005500",
-  "61": "006100", "62": "006200", "63": "006300", "64": "006400", "65": "006500",
-  "71": "007100", "72": "007200", "73": "007300", "74": "007400", "75": "007500",
-  "81": "008100", "82": "008200", "83": "008300", "84": "008400", "85": "008500",
-  // === 乳歯アルファベット表記 → FDI番号への変換 ===
-  "A": "005500", "B": "005400", "C": "005300", "D": "005200", "E": "005100",
-  "F": "006500", "G": "006400", "H": "006300", "I": "006200", "J": "006100",
-  "K": "007100", "L": "007200", "M": "007300", "N": "007400", "O": "007500",
-  "P": "008500", "Q": "008400", "R": "008300", "S": "008200", "T": "008100",
-};
-
 /**
- * [A-2] 歯番号を6桁コードに変換
- * 入力例: "46", "#46", "11", "A"
- * 出力例: "004600", "001100", "005500"
+ * [UKE-7] 歯番号を6桁コードに変換
+ * m_tooth_chartのfdi_numberカラムから構築したMapを参照
+ * 入力例: "46", "#46", "11"
+ * 出力例: "104600", "101100"
+ * toothMap: POST関数内でm_tooth_chartから構築したMap
  */
-function toothTo6Digit(tooth: string): string {
-  // #プレフィックスを除去
+function toothTo6Digit(tooth: string, toothMap: Map<string, string>): string {
   const cleaned = tooth.replace(/^#/, "").trim();
-  // マップから検索
-  const mapped = TOOTH_6DIGIT_MAP[cleaned];
+  // m_tooth_chartから構築したMapを参照
+  const mapped = toothMap.get(cleaned);
   if (mapped) return mapped;
-  // 2桁数字でマップにない場合 → 00XX00 形式で生成
-  if (/^\d{1,2}$/.test(cleaned)) {
-    return cleaned.padStart(4, "0") + "00";
-  }
   // すでに6桁の場合はそのまま
   if (/^\d{6}$/.test(cleaned)) return cleaned;
   // 変換不能 → そのまま返す（警告は呼び出し元で出す）
@@ -322,6 +292,23 @@ export async function POST(request: NextRequest) {
       );
     } catch (e) {
       console.error("傷病名マスタ取得エラー:", e);
+    }
+
+    // ============================================================
+    // [UKE-7] m_tooth_chartのfdi_numberからtoothMapを構築
+    // fdi_number（FDI歯番号）→ tooth_code（6桁）のMap
+    // ============================================================
+    const toothMap = new Map<string, string>();
+    try {
+      const { data: toothChartData } = await supabase
+        .from("m_tooth_chart")
+        .select("tooth_code, fdi_number")
+        .not("fdi_number", "is", null);
+      for (const row of (toothChartData || [])) {
+        toothMap.set(String(row.fdi_number), String(row.tooth_code));
+      }
+    } catch (e) {
+      console.error("歯式マスタ取得エラー:", e);
     }
 
     // クリニック情報
@@ -557,7 +544,7 @@ export async function POST(request: NextRequest) {
 
           // 歯式コード6桁変換（m_tooth_chartの10XY00形式）
           const toothNum = (d.tooth_number_display || "").replace(/#/g, "");
-          const toothSixDigit = toothNum ? toothTo6Digit(toothNum) : "";
+          const toothSixDigit = toothNum ? toothTo6Digit(toothNum, toothMap) : "";
 
           // HS レコード（傷病名部位）公式仕様準拠・入院外
           const diagNameField = diagCode === "0000999" ? diagName : "";
@@ -641,7 +628,7 @@ export async function POST(request: NextRequest) {
           let teethStr = "";
           if (proc.tooth_numbers && proc.tooth_numbers.length > 0) {
             const converted = proc.tooth_numbers.map((t: string) => {
-              const sixDigit = toothTo6Digit(t);
+              const sixDigit = toothTo6Digit(t, toothMap);
               // 変換結果が6桁数字でない場合は警告
               if (!/^\d{6}$/.test(sixDigit)) {
                 warnings.push(`歯式6桁変換失敗: "${t}" → "${sixDigit}"`);
