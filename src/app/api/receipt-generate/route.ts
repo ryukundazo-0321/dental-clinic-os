@@ -407,7 +407,7 @@ export async function POST(request: NextRequest) {
       // 例: 社保本人3割外来 = "1132", 公費1件あり = "1132" + 公費レセプト種別
       const reInsType = `${insCode}1${burdenCode}2`;
       lines.push(
-        `RE,${receiptNo},${reInsType},${yearMonth},${pat.name_kanji || ""},${sexCode},${dob},${burdenCode * 10},,,,1,,,,,${pat.name_kana || ""},`
+        `RE,${receiptNo},${reInsType},${yearMonth},${pat.name_kanji || ""},${sexCode},${dob},${Math.round((1 - burdenRatio) * 10) * 10},,,,1,,,,,${pat.name_kana || ""},`
       );
 
       // ============================================================
@@ -469,6 +469,25 @@ export async function POST(request: NextRequest) {
       const futanKubunAll = publicExpenses.map(pe => pe.kubun).join(" ");
 
       // ============================================================
+      // [UKE-1] JD レコード（受診日等）— 公式仕様: KO直後・HS前
+      // ============================================================
+      const visitDays = pBillings.map(
+        (b: { created_at: string }) => new Date(b.created_at).getDate()
+      );
+      const uniqueDays = Array.from(new Set(visitDays)).sort(
+        (a: number, b: number) => a - b
+      );
+      const dayFlags = new Array(31).fill(0);
+      uniqueDays.forEach((d: number) => {
+        if (d >= 1 && d <= 31) dayFlags[d - 1] = 1;
+      });
+      lines.push(`JD,${uniqueDays.length},${dayFlags.join(",")}`);
+
+      // [UKE-1] MF レコード（窓口負担額）— 公式仕様: JD直後・HS前
+      const windowAmount = Math.round(patientTotalPoints * 10 * burdenRatio);
+      lines.push(`MF,${windowAmount}`);
+
+      // ============================================================
       // [A-4] SY レコード（傷病名部位）— 公式マスタコード変換
       // patient_diagnosesのdiagnosis_codeを公式コードに変換する
       // 独自コードのままだと全レセプト返戻リスクあり
@@ -487,10 +506,16 @@ export async function POST(request: NextRequest) {
       };
       let diagData: ReceiptDiagnosis[] = [];
       try {
+        // UKE-2b: 当月に関係する傷病名のみ取得
+        // ① 継続中: started_at<=当月末 かつ ended_at=null
+        // ② 当月治癒: ended_at が当月内
+        // ③ 当月新規: started_at が当月内
         const { data: diagResult } = await supabase
           .from("receipt_diagnoses")
           .select("*")
-          .eq("patient_id", patientId);
+          .eq("patient_id", patientId)
+          .or(`ended_at.is.null,ended_at.gte.${startDate},started_at.gte.${startDate}`)
+          .lte("started_at", endDate);
         diagData = (diagResult || []) as ReceiptDiagnosis[];
       } catch (e) {
         console.error("傷病名取得エラー:", e);
@@ -530,11 +555,14 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // 歯番号の#除去
+          // 歯式コード6桁変換（m_tooth_chartの10XY00形式）
           const toothNum = (d.tooth_number_display || "").replace(/#/g, "");
+          const toothSixDigit = toothNum ? toothTo6Digit(toothNum) : "";
 
+          // HS レコード（傷病名部位）公式仕様準拠・入院外
+          const diagNameField = diagCode === "0000999" ? diagName : "";
           lines.push(
-            `SY,${diagCode},${diagName},${startYM},${outcomeCode},${endYM},${d.modifier_codes || ""},${toothNum}`
+            `HS,,,${toothSixDigit},${diagCode},${d.modifier_codes || ""},${diagNameField},,,,,,`
           );
         }
       }
@@ -625,9 +653,9 @@ export async function POST(request: NextRequest) {
 
           const futanKubun = hasPublicExpense ? futanKubunAll : "";
 
-          // SI,診療識別,負担区分,診療行為コード(9桁),歯式(6桁),,点数,回数
+          // SS レコード（歯科診療行為）公式仕様準拠
           lines.push(
-            `SI,${shikibetsu},${futanKubun},${receiptCode},${teethStr},,${proc.points},${proc.count}`
+            `SS,${shikibetsu},${futanKubun},${receiptCode},${teethStr},,${proc.points},${proc.count}`
           );
         }
       }
@@ -738,46 +766,41 @@ export async function POST(request: NextRequest) {
       }
 
       // ============================================================
-      // [B-3] CO レコード（コメント）- 公式フォーマット準拠
-      // 支払基金の記録条件仕様に基づくCOレコード出力
-      // CO,区分,コメントコード,文字データ
-      // ※歯科では診療識別・負担区分はCOレコードに不要（SIレコードに従属）
+      // [UKE-5] CO レコード（コメント）— 公式仕様準拠
+      // receipt_commentsテーブルから当月medical_record_idで絞り込んで取得
+      // CO,診療識別,負担区分,コメントコード,文字データ,歯式コード(コメント)
       // ============================================================
-      for (const b of pBillings) {
-        const comments = (b.receipt_comments || []) as {
-          code: string; text: string; kubun: string;
-        }[];
-
-        if (comments && comments.length > 0) {
-          for (const cm of comments) {
-            // COレコード: コメントコード + 文字データ
-            lines.push(
-              `CO,${cm.code},${cm.text}`
-            );
-          }
+      type ReceiptComment = {
+        comment_code: string;
+        comment_text: string | null;
+        shinryo_shikibetsu: string;
+        futan_kubun: string | null;
+        tooth_codes: string | null;
+      };
+      // 当月のbillingに紐づくmedical_record_idで絞り込む
+      const currentMedicalRecordIds = pBillings
+        .map((b: { medical_record_id: string }) => b.medical_record_id)
+        .filter(Boolean);
+      let commentData: ReceiptComment[] = [];
+      if (currentMedicalRecordIds.length > 0) {
+        try {
+          const { data: commentResult } = await supabase
+            .from("receipt_comments")
+            .select("comment_code, comment_text, shinryo_shikibetsu, futan_kubun, tooth_codes")
+            .in("medical_record_id", currentMedicalRecordIds);
+          commentData = (commentResult || []) as ReceiptComment[];
+        } catch (e) {
+          console.error("コメント取得エラー:", e);
         }
       }
+      for (const cm of commentData) {
+        // CO,診療識別,負担区分,コメントコード,文字データ,歯式コード(コメント)
+        const coFutan = cm.futan_kubun || (hasPublicExpense ? futanKubunAll : "1");
+        lines.push(
+          `CO,${cm.shinryo_shikibetsu},${coFutan},${cm.comment_code},${cm.comment_text || ""},${cm.tooth_codes || ""}`
+        );
+      }
 
-      // ============================================================
-      // [A-1] JD レコード（受診日等）— 全billing分の受診日を統合
-      // 月内の全来院日を1つのJDレコードにまとめる
-      // ============================================================
-      const visitDays = pBillings.map(
-        (b: { created_at: string }) => new Date(b.created_at).getDate()
-      );
-      const uniqueDays = Array.from(new Set(visitDays)).sort(
-        (a: number, b: number) => a - b
-      );
-      const dayFlags = new Array(31).fill(0);
-      uniqueDays.forEach((d: number) => {
-        if (d >= 1 && d <= 31) dayFlags[d - 1] = 1;
-      });
-      lines.push(`JD,${uniqueDays.length},${dayFlags.join(",")}`);
-
-      // === MF レコード（窓口負担額） ===
-      // [A-1] 統合後の合計点数から窓口負担を計算
-      const windowAmount = Math.round(patientTotalPoints * 10 * burdenRatio);
-      lines.push(`MF,${windowAmount}`);
     }
 
     // === GO レコード（請求書） ===
