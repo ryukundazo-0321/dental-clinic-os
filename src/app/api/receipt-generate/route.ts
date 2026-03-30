@@ -475,9 +475,9 @@ export async function POST(request: NextRequest) {
       lines.push(`MF,${windowAmount}`);
 
       // ============================================================
-      // [A-4] SY レコード（傷病名部位）— 公式マスタコード変換
-      // patient_diagnosesのdiagnosis_codeを公式コードに変換する
-      // 独自コードのままだと全レセプト返戻リスクあり
+      // [UKE-2] HS レコード（傷病名部位）— 公式マスタコード変換・入院外仕様
+      // receipt_diagnosesのdiagnosis_codeを公式コードに変換する
+      // 当月に関係する傷病名のみ取得（継続中・当月治癒・当月新規）
       // ============================================================
       type ReceiptDiagnosis = {
         id: string;
