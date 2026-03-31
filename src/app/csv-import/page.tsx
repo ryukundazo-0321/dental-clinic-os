@@ -185,23 +185,36 @@ export default function CSVImportPage() {
           name_kana: nameKana || nameKanji,
           date_of_birth: parsedDob,
           phone: getMappedValue(row, "phone") || "",
-          insurance_type: getMappedValue(row, "insurance_type") || "社保",
-          burden_ratio: burdenRatio,
           is_new: true,
           patient_status: "active",
         };
 
         // 任意フィールド
-        const optFields = ["sex", "postal_code", "address", "insurer_number", "insured_symbol", "insured_number", "patient_number", "notes"];
+        const optFields = ["sex", "postal_code", "address", "patient_number", "notes"];
         for (const f of optFields) {
           const v = getMappedValue(row, f);
           if (v) patientData[f] = v;
         }
 
-        const { error } = await supabase.from("patients").insert(patientData);
+        const { data: newPat, error } = await supabase.from("patients").insert(patientData).select("id").single();
         if (error) {
           errors.push(`行${i + 2} (${nameKanji}): ${error.message}`);
         } else {
+          // patient_insurancesにINSERT
+          if (newPat?.id) {
+            const insData: Record<string, unknown> = {
+              patient_id: newPat.id,
+              insurance_type: getMappedValue(row, "insurance_type") || "社保",
+              burden_ratio: burdenRatio,
+              is_current: true,
+            };
+            const insOptFields = ["insurer_number", "insured_symbol", "insured_number"];
+            for (const f of insOptFields) {
+              const v = getMappedValue(row, f);
+              if (v) insData[f] = v;
+            }
+            await supabase.from("patient_insurances").insert(insData);
+          }
           success++;
         }
       }
