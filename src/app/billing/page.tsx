@@ -11,7 +11,7 @@ type BillingRow = {
   ai_check_warnings: string[];
   document_provided: boolean;
   claim_status: string; payment_status: string; created_at: string; notes?: string;
-  patients: { name_kanji: string; name_kana: string; insurance_type: string; burden_ratio: number } | null;
+  patients: { name_kanji: string; name_kana: string; patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[] } | null;
 };
 
 type MainTab = "billing" | "unpaid_all" | "receipt" | "estimate";
@@ -38,7 +38,7 @@ export default function BillingPage() {
 
   const loadBillings = useCallback(async () => {
     const { data } = await supabase.from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type, burden_ratio)")
+      .select("*, patients(name_kanji, name_kana, patient_insurances(insurance_type, burden_ratio, is_current))")
       .gte("created_at", `${selectedDate}T00:00:00+00`).lte("created_at", `${selectedDate}T23:59:59+00`)
       .order("created_at", { ascending: false });
     if (data) setBillings(data as unknown as BillingRow[]);
@@ -47,7 +47,7 @@ export default function BillingPage() {
 
   async function loadAllUnpaid() {
     const { data } = await supabase.from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type, burden_ratio)")
+      .select("*, patients(name_kanji, name_kana, patient_insurances(insurance_type, burden_ratio, is_current))")
       .eq("payment_status", "unpaid")
       .order("created_at", { ascending: false });
     if (data) setAllUnpaid(data as unknown as BillingRow[]);
@@ -85,7 +85,7 @@ export default function BillingPage() {
   function printReceipt(billing: BillingRow) {
     const name = billing.patients?.name_kanji || "不明";
     const kana = billing.patients?.name_kana || "";
-    const insType = billing.patients?.insurance_type || "";
+    const insType = billing.patients?.patient_insurances?.[0]?.insurance_type || "";
     const burdenPct = Math.round(billing.burden_ratio * 10);
     const dateStr = new Date(billing.created_at).toLocaleDateString("ja-JP");
     const procs = billing.procedures_detail || [];
