@@ -16,7 +16,7 @@ interface Patient {
   id: string;
   name: string;
   birth_date: string;
-  insurance_type: string;
+  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   current_tooth_chart: Record<string, ToothStatus> | null;
   personality_profile?: PersonalityProfile | null;
   medical_safety_info?: MedicalSafetyInfo | null;
@@ -1551,7 +1551,7 @@ export default function ConsultationPage() {
           <div>
             <span className="font-bold text-lg">{patient.name}</span>
             <span className="ml-2 text-sm text-gray-500">{age}歳</span>
-            <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{patient.insurance_type || "社保"}</span>
+            <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{patient.patient_insurances?.[0]?.insurance_type || "社保"}</span>
             <span className={`ml-2 text-sm px-2 py-0.5 rounded ${isFirstVisit ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>{isFirstVisit ? "初診" : "再診"}</span>
             {revisitMode === "new_start" && <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded font-bold">新主訴優先</span>}
           </div>
