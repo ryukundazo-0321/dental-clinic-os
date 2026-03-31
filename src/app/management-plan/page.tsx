@@ -7,7 +7,8 @@ import { supabase } from "@/lib/supabase";
 
 type Patient = {
   id: string; name_kanji: string; name_kana: string;
-  date_of_birth: string; sex?: string; insurance_type: string;
+  date_of_birth: string; sex?: string;
+  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
 };
 
 type Diagnosis = {
