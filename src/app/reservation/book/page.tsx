@@ -204,11 +204,18 @@ export default function PatientBookingPage() {
       if (patientType === "new") {
         const { data: newPatient, error: patientErr } = await supabase.from("patients").insert({
           name_kanji: form.name_kanji, name_kana: form.name_kana, date_of_birth: form.date_of_birth,
-          phone: form.phone, insurance_type: form.insurance_type, burden_ratio: parseFloat(form.burden_ratio),
+          phone: form.phone,
           is_new: true, clinic_id: config?.clinicId,
         }).select("id").single();
         if (patientErr || !newPatient) { setError("登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
         patientId = newPatient.id;
+        // patient_insurancesにINSERT
+        await supabase.from("patient_insurances").insert({
+          patient_id: newPatient.id,
+          insurance_type: form.insurance_type,
+          burden_ratio: parseFloat(form.burden_ratio),
+          is_current: true,
+        });
       }
 
       const scheduledAt = selectedDate + "T" + selectedTime + ":00";
