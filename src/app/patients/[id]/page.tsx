@@ -28,21 +28,32 @@ interface MedicalSafetyInfo {
 type Patient = {
   id: string; patient_number: string | null; name_kanji: string; name_kana: string;
   date_of_birth: string | null; sex: string | null; phone: string | null; email: string | null;
-  insurance_type: string | null; burden_ratio: number | null; patient_status: string | null;
+  patient_status: string | null;
   allergies: unknown; medications: unknown; is_new: boolean; created_at: string;
   postal_code: string | null; address: string | null; occupation: string | null; notes: string | null;
   current_tooth_chart: Record<string, ToothData> | null;
   current_perio_chart: PerioChart | null;
-  insurer_number: string | null; insured_number: string | null; insured_symbol: string | null;
-  insured_branch?: string | null; insurer_name?: string | null; insurer_address?: string | null;
-  insurer_phone?: string | null; insurance_relation?: string | null; insured_name?: string | null;
-  insurance_valid_from?: string | null; insurance_valid_until?: string | null;
-  public_insurer?: string | null; public_recipient?: string | null;
-  public_insurer_2?: string | null; public_recipient_2?: string | null;
-  public_insurer_3?: string | null; public_recipient_3?: string | null;
-  public_valid_from?: string | null; public_valid_until?: string | null;
   high_cost_medical?: boolean; income_category?: string | null; disability_flag?: boolean;
   infection_flags?: string | null; alert_memo?: string | null;
+  patient_insurances?: {
+    id: string;
+    insurance_type: string | null;
+    burden_ratio: number | null;
+    insurer_number: string | null;
+    insured_symbol: string | null;
+    insured_number: string | null;
+    insured_branch?: string | null;
+    branch_code?: string | null;
+    public_insurer?: string | null;
+    public_recipient?: string | null;
+    public_insurer_2?: string | null;
+    public_recipient_2?: string | null;
+    public_insurer_3?: string | null;
+    public_recipient_3?: string | null;
+    public_valid_from?: string | null;
+    public_valid_until?: string | null;
+    is_current: boolean;
+  }[];
   assigned_dh_id?: string | null; subchart_notes?: string | null;
   medical_safety_info?: MedicalSafetyInfo | null;
 };
@@ -462,7 +473,7 @@ export default function PatientDetailPage() {
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>領収書</title><style>@media print{.no-print{display:none!important;}@page{size:A4;margin:8mm;}}*{margin:0;padding:0;box-sizing:border-box;}body{font-family:"Yu Gothic",sans-serif;max-width:700px;margin:0 auto;color:#111;font-size:11px;padding:10px;}h1{font-size:20px;text-align:center;letter-spacing:10px;margin:10px 0 14px;font-weight:800;}table{border-collapse:collapse;width:100%;}.bx td,.bx th{border:1.5px solid #111;padding:4px 6px;}.bx .hd{background:#f5f5f5;font-size:10px;text-align:center;font-weight:600;}.bx .vb{font-size:16px;font-weight:800;text-align:center;}.pt td{padding:0;}.pt .lb{border:1px solid #111;border-top:none;font-size:9px;text-align:center;padding:2px 3px;font-weight:600;}.pt .vl{border:1px solid #111;text-align:right;padding:4px 6px;min-width:60px;font-size:14px;}.pt .vl b{font-size:17px;}.pt .vl .u{font-size:8px;margin-left:2px;}.tot td{border:1.5px solid #111;padding:5px 8px;font-size:12px;}.tot .bg{font-size:20px;font-weight:900;}.tot .bk{background:#111;color:#fff;font-weight:700;}.stamp{width:55px;height:55px;border:1.5px solid #111;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#999;}</style></head><body>
 <h1>領 収 書</h1>
 <table class="bx" style="margin-bottom:8px;"><tr><td class="hd" style="width:15%;">患者ID</td><td style="width:20%;text-align:center;">${patient.patient_number||"-"}</td><td class="hd" style="width:10%;">氏名</td><td style="width:25%;text-align:center;font-size:14px;font-weight:700;">${patient.name_kanji} 様</td><td class="hd" style="width:12%;">診療日</td><td style="width:18%;text-align:center;font-size:12px;font-weight:700;">${diagDate}</td></tr></table>
-<table class="bx" style="margin-bottom:8px;"><tr><td class="hd">費用区分</td><td class="hd">負担率</td><td class="hd" colspan="4">&nbsp;</td></tr><tr><td class="vb">${patient.insurance_type||"社保"}</td><td class="vb">${Math.round(bill.burden_ratio*10)}割</td><td colspan="4"></td></tr></table>
+<table class="bx" style="margin-bottom:8px;"><tr><td class="hd">費用区分</td><td class="hd">負担率</td><td class="hd" colspan="4">&nbsp;</td></tr><tr><td class="vb">${patient.patient_insurances?.[0]?.insurance_type||"社保"}</td><td class="vb">${Math.round(bill.burden_ratio*10)}割</td><td colspan="4"></td></tr></table>
 <div style="font-size:11px;font-weight:700;margin-bottom:2px;">保険・介護</div>
 <table class="pt"><tr>${mkC(row1)}</tr><tr>${mkV(row1)}</tr><tr>${mkC(row2)}</tr><tr>${mkV(row2)}</tr></table>
 <div style="display:flex;gap:10px;margin-top:10px;">
@@ -533,7 +544,7 @@ export default function PatientDetailPage() {
                   <span>•</span>
                   <span>{patient.sex || "-"}</span>
                   <span>•</span>
-                  <span>{patient.insurance_type || "-"}</span>
+                  <span>{patient.patient_insurances?.[0]?.insurance_type || "-"}</span>
                   <span>•</span>
                   <span>最終来院: {records.length > 0 ? fd(records[0].appointments?.scheduled_at || records[0].created_at) : "-"}</span>
                 </div>
@@ -571,15 +582,15 @@ export default function PatientDetailPage() {
               setInfoForm({
                 sex: patient.sex || "", postal_code: patient.postal_code || "", address: patient.address || "",
                 occupation: patient.occupation || "", notes: patient.notes || "",
-                insurer_number: patient.insurer_number || "", insured_symbol: patient.insured_symbol || "",
-                insured_number: patient.insured_number || "", insured_branch: patient.insured_branch || "",
+                insurer_number: patient.patient_insurances?.[0]?.insurer_number || "", insured_symbol: patient.patient_insurances?.[0]?.insured_symbol || "",
+                insured_number: patient.patient_insurances?.[0]?.insured_number || "", insured_branch: patient.patient_insurances?.[0]?.insured_branch || "",
                 insurance_relation: patient.insurance_relation || "self", insured_name: patient.insured_name || "",
                 insurer_name: patient.insurer_name || "", insurer_address: patient.insurer_address || "",
                 insurer_phone: patient.insurer_phone || "", insurance_valid_from: patient.insurance_valid_from || "",
                 insurance_valid_until: patient.insurance_valid_until || "",
                 high_cost_medical: patient.high_cost_medical || false,
                 income_category: patient.income_category || "", disability_flag: patient.disability_flag || false,
-                public_insurer: patient.public_insurer || "", public_recipient: patient.public_recipient || "",
+                public_insurer: patient.patient_insurances?.[0]?.public_insurer || "", public_recipient: patient.patient_insurances?.[0]?.public_recipient || "",
                 public_valid_from: patient.public_valid_from || "", public_valid_until: patient.public_valid_until || "",
                 infection_flags: patient.infection_flags || "", alert_memo: patient.alert_memo || "",
                 subchart_notes: patient.subchart_notes || "",
@@ -1253,10 +1264,28 @@ export default function PatientDetailPage() {
                               const data = await res.json();
                               if (data.success && data.ocr) {
                                 const o = data.ocr; const updates: Record<string, string | boolean | null> = {};
-                                if (o.insurance_type) updates.insurance_type = o.insurance_type;
-                                if (o.insurer_number) updates.insurer_number = o.insurer_number;
-                                if (o.insured_symbol) updates.insured_symbol = o.insured_symbol;
-                                if (o.insured_number) updates.insured_number = o.insured_number;
+                                // patient_insurancesを更新
+                                if (o.insurance_type || o.insurer_number || o.insured_symbol || o.insured_number) {
+                                  const currentIns = patient.patient_insurances?.[0];
+                                  if (currentIns?.id) {
+                                    await supabase.from("patient_insurances").update({
+                                      ...(o.insurance_type && { insurance_type: o.insurance_type }),
+                                      ...(o.insurer_number && { insurer_number: o.insurer_number }),
+                                      ...(o.insured_symbol && { insured_symbol: o.insured_symbol }),
+                                      ...(o.insured_number && { insured_number: o.insured_number }),
+                                    }).eq("id", currentIns.id);
+                                  } else {
+                                    await supabase.from("patient_insurances").insert({
+                                      patient_id: patient.id,
+                                      insurance_type: o.insurance_type,
+                                      insurer_number: o.insurer_number,
+                                      insured_symbol: o.insured_symbol,
+                                      insured_number: o.insured_number,
+                                      burden_ratio: o.burden_ratio || 0.3,
+                                      is_current: true,
+                                    });
+                                  }
+                                }
                                 setInfoForm(prev => ({ ...prev, ...updates }));
                                 alert(`✅ OCR完了 (${Math.round((o.confidence||0)*100)}%)`);
                               } else alert("❌ " + (data.error || "OCR失敗"));
@@ -1267,8 +1296,8 @@ export default function PatientDetailPage() {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <IR l="保険種別" v={patient.insurance_type} />
-                    <IR l="負担割合" v={patient.burden_ratio ? `${Math.round(patient.burden_ratio*10)}割` : null} />
+                    <IR l="保険種別" v={patient.patient_insurances?.[0]?.insurance_type} />
+                    <IR l="負担割合" v={patient.patient_insurances?.[0]?.burden_ratio ? `${Math.round((patient.patient_insurances?.[0]?.burden_ratio||0)*10)}割` : null} />
                     {[
                       { l: "保険者番号", k: "insurer_number" }, { l: "被保険者記号", k: "insured_symbol" },
                       { l: "被保険者番号", k: "insured_number" }, { l: "枝番", k: "insured_branch" },
