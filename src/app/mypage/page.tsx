@@ -18,9 +18,8 @@ type PatientFull = {
   date_of_birth: string | null;
   sex: string | null;
   phone: string | null;
-  insurance_type: string | null;
-  burden_ratio: number | null;
   allergies: unknown;
+  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   current_tooth_chart: Record<string, ToothData> | null;
   notes: string | null;
 };
@@ -183,7 +182,7 @@ export default function MyPage() {
   async function loadPatientData(patientId: string) {
     setLoading(true);
     const [pRes, aRes, dRes, imgRes, blockRes] = await Promise.all([
-      supabase.from("patients").select("id,patient_number,name_kanji,name_kana,date_of_birth,sex,phone,insurance_type,burden_ratio,allergies,current_tooth_chart,notes").eq("id", patientId).single(),
+      supabase.from("patients").select("id,patient_number,name_kanji,name_kana,date_of_birth,sex,phone,allergies,current_tooth_chart,notes,patient_insurances(insurance_type,burden_ratio,is_current)").eq("id", patientId).single(),
       supabase.from("appointments").select("id,scheduled_at,status,patient_type,medical_records(soap_s,soap_o,soap_a,soap_p,doctor_confirmed)").eq("patient_id", patientId).order("scheduled_at", { ascending: false }),
       supabase.from("receipt_diagnoses").select("id,diagnosis_name,tooth_number_display,started_at,outcome,session_total,session_current").eq("patient_id", patientId).eq("outcome", "continuing").order("started_at", { ascending: false }),
       supabase.from("patient_images").select("id,image_type,file_name,storage_path,created_at").eq("patient_id", patientId).order("created_at", { ascending: false }),
@@ -766,8 +765,8 @@ export default function MyPage() {
                   { l:"生年月日", v: patientFull.date_of_birth ? patientFull.date_of_birth + "（" + getAge(patientFull.date_of_birth) + "）" : "-" },
                   { l:"性別", v: patientFull.sex },
                   { l:"電話番号", v: patientFull.phone },
-                  { l:"保険種別", v: patientFull.insurance_type },
-                  { l:"負担割合", v: patientFull.burden_ratio ? Math.round(patientFull.burden_ratio*100) + "%" : "-" },
+                  { l:"保険種別", v: patientFull.patient_insurances?.[0]?.insurance_type },
+                  { l:"負担割合", v: patientFull.patient_insurances?.[0]?.burden_ratio ? Math.round((patientFull.patient_insurances?.[0]?.burden_ratio || 0)*100) + "%" : "-" },
                 ].map(({ l, v }) => (
                   <div key={l} className="flex justify-between py-1.5 border-b border-gray-50">
                     <span className="text-xs text-gray-400 font-bold">{l}</span>
