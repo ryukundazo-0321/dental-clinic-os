@@ -19,7 +19,8 @@ type Appointment = {
   cancel_type?: string | null;
   patients: {
     id: string; name_kanji: string; name_kana: string; phone: string;
-    date_of_birth: string; insurance_type: string; burden_ratio: number; is_new: boolean;
+    date_of_birth: string; is_new: boolean;
+    patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   } | null;
   medical_records: { id: string; status: string; soap_s: string | null }[] | null;
 };
@@ -128,7 +129,7 @@ export default function ReservationManagePage() {
     const { data } = await supabase
       .from("appointments")
       .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, notes, cancel_type,
-        patients ( id, name_kanji, name_kana, phone, date_of_birth, insurance_type, burden_ratio, is_new ),
+        patients ( id, name_kanji, name_kana, phone, date_of_birth, is_new, patient_insurances(insurance_type, burden_ratio, is_current) ),
         medical_records ( id, status, soap_s )`)
       .gte("scheduled_at", `${selectedDate}T00:00:00`)
       .lte("scheduled_at", `${selectedDate}T23:59:59`)
@@ -289,11 +290,18 @@ export default function ReservationManagePage() {
         if (!addForm.name_kana) { setAddError("カナを入力してください"); setAddLoading(false); return; }
         const { data: newPatient, error: patientErr } = await supabase.from("patients").insert({
           name_kanji: addForm.name_kanji, name_kana: addForm.name_kana, date_of_birth: addForm.date_of_birth,
-          phone: addForm.phone, insurance_type: addForm.insurance_type, burden_ratio: parseFloat(addForm.burden_ratio),
+          phone: addForm.phone,
           is_new: true, clinic_id: config?.clinicId,
         }).select("id").single();
         if (patientErr || !newPatient) { setAddError("患者登録に失敗しました"); setAddLoading(false); return; }
         patientId = newPatient.id;
+        // patient_insurancesにINSERT
+        await supabase.from("patient_insurances").insert({
+          patient_id: newPatient.id,
+          insurance_type: addForm.insurance_type,
+          burden_ratio: parseFloat(addForm.burden_ratio),
+          is_current: true,
+        });
       }
 
       const bookDate = addForm.appointment_date || selectedDate;
@@ -511,8 +519,8 @@ export default function ReservationManagePage() {
                     <div><p className="text-xs text-gray-400 mb-0.5">生年月日</p><p className="text-sm text-gray-900">{selectedApt.patients?.date_of_birth || "-"}</p></div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><p className="text-xs text-gray-400 mb-0.5">保険種別</p><p className="text-sm text-gray-900">{selectedApt.patients?.insurance_type || "-"}</p></div>
-                    <div><p className="text-xs text-gray-400 mb-0.5">負担割合</p><p className="text-sm text-gray-900">{selectedApt.patients?.burden_ratio ? `${selectedApt.patients.burden_ratio * 10}割` : "-"}</p></div>
+                    <div><p className="text-xs text-gray-400 mb-0.5">保険種別</p><p className="text-sm text-gray-900">{selectedApt.patients?.patient_insurances?.[0]?.insurance_type || "-"}</p></div>
+                    <div><p className="text-xs text-gray-400 mb-0.5">負担割合</p><p className="text-sm text-gray-900">{selectedApt.patients?.patient_insurances?.[0]?.burden_ratio ? `${(selectedApt.patients?.patient_insurances?.[0]?.burden_ratio || 0) * 10}割` : "-"}</p></div>
                   </div>
                   {selectedApt.notes && (
                     <div className="border-t border-gray-100 pt-3">
