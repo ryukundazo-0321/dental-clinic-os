@@ -13,7 +13,7 @@ type Patient = {
   date_of_birth: string | null;
   sex: string | null;
   phone: string | null;
-  insurance_type: string | null;
+  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   patient_status: string | null;
   allergies: unknown;
   is_new: boolean;
@@ -68,7 +68,7 @@ export default function PatientsPage() {
     // 患者を取得
     let query = supabase
       .from("patients")
-      .select("id, patient_number, name_kanji, name_kana, date_of_birth, sex, phone, insurance_type, patient_status, allergies, is_new, created_at");
+      .select("id, patient_number, name_kanji, name_kana, date_of_birth, sex, phone, patient_status, allergies, is_new, created_at, patient_insurances(insurance_type, burden_ratio, is_current)");
 
     // ステータスフィルター
     if (filterStatus !== "all") {
@@ -157,16 +157,23 @@ export default function PatientsPage() {
       date_of_birth: newForm.date_of_birth || null,
       sex: newForm.sex,
       phone: newForm.phone || null,
-      insurance_type: newForm.insurance_type,
       patient_status: "active",
       is_new: true,
-      burden_ratio: newForm.insurance_type === "自費" ? 1.0 : 0.3,
     });
 
     if (error) {
       alert("登録エラー: " + error.message);
     } else {
       setShowNewModal(false);
+      // patient_insurancesにINSERT
+      if (data?.[0]?.id) {
+        await supabase.from("patient_insurances").insert({
+          patient_id: data[0].id,
+          insurance_type: newForm.insurance_type,
+          burden_ratio: newForm.insurance_type === "自費" ? 1.0 : 0.3,
+          is_current: true,
+        });
+      }
       setNewForm({ name_kanji: "", name_kana: "", date_of_birth: "", sex: "男", phone: "", insurance_type: "社保" });
       fetchPatients();
     }
@@ -335,9 +342,9 @@ export default function PatientsPage() {
                     {/* 保険 */}
                     <div>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                        p.insurance_type === "自費" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
+                        p.patient_insurances?.[0]?.insurance_type === "自費" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
                       }`}>
-                        {p.insurance_type || "-"}
+                        {p.patient_insurances?.[0]?.insurance_type || "-"}
                       </span>
                     </div>
 
