@@ -81,6 +81,16 @@ export default function SettingsPage() {
   } | null>(null);
   const [ukeSaving, setUkeSaving] = useState(false);
   const [ukeSaveMsg, setUkeSaveMsg] = useState("");
+
+  // === CP-8: 傾向ダッシュボード ===
+  const [dashPatterns, setDashPatterns] = useState<{
+    id: string;
+    pattern_name: string;
+    diagnosis_name: string;
+    use_count: number;
+    updated_at: string;
+  }[]>([]);
+  const [dashLoading, setDashLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
@@ -128,6 +138,21 @@ export default function SettingsPage() {
   const [blockSaving, setBlockSaving] = useState(false);
 
   useEffect(() => { initializeData(); }, []);
+
+  // CP-8: setupタブを開いた時にダッシュボードデータを取得
+  useEffect(() => {
+    if (activeTab !== "setup") return;
+    setDashLoading(true);
+    supabase
+      .from("clinic_patterns")
+      .select("id, pattern_name, diagnosis_name, use_count, updated_at")
+      .eq("is_active", true)
+      .order("use_count", { ascending: false })
+      .then(({ data }) => {
+        setDashPatterns(data ?? []);
+        setDashLoading(false);
+      });
+  }, [activeTab]);
 
   async function initializeData() {
     // clinicsの取得・なければ自動作成
@@ -937,6 +962,65 @@ export default function SettingsPage() {
         {activeTab === "setup" && (
           <div className="space-y-6">
 
+
+            {/* ===== ダッシュボード ===== */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 className="text-lg font-bold text-gray-900 mb-4">📊 パターン登録状況</h2>
+              {dashLoading ? (
+                <p className="text-sm text-gray-400 text-center py-4">読み込み中...</p>
+              ) : dashPatterns.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-3xl mb-2">📭</p>
+                  <p className="text-sm text-gray-400">まだパターンが登録されていません</p>
+                  <p className="text-xs text-gray-300 mt-1">UKEファイルをアップロードして診療パターンを学習させましょう</p>
+                </div>
+              ) : (
+                <>
+                  {/* サマリー */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="bg-sky-50 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-sky-600">{dashPatterns.length}</p>
+                      <p className="text-xs text-gray-400">登録済みパターン数</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-emerald-600">
+                        {dashPatterns.reduce((sum, p) => sum + p.use_count, 0)}
+                      </p>
+                      <p className="text-xs text-gray-400">総算定回数</p>
+                    </div>
+                  </div>
+
+                  {/* よく使うパターンTOP5 */}
+                  <div>
+                    <p className="text-xs font-bold text-gray-600 mb-2">🏆 よく使うパターン TOP5</p>
+                    <div className="space-y-2">
+                      {dashPatterns.slice(0, 5).map((p, i) => (
+                        <div key={p.id} className="flex items-center gap-3">
+                          <span className={`text-xs font-bold w-5 text-center ${i === 0 ? "text-amber-500" : i === 1 ? "text-gray-400" : i === 2 ? "text-amber-700" : "text-gray-300"}`}>
+                            {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-gray-900 truncate">{p.pattern_name}</p>
+                            <p className="text-xs text-gray-400 truncate">{p.diagnosis_name}</p>
+                          </div>
+                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full shrink-0">
+                            {p.use_count}回
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 最終更新日 */}
+                  {dashPatterns[0]?.updated_at && (
+                    <p className="text-xs text-gray-300 mt-4 text-right">
+                      最終更新: {new Date(dashPatterns[0].updated_at).toLocaleDateString("ja-JP")}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
             {/* ===== ステップ1: アップロード ===== */}
             {!ukeResult && (
               <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -1141,6 +1225,13 @@ export default function SettingsPage() {
                           }
                         }
                         setUkeSaveMsg("✅ パターンを保存しました");
+                        // ダッシュボード再取得
+                        const { data: refreshed } = await supabase
+                          .from("clinic_patterns")
+                          .select("id, pattern_name, diagnosis_name, use_count, updated_at")
+                          .eq("is_active", true)
+                          .order("use_count", { ascending: false });
+                        setDashPatterns(refreshed ?? []);
                         setTimeout(() => {
                           setUkeResult(null);
                           setUkeFile(null);
