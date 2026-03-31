@@ -151,7 +151,7 @@ export default function PatientsPage() {
     if (!newForm.name_kanji || !newForm.name_kana) return;
     setSaving(true);
 
-    const { error } = await supabase.from("patients").insert({
+    const { data: newPatientData, error } = await supabase.from("patients").insert({
       name_kanji: newForm.name_kanji,
       name_kana: newForm.name_kana,
       date_of_birth: newForm.date_of_birth || null,
@@ -159,16 +159,16 @@ export default function PatientsPage() {
       phone: newForm.phone || null,
       patient_status: "active",
       is_new: true,
-    });
+    }).select("id");
 
     if (error) {
       alert("登録エラー: " + error.message);
     } else {
       setShowNewModal(false);
       // patient_insurancesにINSERT
-      if (data?.[0]?.id) {
+      if (newPatientData?.[0]?.id) {
         await supabase.from("patient_insurances").insert({
-          patient_id: data[0].id,
+          patient_id: newPatientData[0].id,
           insurance_type: newForm.insurance_type,
           burden_ratio: newForm.insurance_type === "自費" ? 1.0 : 0.3,
           is_current: true,
