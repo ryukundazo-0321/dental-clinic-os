@@ -44,6 +44,13 @@ type Patient = {
     insured_number: string | null;
     insured_branch?: string | null;
     branch_code?: string | null;
+    insurance_relation?: string | null;
+    insured_name?: string | null;
+    insurer_name?: string | null;
+    insurer_address?: string | null;
+    insurer_phone?: string | null;
+    insurance_valid_from?: string | null;
+    insurance_valid_until?: string | null;
     public_insurer?: string | null;
     public_recipient?: string | null;
     public_insurer_2?: string | null;
@@ -584,14 +591,14 @@ export default function PatientDetailPage() {
                 occupation: patient.occupation || "", notes: patient.notes || "",
                 insurer_number: patient.patient_insurances?.[0]?.insurer_number || "", insured_symbol: patient.patient_insurances?.[0]?.insured_symbol || "",
                 insured_number: patient.patient_insurances?.[0]?.insured_number || "", insured_branch: patient.patient_insurances?.[0]?.insured_branch || "",
-                insurance_relation: patient.insurance_relation || "self", insured_name: patient.insured_name || "",
-                insurer_name: patient.insurer_name || "", insurer_address: patient.insurer_address || "",
-                insurer_phone: patient.insurer_phone || "", insurance_valid_from: patient.insurance_valid_from || "",
-                insurance_valid_until: patient.insurance_valid_until || "",
+                insurance_relation: patient.patient_insurances?.[0]?.insurance_relation || "self", insured_name: patient.patient_insurances?.[0]?.insured_name || "",
+                insurer_name: patient.patient_insurances?.[0]?.insurer_name || "", insurer_address: patient.patient_insurances?.[0]?.insurer_address || "",
+                insurer_phone: patient.patient_insurances?.[0]?.insurer_phone || "", insurance_valid_from: patient.patient_insurances?.[0]?.insurance_valid_from || "",
+                insurance_valid_until: patient.patient_insurances?.[0]?.insurance_valid_until || "",
                 high_cost_medical: patient.high_cost_medical || false,
                 income_category: patient.income_category || "", disability_flag: patient.disability_flag || false,
                 public_insurer: patient.patient_insurances?.[0]?.public_insurer || "", public_recipient: patient.patient_insurances?.[0]?.public_recipient || "",
-                public_valid_from: patient.public_valid_from || "", public_valid_until: patient.public_valid_until || "",
+                public_valid_from: patient.patient_insurances?.[0]?.public_valid_from || "", public_valid_until: patient.patient_insurances?.[0]?.public_valid_until || "",
                 infection_flags: patient.infection_flags || "", alert_memo: patient.alert_memo || "",
                 subchart_notes: patient.subchart_notes || "",
               });
