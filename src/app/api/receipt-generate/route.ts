@@ -239,17 +239,16 @@ export async function POST(request: NextRequest) {
         billings.map((b: { patient_id: string }) => b.patient_id)
       )
     );
-    type Patient = {
+    type PatientInsurance = {
       id: string;
-      name_kanji: string | null;
-      name_kana: string | null;
-      sex: string | null;
-      date_of_birth: string | null;
+      patient_id: string;
       insurance_type: string | null;
       burden_ratio: number | null;
       insurer_number: string | null;
       insured_symbol: string | null;
       insured_number: string | null;
+      branch_code: string | null;
+      qualified_recipient_number: string | null;
       public_insurer: string | null;
       public_recipient: string | null;
       public_insurer_2: string | null;
@@ -258,15 +257,27 @@ export async function POST(request: NextRequest) {
       public_recipient_3: string | null;
       public_insurer_4: string | null;
       public_recipient_4: string | null;
+      is_current: boolean;
     };
-    let patientLookup = new Map<string, Patient>();
+    type Patient = {
+      id: string;
+      name_kanji: string | null;
+      name_kana: string | null;
+      sex: string | null;
+      date_of_birth: string | null;
+      patient_insurances: PatientInsurance[];
+    };
+    let patientLookup = new Map<string, Patient & { ins: PatientInsurance }>();
     try {
       const { data: patientsData } = await supabase
         .from("patients")
-        .select("*")
+        .select("id, name_kanji, name_kana, sex, date_of_birth, patient_insurances(*)")
         .in("id", patientIds);
       patientLookup = new Map(
-        (patientsData || []).map((p: Patient) => [p.id, p])
+        (patientsData || []).map((p: Patient) => {
+          const ins = (p.patient_insurances || []).find((i: PatientInsurance) => i.is_current) || p.patient_insurances?.[0] || {} as PatientInsurance;
+          return [p.id, { ...p, ins }];
+        })
       );
     } catch (e) {
       console.error("患者情報取得エラー:", e);
@@ -372,11 +383,11 @@ export async function POST(request: NextRequest) {
       const pat = patientLookup.get(patientId);
       if (!pat) continue;
 
-      const insType = String(pat.insurance_type || "社保");
+      const insType = String(pat.ins.insurance_type || "社保");
       const insCode = insType === "国保" ? "3" : insType === "後期高齢" ? "7" : "1";
       const sexCode = String(pat.sex || "2") === "男" || String(pat.sex || "2") === "1" ? "1" : "2";
       const dob = toYMD(String(pat.date_of_birth || ""));
-      const burdenRatio = Number(pat.burden_ratio || 0.3);
+      const burdenRatio = Number(pat.ins.burden_ratio || 0.3);
       const burdenCode = Math.round(burdenRatio * 10);
 
       // ============================================================
@@ -401,13 +412,39 @@ export async function POST(request: NextRequest) {
       // [A-3] 保険者番号の0パディング（8桁に統一）
       // 支払基金は8桁固定。桁数不足だと受付エラーで弾かれる
       // ============================================================
-      if (pat.insurer_number) {
-        const insurerNum = String(pat.insurer_number).padStart(8, "0");
-        const insuredSymbol = pat.insured_symbol ? toFull(String(pat.insured_symbol)) : "";
-        const insuredNum = pat.insured_number ? String(pat.insured_number) : "";
+      if (pat.ins.insurer_number) {
+        const insurerNum = String(pat.ins.insurer_number).padStart(8, "0");
+        const insuredSymbol = pat.ins.insured_symbol ? toFull(String(pat.ins.insured_symbol)) : "";
+        const insuredNum = pat.ins.insured_number ? String(pat.ins.insured_number) : "";
         lines.push(
           `HO,${insurerNum},,${insuredSymbol},${insuredNum},${patientTotalPoints},,,,,,,,`
         );
+      }
+
+      // ============================================================
+      // [UKE-9] SN レコード（資格確認レコード）
+      // 電子資格確認を行った患者にのみ出力する
+      // SN,負担者種別,確認区分,,,,,枝番,,
+      // 一次請求のため(4)(5)(6)(8)は省略
+      // ============================================================
+      const medRecord = pBillings[0]?.medical_record_id
+        ? await supabase
+            .from("medical_records")
+            .select("online_qualification_confirmed, qualification_method")
+            .eq("id", pBillings[0].medical_record_id)
+            .single()
+        : null;
+      const isQualified = medRecord?.data?.online_qualification_confirmed === true;
+      if (isQualified) {
+        // 負担者種別コード: 医療保険=1, 後期高齢=3
+        const futanshaShu = insType === "後期高齢" ? "3" : "1";
+        // 確認区分: card=01（オンライン）, paper=02（窓口）
+        const kakuninKubun = medRecord?.data?.qualification_method === "card" ? "01" : "02";
+        // 枝番（2桁・先頭0パディング）
+        const edaban = pat.ins.branch_code
+          ? String(pat.ins.branch_code).padStart(2, "0")
+          : "";
+        lines.push(`SN,${futanshaShu},${kakuninKubun},,,,${edaban},,`);
       }
 
       // ============================================================
@@ -416,31 +453,31 @@ export async function POST(request: NextRequest) {
       // 負担区分: 1=公費1, 2=公費2, 3=公費3, 4=公費4
       // ============================================================
       const publicExpenses: { insurer: string; recipient: string; kubun: string }[] = [];
-      if (pat.public_insurer) {
+      if (pat.ins.public_insurer) {
         publicExpenses.push({
-          insurer: String(pat.public_insurer).padStart(8, "0"),
-          recipient: pat.public_recipient ? String(pat.public_recipient).padStart(7, "0") : "",
+          insurer: String(pat.ins.public_insurer).padStart(8, "0"),
+          recipient: pat.ins.public_recipient ? String(pat.ins.public_recipient).padStart(7, "0") : "",
           kubun: "1",
         });
       }
-      if (pat.public_insurer_2) {
+      if (pat.ins.public_insurer_2) {
         publicExpenses.push({
-          insurer: String(pat.public_insurer_2).padStart(8, "0"),
-          recipient: pat.public_recipient_2 ? String(pat.public_recipient_2).padStart(7, "0") : "",
+          insurer: String(pat.ins.public_insurer_2).padStart(8, "0"),
+          recipient: pat.ins.public_recipient_2 ? String(pat.ins.public_recipient_2).padStart(7, "0") : "",
           kubun: "2",
         });
       }
-      if (pat.public_insurer_3) {
+      if (pat.ins.public_insurer_3) {
         publicExpenses.push({
-          insurer: String(pat.public_insurer_3).padStart(8, "0"),
-          recipient: pat.public_recipient_3 ? String(pat.public_recipient_3).padStart(7, "0") : "",
+          insurer: String(pat.ins.public_insurer_3).padStart(8, "0"),
+          recipient: pat.ins.public_recipient_3 ? String(pat.ins.public_recipient_3).padStart(7, "0") : "",
           kubun: "3",
         });
       }
-      if (pat.public_insurer_4) {
+      if (pat.ins.public_insurer_4) {
         publicExpenses.push({
-          insurer: String(pat.public_insurer_4).padStart(8, "0"),
-          recipient: pat.public_recipient_4 ? String(pat.public_recipient_4).padStart(7, "0") : "",
+          insurer: String(pat.ins.public_insurer_4).padStart(8, "0"),
+          recipient: pat.ins.public_recipient_4 ? String(pat.ins.public_recipient_4).padStart(7, "0") : "",
           kubun: "4",
         });
       }
