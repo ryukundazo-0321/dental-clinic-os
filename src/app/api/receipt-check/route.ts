@@ -37,7 +37,8 @@ interface PatientInfo {
   id: string;
   name_kanji: string;
   name_kana: string;
-  insurance_type: string;
+  insurance_type?: string;
+  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   date_of_birth: string | null;
   burden_ratio: number;
 }
@@ -298,7 +299,7 @@ export async function POST(request: NextRequest) {
     const patientIds = Array.from(new Set(billings.map((b: BillingRow) => b.patient_id)));
     const { data: patientsData } = await supabase
       .from("patients")
-      .select("id, name_kanji, name_kana, insurance_type, date_of_birth, burden_ratio")
+      .select("id, name_kanji, name_kana, date_of_birth, patient_insurances(*)")
       .in("id", patientIds);
     const patientMap = new Map<string, PatientInfo>(
       (patientsData || []).map((p: PatientInfo) => [p.id, p])
@@ -372,7 +373,7 @@ export async function POST(request: NextRequest) {
           `患者負担額が計算と不一致です（期待:¥${roundedExpected} / 実際:¥${billing.patient_burden}）【算定要件】`
         );
       }
-      if (!patient?.insurance_type) {
+      if (!patient?.patient_insurances?.[0]?.insurance_type) {
         errors.push("保険種別が未設定です。患者情報で保険種別を設定してください【請求要件】");
       }
 
