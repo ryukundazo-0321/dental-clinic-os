@@ -37,10 +37,8 @@ interface PatientInfo {
   id: string;
   name_kanji: string;
   name_kana: string;
-  insurance_type?: string;
-  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   date_of_birth: string | null;
-  burden_ratio: number;
+  patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
 }
 
 // receipt_diagnosesテーブルの型（新テーブル）
