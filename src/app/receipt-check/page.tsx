@@ -11,7 +11,7 @@ type BillingRow = {
   ai_check_warnings: string[];
   document_provided: boolean;
   claim_status: string; payment_status: string; created_at: string;
-  patients: { name_kanji: string; name_kana: string; insurance_type: string } | null;
+  patients: { name_kanji: string; name_kana: string; patient_insurances?: { insurance_type: string | null; is_current: boolean }[] } | null;
 };
 
 type CheckResult = {
@@ -71,7 +71,7 @@ export default function ReceiptCheckPage() {
 
     const { data } = await supabase
       .from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .select("*, patients(name_kanji, name_kana, patient_insurances(insurance_type, is_current))")
       .eq("payment_status", "paid")
       .gte("created_at", startDate)
       .lte("created_at", endDate)
@@ -167,7 +167,7 @@ export default function ReceiptCheckPage() {
     // billingデータを再取得
     const { data: freshBilling } = await supabase
       .from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .select("*, patients(name_kanji, name_kana, patient_insurances(insurance_type, is_current))")
       .eq("id", billingId)
       .single();
 
@@ -221,7 +221,7 @@ export default function ReceiptCheckPage() {
 
     const { data } = await supabase
       .from("billing")
-      .select("*, patients(name_kanji, name_kana, insurance_type)")
+      .select("*, patients(name_kanji, name_kana, patient_insurances(insurance_type, is_current))")
       .eq("payment_status", "paid")
       .gte("created_at", startDate)
       .lte("created_at", endDate)
@@ -293,7 +293,7 @@ export default function ReceiptCheckPage() {
         const prompt = `歯科レセプトの査定・返戻リスクを判定してください。
 
 【患者】${billing.patients?.name_kanji || "不明"}
-【保険種別】${billing.patients?.insurance_type || "不明"}
+【保険種別】${billing.patients?.patient_insurances?.[0]?.insurance_type || "不明"}
 【合計点数】${billing.total_points}点
 【算定項目】
 ${procs.map(p => `- ${p.name}(${p.code}) ${p.points}点×${p.count}回${p.tooth_numbers?.length ? " 歯:" + p.tooth_numbers.join(",") : ""}`).join("\n")}
