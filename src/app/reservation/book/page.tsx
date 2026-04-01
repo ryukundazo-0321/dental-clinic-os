@@ -31,7 +31,7 @@ export default function PatientBookingPage() {
   const [configLoading, setConfigLoading] = useState(true);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
 
-  const [form, setForm] = useState({ name_kanji: "", name_kana: "", date_of_birth: "", phone: "", insurance_type: "社保", burden_ratio: "0.3" });
+  const [form, setForm] = useState({ name_kanji: "", name_kana: "", date_of_birth: "", phone: "", sex: "1", insurance_type: "社保", burden_ratio: "0.3" });
   const [lookupForm, setLookupForm] = useState({ name_kanji: "", date_of_birth: "", phone: "" });
   const [matchedPatient, setMatchedPatient] = useState<{ id: string; name_kanji: string } | null>(null);
 
@@ -365,6 +365,11 @@ export default function PatientBookingPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1.5">保険種別</label>
+                  <select value={form.sex} onChange={(e) => setForm({ ...form, sex: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-400 bg-white">
+                    <option value="1">男性</option>
+                    <option value="2">女性</option>
+                  </select>
                   <select value={form.insurance_type} onChange={(e) => setForm({ ...form, insurance_type: e.target.value })}
                     className="w-full border border-gray-300 rounded-xl px-4 py-3.5 text-base focus:outline-none focus:border-sky-400 bg-white">
                     <option value="社保">社保</option><option value="国保">国保</option><option value="後期高齢">後期高齢</option><option value="自費">自費</option>
