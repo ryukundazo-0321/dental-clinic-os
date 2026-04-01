@@ -114,7 +114,7 @@ export default function SelfCheckinPage() {
       return;
     }
 
-    const { data: appointments } = await supabase
+    const { data: appointments, error: aptError } = await supabase
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
       .eq("patient_id", patient.id)
@@ -123,6 +123,7 @@ export default function SelfCheckinPage() {
       .in("status", ["reserved"])
       .order("created_at", { ascending: false })
       .limit(1);
+    console.log("予約検索:", { todayStr, patientId: patient.id, appointments, aptError });
 
     if (!appointments || appointments.length === 0) {
       const { data: checkedIn } = await supabase
