@@ -592,96 +592,60 @@ export async function POST(request: NextRequest) {
       }
 
       // ============================================================
-      // [A-1] SI レコード（歯科診療行為）— 全billing分を統合出力
-      // [B-1] DRUG-プレフィックスはIYレコードで別途出力するためスキップ
+      // ============================================================
+      // CP-10: SSレコード（歯科診療行為）
+      // receipt_proceduresから直接読む（CODE_MAP不要・完全正規化）
+      // medical_record_idで当月分を取得 → m_feesでshinryo_shikibetsu取得
       // ============================================================
       const drugProcs: { code: string; name: string; points: number; count: number; note: string }[] = [];
 
-      for (const b of pBillings) {
-        const procs = (b.procedures_detail || []) as {
-          code: string; name: string; points: number; count: number;
-          tooth_numbers?: string[]; note?: string;
-        }[];
+      const medicalRecordIds = pBillings
+        .map((b: { medical_record_id: string }) => b.medical_record_id)
+        .filter(Boolean);
 
-        for (const proc of procs) {
-          if (proc.code.startsWith("BONUS-")) continue;
+      let receiptProcedures: {
+        fee_code: string;
+        fee_name: string;
+        points: number;
+        count: number;
+        shinryo_shikibetsu: string;
+        futan_kubun: string;
+        tooth_codes: string | null;
+      }[] = [];
 
-          // [B-1] DRUG-プレフィックスの項目はIYレコード用に別途収集
-          if (proc.code.startsWith("DRUG-")) {
-            drugProcs.push({
-              code: proc.code,
-              name: proc.name,
-              points: proc.points,
-              count: proc.count,
-              note: proc.note || "",
-            });
-            continue;
-          }
+      if (medicalRecordIds.length > 0) {
+        const { data: rpData } = await supabase
+          .from("receipt_procedures")
+          .select("fee_code, fee_name, points, count, shinryo_shikibetsu, futan_kubun, tooth_codes")
+          .in("medical_record_id", medicalRecordIds);
+        receiptProcedures = (rpData || []) as typeof receiptProcedures;
+      }
 
-          // [B-2] MAT-プレフィックスの項目はTOレコードで別途出力するためスキップ
-          if (proc.code.startsWith("MAT-")) continue;
-
-          // F-yaku-1は薬剤料のプレースホルダー（0pt）、IYレコードで出力済みのためスキップ
-          if (proc.code === "F-yaku-1") continue;
-
-          // 1) CODE_MAPから検索（billing_patternsのfee_codesを公式コードに統一後、
-          //    4-0aでfee_master_receipt VIEWを再構築してdbLookupに戻す予定）
-          let receiptCode = "";
-          let shikibetsu = "";
-          {
-            const mapped = CODE_MAP[proc.code];
-            if (mapped) {
-              receiptCode = mapped.rc;
-              shikibetsu = mapped.sk;
-            }
-          }
-
-          // 2) 9桁数字コードの場合はそのまま使用
-          if (!receiptCode && /^\d{9}$/.test(proc.code)) {
-            receiptCode = proc.code;
-            shikibetsu = "80";
-          }
-
-          // 4) 最終フォールバック（警告付き）
-          if (!receiptCode) {
-            warnings.push(`receipt_code未解決: ${proc.code} (${proc.name})`);
-            receiptCode = proc.code;
-            const c = proc.code.charAt(0);
-            if (c === "A") shikibetsu = "11";
-            else if (c === "B" || c === "H") shikibetsu = "13";
-            else if (c === "D" || c === "E") shikibetsu = "31";
-            else if (c === "F") shikibetsu = "21";
-            else if (c === "I") shikibetsu = "41";
-            else if (c === "J") shikibetsu = "42";
-            else if (c === "K") shikibetsu = "54";
-            else if (c === "M") shikibetsu = "62";
-            else shikibetsu = "80";
-          }
-
-          // ============================================================
-          // [A-2] 歯式コード6桁変換
-          // "46" → "004600" のように支払基金が要求する6桁形式に変換
-          // ============================================================
-          let teethStr = "";
-          if (proc.tooth_numbers && proc.tooth_numbers.length > 0) {
-            const converted = proc.tooth_numbers.map((t: string) => {
-              const sixDigit = toothTo6Digit(t, toothMap);
-              // 変換結果が6桁数字でない場合は警告
-              if (!/^\d{6}$/.test(sixDigit)) {
-                warnings.push(`歯式6桁変換失敗: "${t}" → "${sixDigit}"`);
-              }
-              return sixDigit;
-            });
-            teethStr = converted.join(" ");
-          }
-
-          const futanKubun = hasPublicExpense ? futanKubunAll : "";
-
-          // SS レコード（歯科診療行為）公式仕様準拠
-          lines.push(
-            `SS,${shikibetsu},${futanKubun},${receiptCode},${teethStr},,${proc.points},${proc.count}`
-          );
+      // fee_codeからshinryo_shikibetsuを一括取得（m_fees照合）
+      const rpFeeCodes = [...new Set(receiptProcedures.map(r => r.fee_code).filter(Boolean))];
+      const feeShikibetsuMap = new Map<string, string>();
+      if (rpFeeCodes.length > 0) {
+        const { data: feeData } = await supabase
+          .from("m_fees")
+          .select("sub_code, shinryo_shikibetsu")
+          .in("sub_code", rpFeeCodes);
+        for (const f of feeData || []) {
+          feeShikibetsuMap.set(f.sub_code, f.shinryo_shikibetsu || "80");
         }
+      }
+
+      for (const rp of receiptProcedures) {
+        if (!rp.fee_code || rp.fee_code.length !== 9) {
+          warnings.push(`fee_code不正: ${rp.fee_code} (${rp.fee_name})`);
+          continue;
+        }
+        const shikibetsu = feeShikibetsuMap.get(rp.fee_code) || rp.shinryo_shikibetsu || "80";
+        const futanKubun = rp.futan_kubun || (hasPublicExpense ? futanKubunAll : "");
+        const teethStr = rp.tooth_codes || "";
+
+        lines.push(
+          `SS,${shikibetsu},${futanKubun},${rp.fee_code},${teethStr},,${rp.points},${rp.count}`
+        );
       }
 
       // ============================================================
