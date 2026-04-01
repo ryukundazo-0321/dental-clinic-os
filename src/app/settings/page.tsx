@@ -58,29 +58,41 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("clinic");
 
   // === CP-7: UKEアップロード ===
+  type UkePatient = {
+    re: { patient_name: string; shinryo_yearmonth: string };
+    ho: { insurer_no: string; visit_days: string; total_points: string }[];
+    hs: { diagnosis_code: string; diagnosis_name: string; tooth_code: string }[];
+    ss: { fee_code: string; procedure_name: string; points: number; count: string; matched: boolean }[];
+    iy: { drug_code: string; drug_name: string; usage_amount: string; matched: boolean }[];
+    to: { material_code: string; material_name: string; quantity: string; matched: boolean }[];
+  };
+  type UkePattern = {
+    key: string;
+    diagnosis_codes: string[];
+    diagnosis_names: string[];
+    fee_codes: string[];
+    procedure_names: string[];
+    use_count: number;
+    pattern_name: string;
+  };
   const [ukeDragging, setUkeDragging] = useState(false);
   const [ukeFile, setUkeFile] = useState<File | null>(null);
-  const [ukeAnalyzing, setUkeAnalyzing] = useState(false);
-  const [ukeResult, setUkeResult] = useState<{
-    analysis: {
-      patterns: {
-        pattern_name: string;
-        diagnosis_names: string[];
-        procedure_names: string[];
-        use_count: number;
-      }[];
-      missing_claims: { procedure_name: string; reason: string }[];
-      insights: string[];
-    };
-    matched_patients: {
-      hs: { diagnosis_code: string; diagnosis_name: string }[];
-      ss: { fee_code: string; procedure_name: string; points: number }[];
-    }[];
-    matched_summary: { total_patients: number; total_ss: number; unmatched_total: number };
-    unmatched_codes: { ss: string[]; hs: string[]; iy: string[]; to: string[] };
-  } | null>(null);
+  const [ukeStep, setUkeStep] = useState<1 | 2 | 3 | 4>(1);
+  const [ukeParsing, setUkeParsing] = useState(false);
+  const [ukeNaming, setUkeNaming] = useState(false);
   const [ukeSaving, setUkeSaving] = useState(false);
   const [ukeSaveMsg, setUkeSaveMsg] = useState("");
+  const [expandedPatient, setExpandedPatient] = useState<number | null>(null);
+  const [ukePatients, setUkePatients] = useState<UkePatient[]>([]);
+  const [ukeGrouped, setUkeGrouped] = useState<UkePattern[]>([]);
+  const [ukeSummary, setUkeSummary] = useState<{ total_patients: number; total_ss: number; unmatched_total: number } | null>(null);
+  const [ukeEditPatterns, setUkeEditPatterns] = useState<UkePattern[]>([]);
+  const [ukeInsights, setUkeInsights] = useState<string[]>([]);
+  const [ukeMissingClaims, setUkeMissingClaims] = useState<{ procedure_name: string; reason: string }[]>([]);
+  const [feeSearchQuery, setFeeSearchQuery] = useState("");
+  const [feeSearchResults, setFeeSearchResults] = useState<{ sub_code: string; name: string; points: number }[]>([]);
+  const [feeSearching, setFeeSearching] = useState(false);
+  const [editingPatternIdx, setEditingPatternIdx] = useState<number | null>(null);
 
   // === CP-8: 傾向ダッシュボード ===
   const [dashPatterns, setDashPatterns] = useState<{
@@ -962,7 +974,6 @@ export default function SettingsPage() {
         {activeTab === "setup" && (
           <div className="space-y-6">
 
-
             {/* ===== ダッシュボード ===== */}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-lg font-bold text-gray-900 mb-4">📊 パターン登録状況</h2>
@@ -976,53 +987,58 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <>
-                  {/* サマリー */}
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div className="bg-sky-50 rounded-lg p-3 text-center">
                       <p className="text-2xl font-bold text-sky-600">{dashPatterns.length}</p>
                       <p className="text-xs text-gray-400">登録済みパターン数</p>
                     </div>
                     <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-emerald-600">
-                        {dashPatterns.reduce((sum, p) => sum + p.use_count, 0)}
-                      </p>
+                      <p className="text-2xl font-bold text-emerald-600">{dashPatterns.reduce((sum, p) => sum + p.use_count, 0)}</p>
                       <p className="text-xs text-gray-400">総算定回数</p>
                     </div>
                   </div>
-
-                  {/* よく使うパターンTOP5 */}
-                  <div>
-                    <p className="text-xs font-bold text-gray-600 mb-2">🏆 よく使うパターン TOP5</p>
-                    <div className="space-y-2">
-                      {dashPatterns.slice(0, 5).map((p, i) => (
-                        <div key={p.id} className="flex items-center gap-3">
-                          <span className={`text-xs font-bold w-5 text-center ${i === 0 ? "text-amber-500" : i === 1 ? "text-gray-400" : i === 2 ? "text-amber-700" : "text-gray-300"}`}>
-                            {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-gray-900 truncate">{p.pattern_name}</p>
-                            <p className="text-xs text-gray-400 truncate">{p.diagnosis_name}</p>
-                          </div>
-                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full shrink-0">
-                            {p.use_count}回
-                          </span>
+                  <p className="text-xs font-bold text-gray-600 mb-2">🏆 よく使うパターン TOP5</p>
+                  <div className="space-y-2">
+                    {dashPatterns.slice(0, 5).map((p, i) => (
+                      <div key={p.id} className="flex items-center gap-3">
+                        <span className="text-xs font-bold w-5 text-center">
+                          {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-gray-900 truncate">{p.pattern_name}</p>
+                          <p className="text-xs text-gray-400 truncate">{p.diagnosis_name}</p>
                         </div>
-                      ))}
-                    </div>
+                        <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full shrink-0">{p.use_count}回</span>
+                      </div>
+                    ))}
                   </div>
-
-                  {/* 最終更新日 */}
                   {dashPatterns[0]?.updated_at && (
-                    <p className="text-xs text-gray-300 mt-4 text-right">
-                      最終更新: {new Date(dashPatterns[0].updated_at).toLocaleDateString("ja-JP")}
-                    </p>
+                    <p className="text-xs text-gray-300 mt-4 text-right">最終更新: {new Date(dashPatterns[0].updated_at).toLocaleDateString("ja-JP")}</p>
                   )}
                 </>
               )}
             </div>
 
+            {/* ===== ステップインジケーター ===== */}
+            <div className="flex items-center gap-2">
+              {[
+                { n: 1, label: "アップロード" },
+                { n: 2, label: "データ確認" },
+                { n: 3, label: "分析" },
+                { n: 4, label: "保存" },
+              ].map((s, i, arr) => (
+                <div key={s.n} className="flex items-center gap-2 flex-1">
+                  <div className={`flex items-center gap-1.5 ${ukeStep >= s.n ? "text-sky-600" : "text-gray-300"}`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${ukeStep >= s.n ? "bg-sky-600 text-white" : "bg-gray-200 text-gray-400"}`}>{s.n}</div>
+                    <span className="text-xs font-bold whitespace-nowrap">{s.label}</span>
+                  </div>
+                  {i < arr.length - 1 && <div className={`flex-1 h-0.5 ${ukeStep > s.n ? "bg-sky-400" : "bg-gray-200"}`} />}
+                </div>
+              ))}
+            </div>
+
             {/* ===== ステップ1: アップロード ===== */}
-            {!ukeResult && (
+            {ukeStep === 1 && (
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h2 className="text-lg font-bold text-gray-900 mb-1">📥 UKEファイルをアップロード</h2>
                 <p className="text-xs text-gray-400 mb-4">
@@ -1051,83 +1067,208 @@ export default function SettingsPage() {
                       <p className="text-xs text-gray-400 mt-1">またはクリックして選択（.UKE / Shift-JIS）</p>
                     </>
                   )}
-                  <input
-                    id="uke-file-input"
-                    type="file"
-                    accept=".uke,.UKE"
-                    className="hidden"
-                    onChange={e => { const picked = e.target.files?.[0]; if (picked) setUkeFile(picked); }}
-                  />
+                  <input id="uke-file-input" type="file" accept=".uke,.UKE" className="hidden"
+                    onChange={e => { const picked = e.target.files?.[0]; if (picked) setUkeFile(picked); }} />
                 </div>
-
                 {ukeFile && (
                   <button
                     onClick={async () => {
-                      setUkeAnalyzing(true);
+                      setUkeParsing(true);
                       setUkeSaveMsg("");
                       try {
                         const fd = new FormData();
                         fd.append("file", ukeFile);
-                        const res = await fetch("/api/analyze-uke", { method: "POST", body: fd });
+                        const res = await fetch("/api/analyze-uke?step=parse", { method: "POST", body: fd });
                         const json = await res.json();
-                        if (!json.success) throw new Error(json.error || "分析失敗");
-                        setUkeResult(json);
+                        if (!json.success) throw new Error(json.error || "パース失敗");
+                        setUkePatients(json.matched_patients);
+                        setUkeGrouped(json.grouped_patterns);
+                        setUkeSummary(json.matched_summary);
+                        setUkeStep(2);
                       } catch (e) {
                         setUkeSaveMsg(`❌ エラー: ${String(e)}`);
                       } finally {
-                        setUkeAnalyzing(false);
+                        setUkeParsing(false);
                       }
                     }}
-                    disabled={ukeAnalyzing}
+                    disabled={ukeParsing}
                     className="mt-4 w-full bg-sky-600 text-white py-3 rounded-xl font-bold hover:bg-sky-700 disabled:opacity-50 transition-colors"
                   >
-                    {ukeAnalyzing ? "🔄 分析中（少々お待ちください）..." : "🔍 分析する"}
+                    {ukeParsing ? "🔄 読み込み中..." : "📂 データを読み込む"}
                   </button>
                 )}
                 {ukeSaveMsg && <p className="mt-3 text-sm text-center font-bold text-red-500">{ukeSaveMsg}</p>}
               </div>
             )}
 
-            {/* ===== ステップ2: 確認画面 ===== */}
-            {ukeResult && (
+            {/* ===== ステップ2: 全患者データ確認 ===== */}
+            {ukeStep === 2 && ukeSummary && (
               <div className="space-y-4">
-
-                {/* サマリー */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h2 className="text-lg font-bold text-gray-900 mb-4">📊 分析結果</h2>
-                  <div className="grid grid-cols-3 gap-4 mb-4">
-                    <div className="bg-sky-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-sky-600">{ukeResult.matched_summary.total_patients}</p>
-                      <p className="text-xs text-gray-400">患者数</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-emerald-600">{ukeResult.analysis.patterns.length}</p>
-                      <p className="text-xs text-gray-400">検出パターン数</p>
-                    </div>
-                    <div className="bg-amber-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-amber-600">{ukeResult.analysis.missing_claims.length}</p>
-                      <p className="text-xs text-gray-400">算定漏れ候補</p>
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-bold text-gray-900">📋 レセプトデータ確認</h2>
+                    <div className="flex gap-2 text-xs">
+                      <span className="bg-sky-100 text-sky-700 px-2 py-1 rounded-full font-bold">{ukeSummary.total_patients}名</span>
+                      <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-bold">{ukeGrouped.length}パターン検出</span>
                     </div>
                   </div>
-                  {ukeResult.analysis.insights.length > 0 && (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-xs font-bold text-gray-600 mb-2">💡 気づき・改善提案</p>
-                      <ul className="space-y-1">
-                        {ukeResult.analysis.insights.map((insight, i) => (
-                          <li key={i} className="text-xs text-gray-600">• {insight}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                  <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                    {ukePatients.map((p, i) => {
+                      const totalPoints = p.ho.reduce((s, h) => s + Number(h.total_points || 0), 0);
+                      const visitDays = p.ho.reduce((s, h) => s + Number(h.visit_days || 0), 0);
+                      const isExpanded = expandedPatient === i;
+                      return (
+                        <div key={i} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <button
+                            onClick={() => setExpandedPatient(isExpanded ? null : i)}
+                            className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs text-gray-400 font-mono w-8">#{i + 1}</span>
+                              <div className="text-left">
+                                <p className="text-sm font-bold text-gray-900">
+                                  {p.hs.map(h => h.diagnosis_name).filter(Boolean).slice(0, 2).join("・") || "傷病名なし"}
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  {visitDays}日・{totalPoints}点
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-gray-400 text-xs">{isExpanded ? "▲" : "▼"}</span>
+                          </button>
+                          {isExpanded && (
+                            <div className="px-4 py-3 space-y-3 bg-white">
+                              {/* 傷病名 */}
+                              {p.hs.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-bold text-gray-500 mb-1">🦷 傷病名</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {p.hs.map((h, j) => (
+                                      <span key={j} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                                        {h.tooth_code ? `${h.tooth_code}番 ` : ""}{h.diagnosis_name || h.diagnosis_code}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {/* 処置 */}
+                              {p.ss.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-bold text-gray-500 mb-1">⚡ 処置（{p.ss.length}件）</p>
+                                  <div className="space-y-1">
+                                    {p.ss.map((s, j) => (
+                                      <div key={j} className="flex items-center justify-between text-xs">
+                                        <span className={`flex-1 ${s.matched ? "text-gray-700" : "text-amber-600"}`}>
+                                          {s.matched ? "" : "⚠️"}{s.procedure_name || s.fee_code}
+                                        </span>
+                                        <span className="text-gray-400 ml-2">{s.points}点×{s.count}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {/* 薬剤 */}
+                              {p.iy.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-bold text-gray-500 mb-1">💊 薬剤（{p.iy.length}件）</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {p.iy.map((d, j) => (
+                                      <span key={j} className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
+                                        {d.drug_name || d.drug_code} {d.usage_amount}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {/* 特定器材 */}
+                              {p.to.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-bold text-gray-500 mb-1">🔧 特定器材（{p.to.length}件）</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {p.to.map((t, j) => (
+                                      <span key={j} className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">
+                                        {t.material_name || t.material_code} {t.quantity}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
+                <div className="flex gap-3">
+                  <button onClick={() => { setUkeStep(1); setUkeFile(null); }} className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-200">やり直す</button>
+                  <button
+                    onClick={async () => {
+                      setUkeNaming(true);
+                      setUkeSaveMsg("");
+                      try {
+                        const res = await fetch("/api/analyze-uke?step=name", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ grouped_patterns: ukeGrouped }),
+                        });
+                        const json = await res.json();
+                        if (!json.success) throw new Error(json.error || "命名失敗");
+                        setUkeEditPatterns(json.named_patterns);
+                        setUkeInsights(json.insights || []);
+                        setUkeMissingClaims(json.missing_claims || []);
+                        setUkeStep(3);
+                      } catch (e) {
+                        setUkeSaveMsg(`❌ エラー: ${String(e)}`);
+                      } finally {
+                        setUkeNaming(false);
+                      }
+                    }}
+                    disabled={ukeNaming}
+                    className="flex-1 bg-sky-600 text-white py-3 rounded-xl font-bold hover:bg-sky-700 disabled:opacity-50 transition-colors"
+                  >
+                    {ukeNaming ? "🔄 AI分析中（少々お待ちください）..." : "🤖 分析開始"}
+                  </button>
+                </div>
+                {ukeSaveMsg && <p className="text-sm text-center font-bold text-red-500">{ukeSaveMsg}</p>}
+              </div>
+            )}
 
+            {/* ===== ステップ3: 分析結果 ===== */}
+            {ukeStep === 3 && (
+              <div className="space-y-4">
+                {/* インサイト */}
+                {ukeInsights.length > 0 && (
+                  <div className="bg-white rounded-xl border border-gray-200 p-4">
+                    <p className="text-sm font-bold text-gray-700 mb-2">💡 気づき・改善提案</p>
+                    <ul className="space-y-1">
+                      {ukeInsights.map((insight, i) => (
+                        <li key={i} className="text-xs text-gray-600">• {insight}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {/* 算定漏れ候補 */}
+                {ukeMissingClaims.length > 0 && (
+                  <div className="bg-white rounded-xl border border-amber-200 p-4">
+                    <p className="text-sm font-bold text-amber-700 mb-2">⚠️ 算定漏れ候補</p>
+                    <div className="space-y-2">
+                      {ukeMissingClaims.map((m, i) => (
+                        <div key={i}>
+                          <p className="text-sm font-bold text-gray-900">{m.procedure_name}</p>
+                          <p className="text-xs text-gray-400">{m.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {/* パターン一覧 */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                    <h3 className="text-sm font-bold text-gray-700">🦷 登録するパターン（{ukeResult.analysis.patterns.length}件）</h3>
+                    <h3 className="text-sm font-bold text-gray-700">🦷 検出パターン（{ukeEditPatterns.length}件）</h3>
                   </div>
                   <div className="divide-y divide-gray-100">
-                    {ukeResult.analysis.patterns.map((p, i) => (
+                    {ukeEditPatterns.map((p, i) => (
                       <div key={i} className="px-4 py-3">
                         <div className="flex items-center justify-between mb-1">
                           <p className="text-sm font-bold text-gray-900">{p.pattern_name}</p>
@@ -1139,46 +1280,141 @@ export default function SettingsPage() {
                     ))}
                   </div>
                 </div>
-
-                {/* 算定漏れ候補 */}
-                {ukeResult.analysis.missing_claims.length > 0 && (
-                  <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
-                    <div className="bg-amber-50 px-4 py-2 border-b border-amber-200">
-                      <h3 className="text-sm font-bold text-amber-700">⚠️ 算定漏れ候補</h3>
-                    </div>
-                    <div className="divide-y divide-amber-100">
-                      {ukeResult.analysis.missing_claims.map((m, i) => (
-                        <div key={i} className="px-4 py-3">
-                          <p className="text-sm font-bold text-gray-900">{m.procedure_name}</p>
-                          <p className="text-xs text-gray-400">{m.reason}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ボタン */}
                 <div className="flex gap-3">
-                  <button
-                    onClick={() => { setUkeResult(null); setUkeFile(null); setUkeSaveMsg(""); }}
-                    className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-200"
-                  >
-                    やり直す
-                  </button>
+                  <button onClick={() => setUkeStep(2)} className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-200">戻る</button>
+                  <button onClick={() => setUkeStep(4)} className="flex-1 bg-sky-600 text-white py-3 rounded-xl font-bold hover:bg-sky-700">✏️ 編集・保存へ</button>
+                </div>
+              </div>
+            )}
+
+            {/* ===== ステップ4: 編集・保存 ===== */}
+            {ukeStep === 4 && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                    <h3 className="text-sm font-bold text-gray-700">✏️ パターン編集（{ukeEditPatterns.length}件）</h3>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {ukeEditPatterns.map((p, i) => (
+                      <div key={i} className="px-4 py-4">
+                        {/* パターン名編集 */}
+                        <div className="flex items-center gap-2 mb-3">
+                          <input
+                            type="text"
+                            value={p.pattern_name}
+                            onChange={e => {
+                              const updated = [...ukeEditPatterns];
+                              updated[i] = { ...updated[i], pattern_name: e.target.value };
+                              setUkeEditPatterns(updated);
+                            }}
+                            className="flex-1 text-sm font-bold border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-sky-400"
+                          />
+                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full shrink-0">{p.use_count}回</span>
+                        </div>
+                        {/* 傷病名 */}
+                        <p className="text-xs text-gray-400 mb-2">傷病名: {p.diagnosis_names.join("、")}</p>
+                        {/* 処置一覧（削除可能） */}
+                        <div className="space-y-1 mb-3">
+                          {p.procedure_names.map((proc, j) => (
+                            <div key={j} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-1.5">
+                              <span className="text-xs text-gray-700">{proc}</span>
+                              <button
+                                onClick={() => {
+                                  const updated = [...ukeEditPatterns];
+                                  updated[i] = {
+                                    ...updated[i],
+                                    procedure_names: updated[i].procedure_names.filter((_, k) => k !== j),
+                                    fee_codes: updated[i].fee_codes.filter((_, k) => k !== j),
+                                  };
+                                  setUkeEditPatterns(updated);
+                                }}
+                                className="text-red-400 hover:text-red-600 text-xs ml-2"
+                              >✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        {/* 処置追加（m_fees検索） */}
+                        {editingPatternIdx === i ? (
+                          <div className="border border-sky-200 rounded-lg p-3 bg-sky-50">
+                            <div className="flex gap-2 mb-2">
+                              <input
+                                type="text"
+                                value={feeSearchQuery}
+                                onChange={e => setFeeSearchQuery(e.target.value)}
+                                placeholder="処置名で検索..."
+                                className="flex-1 text-xs border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-sky-400"
+                              />
+                              <button
+                                onClick={async () => {
+                                  if (!feeSearchQuery.trim()) return;
+                                  setFeeSearching(true);
+                                  try {
+                                    const { data } = await supabase
+                                      .from("m_fees")
+                                      .select("sub_code, name, points")
+                                      .ilike("name", `%${feeSearchQuery}%`)
+                                      .eq("is_active", true)
+                                      .limit(10);
+                                    setFeeSearchResults(data || []);
+                                  } finally {
+                                    setFeeSearching(false);
+                                  }
+                                }}
+                                disabled={feeSearching}
+                                className="bg-sky-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                              >
+                                {feeSearching ? "..." : "検索"}
+                              </button>
+                              <button onClick={() => { setEditingPatternIdx(null); setFeeSearchQuery(""); setFeeSearchResults([]); }} className="text-gray-400 text-xs px-2">✕</button>
+                            </div>
+                            {feeSearchResults.length > 0 && (
+                              <div className="space-y-1 max-h-40 overflow-y-auto">
+                                {feeSearchResults.map((f, k) => (
+                                  <button
+                                    key={k}
+                                    onClick={() => {
+                                      const updated = [...ukeEditPatterns];
+                                      updated[i] = {
+                                        ...updated[i],
+                                        fee_codes: [...updated[i].fee_codes, f.sub_code],
+                                        procedure_names: [...updated[i].procedure_names, f.name],
+                                      };
+                                      setUkeEditPatterns(updated);
+                                      setEditingPatternIdx(null);
+                                      setFeeSearchQuery("");
+                                      setFeeSearchResults([]);
+                                    }}
+                                    className="w-full text-left text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 hover:bg-sky-50 hover:border-sky-300"
+                                  >
+                                    <span className="font-bold text-gray-900">{f.name}</span>
+                                    <span className="text-gray-400 ml-2">{f.points}点</span>
+                                    <span className="text-gray-300 ml-2 font-mono">{f.sub_code}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setEditingPatternIdx(i); setFeeSearchQuery(""); setFeeSearchResults([]); }}
+                            className="text-xs text-sky-600 hover:text-sky-700 font-bold"
+                          >＋ 処置を追加</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={() => setUkeStep(3)} className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-200">戻る</button>
                   <button
                     onClick={async () => {
                       setUkeSaving(true);
                       setUkeSaveMsg("");
                       try {
-                        for (let i = 0; i < ukeResult.analysis.patterns.length; i++) {
-                          const p = ukeResult.analysis.patterns[i];
-                          const mp = ukeResult.matched_patients[i];
+                        for (const p of ukeEditPatterns) {
+                          if (!p.pattern_name.trim()) continue;
 
-                          // diagnosis_codeは実データから取得
-                          const diagnosisCode = mp?.hs[0]?.diagnosis_code ?? "";
-                          const diagnosisName = mp?.hs[0]?.diagnosis_name ?? p.diagnosis_names[0] ?? "";
-
-                          // 既存パターンの確認（同名ならuse_count加算）
                           const { data: existing } = await supabase
                             .from("clinic_patterns")
                             .select("id, use_count")
@@ -1196,8 +1432,8 @@ export default function SettingsPage() {
                             const { data: inserted } = await supabase
                               .from("clinic_patterns")
                               .insert({
-                                diagnosis_code: diagnosisCode,
-                                diagnosis_name: diagnosisName,
+                                diagnosis_code: p.diagnosis_codes[0] ?? "",
+                                diagnosis_name: p.diagnosis_names[0] ?? "",
                                 pattern_name: p.pattern_name,
                                 use_count: p.use_count,
                                 source: "uke",
@@ -1208,14 +1444,13 @@ export default function SettingsPage() {
                             if (!inserted) continue;
                             patternId = inserted.id;
 
-                            // clinic_pattern_itemsにfee_codeを保存
-                            // fee_codeは必ずmatched_patientsの実データから取る（m_fees照合済み）
-                            const items = (mp?.ss ?? []).map((s, idx) => ({
+                            // clinic_pattern_itemsにfee_codeを保存（実データ）
+                            const items = p.fee_codes.map((code, idx) => ({
                               pattern_id: patternId,
                               item_type: "SS",
-                              fee_code: s.fee_code,
-                              item_name: s.procedure_name,
-                              points: s.points,
+                              fee_code: code,
+                              item_name: p.procedure_names[idx] ?? "",
+                              points: 0,
                               kubun: "必須",
                               display_order: idx + 1,
                             }));
@@ -1224,7 +1459,7 @@ export default function SettingsPage() {
                             }
                           }
                         }
-                        setUkeSaveMsg("✅ パターンを保存しました");
+
                         // ダッシュボード再取得
                         const { data: refreshed } = await supabase
                           .from("clinic_patterns")
@@ -1232,9 +1467,15 @@ export default function SettingsPage() {
                           .eq("is_active", true)
                           .order("use_count", { ascending: false });
                         setDashPatterns(refreshed ?? []);
+                        setUkeSaveMsg("✅ パターンを保存しました");
                         setTimeout(() => {
-                          setUkeResult(null);
+                          setUkeStep(1);
                           setUkeFile(null);
+                          setUkePatients([]);
+                          setUkeGrouped([]);
+                          setUkeEditPatterns([]);
+                          setUkeInsights([]);
+                          setUkeMissingClaims([]);
                           setUkeSaveMsg("");
                         }, 2000);
                       } catch (e) {
@@ -1256,6 +1497,7 @@ export default function SettingsPage() {
                 )}
               </div>
             )}
+
           </div>
         )}
       </main>
