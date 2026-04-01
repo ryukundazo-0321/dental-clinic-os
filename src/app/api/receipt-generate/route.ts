@@ -625,10 +625,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-    }
-
-    // === GO レコード（請求書） ===
-    // ============================================================
+      // ============================================================
       // [UKE-10] SJ レコード（症状詳記）
       // receipt_symptom_detailsから当月medical_record_idで取得
       // ============================================================
@@ -652,6 +649,7 @@ export async function POST(request: NextRequest) {
 
     }
 
+    // === GO レコード（請求書） ===
     lines.push(`GO,${receiptNo},${totalPointsAll},99`);
 
     // UKEファイルの内容を結合（CR+LF改行）
