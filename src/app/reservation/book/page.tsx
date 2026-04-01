@@ -204,7 +204,7 @@ export default function PatientBookingPage() {
       if (patientType === "new") {
         const { data: newPatient, error: patientErr } = await supabase.from("patients").insert({
           name_kanji: form.name_kanji, name_kana: form.name_kana, date_of_birth: form.date_of_birth,
-          phone: form.phone,
+          phone: form.phone, sex: form.sex,
           is_new: true, clinic_id: config?.clinicId,
         }).select("id").single();
         if (patientErr || !newPatient) { setError("登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
