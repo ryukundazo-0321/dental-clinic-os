@@ -422,8 +422,8 @@ export default function ConsultationPage() {
       // 初診料・再診料の自動追加
       if (mr && (mr.structured_procedures || []).length === 0) {
         const feeProc: StructuredProcedure = isFirst
-          ? { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }
-          : { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+          ? { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", fee_code: "301000110", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }
+          : { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", fee_code: "301001610", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
         const updated = [feeProc];
         await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", mr.id);
         setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
@@ -823,7 +823,7 @@ export default function ConsultationPage() {
     const newProc: StructuredProcedure = {
       id: crypto.randomUUID(), tooth: confirmedDiagnosis?.tooth || "",
       diagnosis_code: confirmedDiagnosis?.code || "", diagnosis_name: confirmedDiagnosis?.name || "",
-      procedure_name: miss.procedure_name, points: miss.points, category: "basic", timestamp: new Date().toISOString(),
+      procedure_name: miss.procedure_name, fee_code: "", points: miss.points, category: "basic", timestamp: new Date().toISOString(),
     };
     const updated = [...(medicalRecord.structured_procedures || []), newProc];
     await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
@@ -1056,7 +1056,7 @@ export default function ConsultationPage() {
     examName = isSeimitsu ? `歯周精密検査（${teethCount}歯）` : `歯周基本検査（${teethCount}歯）`;
 
     if (examPoints > 0 && patient) {
-      const newProc: StructuredProcedure = { id: crypto.randomUUID(), tooth: "", diagnosis_code: "P", diagnosis_name: "歯周病", procedure_name: examName, points: examPoints, category: "perio", timestamp: new Date().toISOString() };
+      const newProc: StructuredProcedure = { id: crypto.randomUUID(), tooth: "", diagnosis_code: "P", diagnosis_name: "歯周病", procedure_name: examName, fee_code: "", points: examPoints, category: "perio", timestamp: new Date().toISOString() };
       const updated = [...(medicalRecord.structured_procedures || []), newProc];
       await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
       setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev);
@@ -2085,8 +2085,8 @@ export default function ConsultationPage() {
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-medium text-gray-700">📋 処置記録</h3>
                 <div className="flex items-center gap-2">
-                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科初診料（267点）を追加"); }} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded hover:bg-green-100">＋初診料</button>
-                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科再診料（58点）を追加"); }} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded hover:bg-gray-100">＋再診料</button>
+                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", fee_code: "301000110", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科初診料（267点）を追加"); }} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded hover:bg-green-100">＋初診料</button>
+                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", fee_code: "301001610", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科再診料（58点）を追加"); }} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded hover:bg-gray-100">＋再診料</button>
                   <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100">+ 傷病名追加</button>
                 </div>
               </div>
