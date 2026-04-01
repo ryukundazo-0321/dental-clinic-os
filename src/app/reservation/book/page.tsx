@@ -209,6 +209,21 @@ export default function PatientBookingPage() {
         }).select("id").single();
         if (patientErr || !newPatient) { setError("登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
         patientId = newPatient.id;
+
+        // patient_numberを自動採番（4桁数字形式：0001〜9999）
+        const { data: maxPatient } = await supabase
+          .from("patients")
+          .select("patient_number")
+          .not("patient_number", "is", null)
+          .order("patient_number", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const lastNum = maxPatient?.patient_number
+          ? parseInt(maxPatient.patient_number) || 0
+          : 0;
+        const newPatientNumber = String(lastNum + 1).padStart(4, "0");
+        await supabase.from("patients").update({ patient_number: newPatientNumber }).eq("id", newPatient.id);
+
         // patient_insurancesにINSERT
         await supabase.from("patient_insurances").insert({
           patient_id: newPatient.id,

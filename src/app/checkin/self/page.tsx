@@ -90,10 +90,10 @@ export default function SelfCheckinPage() {
 
     let inputId = patientId.trim().toUpperCase();
     if (/^\d+$/.test(inputId)) {
-      inputId = `P-${inputId.padStart(5, "0")}`;
+      inputId = inputId.padStart(4, "0");
     }
     if (/^P\d+$/.test(inputId)) {
-      inputId = `P-${inputId.slice(1).padStart(5, "0")}`;
+      inputId = inputId.padStart(4, "0");
     }
 
     const { data: patient } = await supabase
@@ -240,7 +240,7 @@ export default function SelfCheckinPage() {
                   inputMode="numeric"
                   value={patientId}
                   onChange={(e) => setPatientId(e.target.value)}
-                  placeholder="例: 00001"
+                  placeholder="例: 0001"
                   className="w-full border-2 border-gray-200 rounded-2xl px-5 py-5 text-2xl text-center font-mono font-bold tracking-widest focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 />
                 <p className="text-xs text-gray-400 mt-1.5 text-center">
