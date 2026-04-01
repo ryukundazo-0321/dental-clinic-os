@@ -126,14 +126,15 @@ export default function ReservationManagePage() {
 
   async function fetchAppointments() {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("appointments")
       .select(`id, scheduled_at, patient_type, status, duration_min, doctor_id, notes, cancel_type,
         patients ( id, name_kanji, name_kana, phone, date_of_birth, is_new, patient_insurances(insurance_type, burden_ratio, is_current) ),
         medical_records ( id, status, soap_s )`)
-      .gte("scheduled_at", `${selectedDate}T00:00:00`)
-      .lte("scheduled_at", `${selectedDate}T23:59:59`)
+      .gte("scheduled_at", `${selectedDate}T00:00:00+00`)
+      .lte("scheduled_at", `${selectedDate}T23:59:59+00`)
       .order("scheduled_at", { ascending: true });
+    if (error) console.error("予約取得エラー:", error);
     if (data) setAppointments(data as unknown as Appointment[]);
     setLoading(false);
   }
