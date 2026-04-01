@@ -264,8 +264,13 @@ export default function PatientBookingPage() {
       }).select("id").single();
       if (aptErr || !appointment) { setError("予約の登録に失敗しました。お電話にてご予約ください。"); setLoading(false); return; }
 
+      const visitDate = selectedDate || new Date().toISOString().split("T")[0];
       const mrData: Record<string, unknown> = {
-        appointment_id: appointment.id, patient_id: patientId, status: "draft",
+        appointment_id: appointment.id,
+        patient_id: patientId,
+        clinic_id: config?.clinicId,
+        visit_date: visitDate,
+        status: "draft",
       };
       if (patientType === "returning" && visitReason === "new_complaint" && newComplaint) {
         mrData.soap_s = "【主訴】" + newComplaint;
