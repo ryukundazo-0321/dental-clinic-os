@@ -734,12 +734,7 @@ export default function PatientBookingPage() {
 
             {createdAppointmentId && (
               <div className="bg-sky-50 border border-sky-200 rounded-2xl p-5 mb-6">
-                <p className="text-sm font-bold text-sky-900 mb-2">📋 WEB問診票にご回答ください</p>
-                <p className="text-xs text-sky-700 mb-4">ご来院前に問診票にご回答いただくと、よりスムーズに診察を受けていただけます。</p>
-                <a href={"/questionnaire?appointment_id=" + createdAppointmentId}
-                  className="block w-full bg-sky-600 text-white py-3 rounded-xl font-bold text-base hover:bg-sky-700 active:scale-[0.98] text-center">
-                  問診票に回答する →
-                </a>
+                
               </div>
             )}
 
