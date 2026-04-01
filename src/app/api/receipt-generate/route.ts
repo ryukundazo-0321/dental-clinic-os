@@ -628,6 +628,30 @@ export async function POST(request: NextRequest) {
     }
 
     // === GO レコード（請求書） ===
+    // ============================================================
+      // [UKE-10] SJ レコード（症状詳記）
+      // receipt_symptom_detailsから当月medical_record_idで取得
+      // ============================================================
+      if (currentMedicalRecordIds.length > 0) {
+        try {
+          const { data: symptomData } = await supabase
+            .from("receipt_symptom_details")
+            .select("symptom_kubun, symptom_text, display_order")
+            .in("medical_record_id", currentMedicalRecordIds)
+            .order("display_order");
+
+          for (const s of symptomData || []) {
+            if (s.symptom_text && s.symptom_text.trim() !== "") {
+              lines.push(`SJ,${s.symptom_kubun},${s.symptom_text}`);
+            }
+          }
+        } catch (e) {
+          console.error("症状詳記取得エラー:", e);
+        }
+      }
+
+    }
+
     lines.push(`GO,${receiptNo},${totalPointsAll},99`);
 
     // UKEファイルの内容を結合（CR+LF改行）

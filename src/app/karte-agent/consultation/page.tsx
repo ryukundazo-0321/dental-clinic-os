@@ -247,6 +247,10 @@ export default function ConsultationPage() {
 
   // ── 新規追加: 算定確定ポップアップ ───────────────────────────────────
   const [showFinalizePopup, setShowFinalizePopup] = useState(false);
+  // UKE-10: 症状詳記
+  const [symptomDetails, setSymptomDetails] = useState<{ kubun: string; text: string }[]>([]);
+  const [symptomTemplates, setSymptomTemplates] = useState<{ id: string; kubun: string; category: string; template_text: string; trigger_fee_codes: string[] }[]>([]);
+  const [showSymptomInput, setShowSymptomInput] = useState(false);
   // 💫アニメーション
   const [showOtsukare, setShowOtsukare] = useState(false);
 
@@ -1128,8 +1132,25 @@ export default function ConsultationPage() {
   // ── 新規追加: 算定確定フロー ──
   // ==============================
   // 「算定確定」ボタン → 最終確認ポップアップを開く
-  function openFinalizePopup() {
+  async function openFinalizePopup() {
     setShowFinalizePopup(true);
+    setSymptomDetails([]);
+    setShowSymptomInput(false);
+    // 今回算定した処置のfee_codeに紐づくテンプレートを取得
+    const feeCodes = (medicalRecord?.structured_procedures || [])
+      .map(p => p.fee_code)
+      .filter(Boolean);
+    if (feeCodes.length > 0) {
+      const { data } = await supabase
+        .from("m_symptom_templates")
+        .select("id, kubun, category, template_text, trigger_fee_codes")
+        .eq("is_active", true)
+        .order("display_order");
+      const matched = (data || []).filter(t =>
+        t.trigger_fee_codes.some((fc: string) => feeCodes.includes(fc))
+      );
+      setSymptomTemplates(matched);
+    }
   }
 
   // 最終確認ポップアップで「確定して会計へ」を押した時
@@ -1228,6 +1249,19 @@ export default function ConsultationPage() {
 
       await supabase.from("appointments").update({ status: "completed" }).eq("id", appointment.id);
       await supabase.from("patients").update({ current_tooth_chart: toothChartDraft }).eq("id", appointment.patient_id);
+
+      // UKE-10: 症状詳記をreceipt_symptom_detailsに保存
+      const validSymptoms = symptomDetails.filter(s => s.text.trim() !== "");
+      if (validSymptoms.length > 0) {
+        const symptomInserts = validSymptoms.map((s, idx) => ({
+          medical_record_id: medicalRecord.id,
+          patient_id: appointment.patient_id,
+          symptom_kubun: s.kubun,
+          symptom_text: s.text,
+          display_order: idx + 1,
+        }));
+        await supabase.from("receipt_symptom_details").insert(symptomInserts);
+      }
 
       addLog("💰 算定確定完了");
 
@@ -1463,6 +1497,101 @@ export default function ConsultationPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* 症状詳記セクション */}
+            <div className="px-6 pb-4">
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-gray-50 px-4 py-2 flex items-center justify-between">
+                  <p className="text-xs font-bold text-gray-600">📝 症状詳記（SJレコード）</p>
+                  <button
+                    onClick={() => setShowSymptomInput(!showSymptomInput)}
+                    className="text-xs text-sky-600 font-bold hover:text-sky-700"
+                  >＋ 追加</button>
+                </div>
+
+                {/* テンプレート提案 */}
+                {symptomTemplates.length > 0 && symptomDetails.length === 0 && (
+                  <div className="px-4 py-2 border-t border-gray-100">
+                    <p className="text-xs text-gray-400 mb-2">💡 関連テンプレート</p>
+                    <div className="space-y-1">
+                      {symptomTemplates.slice(0, 3).map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => setSymptomDetails([...symptomDetails, { kubun: t.kubun, text: t.template_text }])}
+                          className="w-full text-left text-xs bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 hover:bg-sky-100"
+                        >
+                          <span className="text-sky-600 font-bold mr-1">[区分{t.kubun}]</span>
+                          {t.template_text.length > 40 ? t.template_text.slice(0, 40) + "..." : t.template_text}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 入力済み症状詳記 */}
+                {symptomDetails.length > 0 && (
+                  <div className="px-4 py-2 border-t border-gray-100 space-y-2">
+                    {symptomDetails.map((s, i) => (
+                      <div key={i} className="bg-sky-50 rounded-lg p-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <select
+                            value={s.kubun}
+                            onChange={e => {
+                              const updated = [...symptomDetails];
+                              updated[i] = { ...updated[i], kubun: e.target.value };
+                              setSymptomDetails(updated);
+                            }}
+                            className="text-xs border border-gray-300 rounded px-2 py-0.5 bg-white"
+                          >
+                            <option value="1">1: 診断根拠</option>
+                            <option value="2">2: 診療経過</option>
+                            <option value="3">3: その他</option>
+                            <option value="4">4: 検査結果</option>
+                            <option value="5">5: 傷病の経過</option>
+                            <option value="6">6: 症状</option>
+                            <option value="7">7: 投薬の根拠</option>
+                            <option value="8">8: 手術の根拠</option>
+                          </select>
+                          <button
+                            onClick={() => setSymptomDetails(symptomDetails.filter((_, k) => k !== i))}
+                            className="text-red-400 text-xs hover:text-red-600"
+                          >✕</button>
+                        </div>
+                        <textarea
+                          value={s.text}
+                          onChange={e => {
+                            const updated = [...symptomDetails];
+                            updated[i] = { ...updated[i], text: e.target.value };
+                            setSymptomDetails(updated);
+                          }}
+                          rows={2}
+                          className="w-full text-xs border border-gray-200 rounded px-2 py-1 resize-none focus:outline-none focus:border-sky-400"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 新規入力フォーム */}
+                {showSymptomInput && (
+                  <div className="px-4 py-2 border-t border-gray-100">
+                    <button
+                      onClick={() => {
+                        setSymptomDetails([...symptomDetails, { kubun: "1", text: "" }]);
+                        setShowSymptomInput(false);
+                      }}
+                      className="w-full text-xs bg-sky-600 text-white py-2 rounded-lg hover:bg-sky-700"
+                    >＋ 空白の症状詳記を追加</button>
+                  </div>
+                )}
+
+                {symptomDetails.length === 0 && symptomTemplates.length === 0 && (
+                  <div className="px-4 py-3 text-xs text-gray-400 text-center">
+                    必要な場合のみ追加してください
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="px-6 py-4 border-t flex gap-3">
