@@ -1173,6 +1173,59 @@ export default function ConsultationPage() {
         await supabase.from("receipt_procedures").insert(procedureInserts);
       }
 
+      // CP-12: 施設基準加算を自動反映
+      // is_registered=trueの施設基準のbonusesから
+      // 今回算定したfee_codeに紐づく加算を自動でreceipt_proceduresに追加
+      const { data: facilityStandards } = await supabase
+        .from("m_facility_standards")
+        .select("standard_code, standard_name, bonuses")
+        .eq("is_registered", true)
+        .eq("is_active", true);
+
+      if (facilityStandards && facilityStandards.length > 0) {
+        const algorithmCodes = new Set(procedureInserts.map((p: { fee_code: string }) => p.fee_code));
+        const bonusInserts: {
+          medical_record_id: string;
+          patient_id: string;
+          fee_code: string;
+          fee_name: string;
+          points: number;
+          count: number;
+          shinryo_shikibetsu: string;
+          futan_kubun: string;
+          performed_at: string;
+        }[] = [];
+
+        for (const standard of facilityStandards) {
+          const bonuses = (standard.bonuses || []) as {
+            label: string;
+            points: number;
+            fee_code: string;
+          }[];
+          for (const bonus of bonuses) {
+            // 加算のfee_codeが今回算定した処置に含まれる場合のみ加算
+            if (bonus.fee_code && algorithmCodes.has(bonus.fee_code) && bonus.points > 0) {
+              bonusInserts.push({
+                medical_record_id: medicalRecord.id,
+                patient_id: appointment.patient_id,
+                fee_code: bonus.fee_code,
+                fee_name: `${standard.standard_name}（${bonus.label}）`,
+                points: bonus.points,
+                count: 1,
+                shinryo_shikibetsu: "",
+                futan_kubun: "",
+                performed_at: new Date().toISOString(),
+              });
+            }
+          }
+        }
+
+        if (bonusInserts.length > 0) {
+          await supabase.from("receipt_procedures").insert(bonusInserts);
+          addLog(`🏥 施設基準加算 ${bonusInserts.length}件を自動追加`);
+        }
+      }
+
       await supabase.from("appointments").update({ status: "completed" }).eq("id", appointment.id);
       await supabase.from("patients").update({ current_tooth_chart: toothChartDraft }).eq("id", appointment.patient_id);
 
