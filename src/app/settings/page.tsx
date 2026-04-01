@@ -488,14 +488,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="mb-4">
-          <Link href="/settings/procedure-master" className="flex items-center gap-3 bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 rounded-xl px-4 py-3 hover:border-sky-300 transition-colors group">
-            <span className="text-lg">🦷</span>
-            <div className="flex-1">
-              <span className="font-bold text-sky-700 text-sm group-hover:text-sky-800">処置マスタ管理</span>
-              <span className="text-[10px] text-sky-500 ml-2">処置→算定コード対応表の管理（AI連携・自動算定の基盤）</span>
-            </div>
-            <span className="text-sky-400 text-sm">→</span>
-          </Link>
+
         </div>
 
         {/* ========== 基本情報タブ ========== */}
