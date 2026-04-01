@@ -708,27 +708,44 @@ export default function ConsultationPage() {
       // === 1. clinic_patternsからdiagnosis_codeで検索（UKEアップロード済みパターン）===
       const { data: patterns } = await supabase
         .from("clinic_patterns")
-        .select("id, pattern_name, diagnosis_name, use_count, clinic_pattern_items(fee_code, item_name, points, display_order)")
+        .select("id, diagnosis_name, use_count, clinic_pattern_items(fee_code, item_name, points, display_order, variant_name, variant_count)")
         .eq("diagnosis_code", diagnosisCode)
         .eq("is_active", true)
-        .order("use_count", { ascending: false });
+        .maybeSingle();
 
-      if (patterns && patterns.length > 0) {
-        const converted: ProcedurePattern[] = patterns.map((p, i) => {
-          const items = (p.clinic_pattern_items as { fee_code: string; item_name: string; points: number; display_order: number }[] || [])
-            .sort((a, b) => a.display_order - b.display_order);
-          const totalPoints = items.reduce((sum, item) => sum + (item.points || 0), 0);
-          const topItem = items[0];
-          return {
-            id: p.id,
-            procedure_name: i === 0 ? `★ ${p.pattern_name}（${p.use_count}回）` : `${p.pattern_name}（${p.use_count}回）`,
-            category: "pattern",
-            points: totalPoints,
-            fee_code: topItem?.fee_code || "",
-            fee_items: items.map(item => item.item_name),
-            applicable_diagnoses: [diagnosisCode],
-          };
-        });
+      if (patterns) {
+        const items = (patterns.clinic_pattern_items as {
+          fee_code: string; item_name: string; points: number;
+          display_order: number; variant_name: string; variant_count: number;
+        }[] || []);
+
+        // variant_nameでグループ化
+        const variantMap = new Map<string, { fee_codes: string[]; procedure_names: string[]; points: number; variant_count: number }>();
+        for (const item of items) {
+          const vname = item.variant_name || "標準";
+          if (!variantMap.has(vname)) {
+            variantMap.set(vname, { fee_codes: [], procedure_names: [], points: 0, variant_count: item.variant_count || 1 });
+          }
+          const v = variantMap.get(vname)!;
+          v.fee_codes.push(item.fee_code);
+          v.procedure_names.push(item.item_name);
+          v.points += item.points || 0;
+        }
+
+        // variant_count降順でソート
+        const variants = Array.from(variantMap.entries())
+          .sort((a, b) => b[1].variant_count - a[1].variant_count);
+
+        const converted: ProcedurePattern[] = variants.map(([vname, v], i) => ({
+          id: `${patterns.id}-${i}`,
+          procedure_name: i === 0 ? `★ ${vname}（${v.variant_count}回）` : `${vname}（${v.variant_count}回）`,
+          category: "pattern",
+          points: v.points,
+          fee_code: v.fee_codes[0] || "",
+          fee_items: v.procedure_names,
+          applicable_diagnoses: [diagnosisCode],
+        }));
+
         setSuggestedTreatments(converted);
         addLog(`治療パターン${converted.length}件を提案`);
         return;

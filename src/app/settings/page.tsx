@@ -66,14 +66,19 @@ export default function SettingsPage() {
     iy: { drug_code: string; drug_name: string; usage_amount: string; matched: boolean }[];
     to: { material_code: string; material_name: string; quantity: string; matched: boolean }[];
   };
+  type PatternVariant = {
+    variant_key: string;
+    variant_name: string;
+    fee_codes: string[];
+    procedure_names: string[];
+    variant_count: number;
+  };
   type UkePattern = {
     key: string;
     diagnosis_codes: string[];
     diagnosis_names: string[];
-    fee_codes: string[];
-    procedure_names: string[];
     use_count: number;
-    pattern_name: string;
+    variants: PatternVariant[];
   };
   const [ukeDragging, setUkeDragging] = useState(false);
   const [ukeFile, setUkeFile] = useState<File | null>(null);
@@ -1234,7 +1239,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* ===== ステップ3: 分析結果 ===== */}
+            {/* ===== ステップ3: 分析結果（variant設計） ===== */}
             {ukeStep === 3 && (
               <div className="space-y-4">
                 {/* インサイト */}
@@ -1262,7 +1267,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 )}
-                {/* パターン一覧 */}
+                {/* パターン一覧（傷病名単位・variant表示） */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
                     <h3 className="text-sm font-bold text-gray-700">🦷 検出パターン（{ukeEditPatterns.length}件）</h3>
@@ -1270,12 +1275,23 @@ export default function SettingsPage() {
                   <div className="divide-y divide-gray-100">
                     {ukeEditPatterns.map((p, i) => (
                       <div key={i} className="px-4 py-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-sm font-bold text-gray-900">{p.pattern_name}</p>
-                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">{p.use_count}回</span>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-sm font-bold text-gray-900">{p.diagnosis_names.join("・")}</p>
+                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">計{p.use_count}回</span>
                         </div>
-                        <p className="text-xs text-gray-400">傷病名: {p.diagnosis_names.join("、")}</p>
-                        <p className="text-xs text-gray-400">処置: {p.procedure_names.join("、")}</p>
+                        <div className="space-y-1">
+                          {p.variants.map((v, j) => (
+                            <div key={j} className={`rounded-lg px-3 py-2 ${j === 0 ? "bg-sky-50 border border-sky-200" : "bg-gray-50"}`}>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-gray-700">
+                                  {j === 0 && <span className="text-sky-600 mr-1">★</span>}
+                                  {v.variant_name.length > 40 ? v.variant_name.slice(0, 40) + "..." : v.variant_name}
+                                </span>
+                                <span className="text-xs text-gray-400 shrink-0 ml-2">{v.variant_count}回</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1287,7 +1303,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* ===== ステップ4: 編集・保存 ===== */}
+            {/* ===== ステップ4: 編集・保存（variant設計） ===== */}
             {ukeStep === 4 && (
               <div className="space-y-4">
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -1295,111 +1311,117 @@ export default function SettingsPage() {
                     <h3 className="text-sm font-bold text-gray-700">✏️ パターン編集（{ukeEditPatterns.length}件）</h3>
                   </div>
                   <div className="divide-y divide-gray-100">
-                    {ukeEditPatterns.map((p, i) => (
-                      <div key={i} className="px-4 py-4">
-                        {/* パターン名編集 */}
-                        <div className="flex items-center gap-2 mb-3">
-                          <input
-                            type="text"
-                            value={p.pattern_name}
-                            onChange={e => {
-                              const updated = [...ukeEditPatterns];
-                              updated[i] = { ...updated[i], pattern_name: e.target.value };
-                              setUkeEditPatterns(updated);
-                            }}
-                            className="flex-1 text-sm font-bold border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-sky-400"
-                          />
-                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full shrink-0">{p.use_count}回</span>
+                    {ukeEditPatterns.map((p, pi) => (
+                      <div key={pi} className="px-4 py-4">
+                        {/* 傷病名（パターンの見出し） */}
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-sm font-bold text-gray-900">{p.diagnosis_names.join("・")}</p>
+                          <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">計{p.use_count}回</span>
                         </div>
-                        {/* 傷病名 */}
-                        <p className="text-xs text-gray-400 mb-2">傷病名: {p.diagnosis_names.join("、")}</p>
-                        {/* 処置一覧（削除可能） */}
-                        <div className="space-y-1 mb-3">
-                          {p.procedure_names.map((proc, j) => (
-                            <div key={j} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-1.5">
-                              <span className="text-xs text-gray-700">{proc}</span>
-                              <button
-                                onClick={() => {
-                                  const updated = [...ukeEditPatterns];
-                                  updated[i] = {
-                                    ...updated[i],
-                                    procedure_names: updated[i].procedure_names.filter((_, k) => k !== j),
-                                    fee_codes: updated[i].fee_codes.filter((_, k) => k !== j),
-                                  };
-                                  setUkeEditPatterns(updated);
-                                }}
-                                className="text-red-400 hover:text-red-600 text-xs ml-2"
-                              >✕</button>
+                        {/* バリエーション一覧（編集可能） */}
+                        <div className="space-y-3">
+                          {p.variants.map((v, vi) => (
+                            <div key={vi} className={`rounded-lg border p-3 ${vi === 0 ? "border-sky-200 bg-sky-50" : "border-gray-200 bg-gray-50"}`}>
+                              <div className="flex items-center gap-2 mb-2">
+                                {vi === 0 && <span className="text-xs bg-sky-600 text-white px-2 py-0.5 rounded-full">★最多</span>}
+                                <span className="text-xs text-gray-500">{v.variant_count}回</span>
+                              </div>
+                              {/* 処置一覧（削除可能） */}
+                              <div className="space-y-1 mb-2">
+                                {v.procedure_names.map((proc, j) => (
+                                  <div key={j} className="flex items-center justify-between bg-white rounded px-2 py-1">
+                                    <span className="text-xs text-gray-700">{proc}</span>
+                                    <button
+                                      onClick={() => {
+                                        const updated = [...ukeEditPatterns];
+                                        const updatedVariants = [...updated[pi].variants];
+                                        updatedVariants[vi] = {
+                                          ...updatedVariants[vi],
+                                          procedure_names: updatedVariants[vi].procedure_names.filter((_, k) => k !== j),
+                                          fee_codes: updatedVariants[vi].fee_codes.filter((_, k) => k !== j),
+                                          variant_name: updatedVariants[vi].procedure_names.filter((_, k) => k !== j).join("・"),
+                                        };
+                                        updated[pi] = { ...updated[pi], variants: updatedVariants };
+                                        setUkeEditPatterns(updated);
+                                      }}
+                                      className="text-red-400 hover:text-red-600 text-xs ml-2"
+                                    >✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                              {/* 処置追加（m_fees検索） */}
+                              {editingPatternIdx === pi * 1000 + vi ? (
+                                <div className="border border-sky-200 rounded-lg p-2 bg-white">
+                                  <div className="flex gap-2 mb-2">
+                                    <input
+                                      type="text"
+                                      value={feeSearchQuery}
+                                      onChange={e => setFeeSearchQuery(e.target.value)}
+                                      placeholder="処置名で検索..."
+                                      className="flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-sky-400"
+                                    />
+                                    <button
+                                      onClick={async () => {
+                                        if (!feeSearchQuery.trim()) return;
+                                        setFeeSearching(true);
+                                        try {
+                                          const { data } = await supabase
+                                            .from("m_fees")
+                                            .select("sub_code, name, points")
+                                            .ilike("name", `%${feeSearchQuery}%`)
+                                            .eq("is_active", true)
+                                            .limit(10);
+                                          setFeeSearchResults(data || []);
+                                        } finally {
+                                          setFeeSearching(false);
+                                        }
+                                      }}
+                                      disabled={feeSearching}
+                                      className="bg-sky-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                                    >
+                                      {feeSearching ? "..." : "検索"}
+                                    </button>
+                                    <button onClick={() => { setEditingPatternIdx(null); setFeeSearchQuery(""); setFeeSearchResults([]); }} className="text-gray-400 text-xs px-2">✕</button>
+                                  </div>
+                                  {feeSearchResults.length > 0 && (
+                                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                                      {feeSearchResults.map((f, k) => (
+                                        <button
+                                          key={k}
+                                          onClick={() => {
+                                            const updated = [...ukeEditPatterns];
+                                            const updatedVariants = [...updated[pi].variants];
+                                            updatedVariants[vi] = {
+                                              ...updatedVariants[vi],
+                                              fee_codes: [...updatedVariants[vi].fee_codes, f.sub_code],
+                                              procedure_names: [...updatedVariants[vi].procedure_names, f.name],
+                                              variant_name: [...updatedVariants[vi].procedure_names, f.name].join("・"),
+                                            };
+                                            updated[pi] = { ...updated[pi], variants: updatedVariants };
+                                            setUkeEditPatterns(updated);
+                                            setEditingPatternIdx(null);
+                                            setFeeSearchQuery("");
+                                            setFeeSearchResults([]);
+                                          }}
+                                          className="w-full text-left text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 hover:bg-sky-50 hover:border-sky-300"
+                                        >
+                                          <span className="font-bold text-gray-900">{f.name}</span>
+                                          <span className="text-gray-400 ml-2">{f.points}点</span>
+                                          <span className="text-gray-300 ml-2 font-mono">{f.sub_code}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => { setEditingPatternIdx(pi * 1000 + vi); setFeeSearchQuery(""); setFeeSearchResults([]); }}
+                                  className="text-xs text-sky-600 hover:text-sky-700 font-bold"
+                                >＋ 処置を追加</button>
+                              )}
                             </div>
                           ))}
                         </div>
-                        {/* 処置追加（m_fees検索） */}
-                        {editingPatternIdx === i ? (
-                          <div className="border border-sky-200 rounded-lg p-3 bg-sky-50">
-                            <div className="flex gap-2 mb-2">
-                              <input
-                                type="text"
-                                value={feeSearchQuery}
-                                onChange={e => setFeeSearchQuery(e.target.value)}
-                                placeholder="処置名で検索..."
-                                className="flex-1 text-xs border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-sky-400"
-                              />
-                              <button
-                                onClick={async () => {
-                                  if (!feeSearchQuery.trim()) return;
-                                  setFeeSearching(true);
-                                  try {
-                                    const { data } = await supabase
-                                      .from("m_fees")
-                                      .select("sub_code, name, points")
-                                      .ilike("name", `%${feeSearchQuery}%`)
-                                      .eq("is_active", true)
-                                      .limit(10);
-                                    setFeeSearchResults(data || []);
-                                  } finally {
-                                    setFeeSearching(false);
-                                  }
-                                }}
-                                disabled={feeSearching}
-                                className="bg-sky-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-sky-700 disabled:opacity-50"
-                              >
-                                {feeSearching ? "..." : "検索"}
-                              </button>
-                              <button onClick={() => { setEditingPatternIdx(null); setFeeSearchQuery(""); setFeeSearchResults([]); }} className="text-gray-400 text-xs px-2">✕</button>
-                            </div>
-                            {feeSearchResults.length > 0 && (
-                              <div className="space-y-1 max-h-40 overflow-y-auto">
-                                {feeSearchResults.map((f, k) => (
-                                  <button
-                                    key={k}
-                                    onClick={() => {
-                                      const updated = [...ukeEditPatterns];
-                                      updated[i] = {
-                                        ...updated[i],
-                                        fee_codes: [...updated[i].fee_codes, f.sub_code],
-                                        procedure_names: [...updated[i].procedure_names, f.name],
-                                      };
-                                      setUkeEditPatterns(updated);
-                                      setEditingPatternIdx(null);
-                                      setFeeSearchQuery("");
-                                      setFeeSearchResults([]);
-                                    }}
-                                    className="w-full text-left text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 hover:bg-sky-50 hover:border-sky-300"
-                                  >
-                                    <span className="font-bold text-gray-900">{f.name}</span>
-                                    <span className="text-gray-400 ml-2">{f.points}点</span>
-                                    <span className="text-gray-300 ml-2 font-mono">{f.sub_code}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => { setEditingPatternIdx(i); setFeeSearchQuery(""); setFeeSearchResults([]); }}
-                            className="text-xs text-sky-600 hover:text-sky-700 font-bold"
-                          >＋ 処置を追加</button>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -1413,12 +1435,11 @@ export default function SettingsPage() {
                       setUkeSaveMsg("");
                       try {
                         for (const p of ukeEditPatterns) {
-                          if (!p.pattern_name.trim()) continue;
-
+                          // 傷病名単位でclinic_patternsにUPSERT
                           const { data: existing } = await supabase
                             .from("clinic_patterns")
                             .select("id, use_count")
-                            .eq("pattern_name", p.pattern_name)
+                            .eq("diagnosis_code", p.diagnosis_codes[0] ?? "")
                             .maybeSingle();
 
                           let patternId: string;
@@ -1428,13 +1449,15 @@ export default function SettingsPage() {
                               .update({ use_count: existing.use_count + p.use_count })
                               .eq("id", existing.id);
                             patternId = existing.id;
+                            // 既存のclinic_pattern_itemsを削除して再登録
+                            await supabase.from("clinic_pattern_items").delete().eq("pattern_id", patternId);
                           } else {
                             const { data: inserted } = await supabase
                               .from("clinic_patterns")
                               .insert({
                                 diagnosis_code: p.diagnosis_codes[0] ?? "",
                                 diagnosis_name: p.diagnosis_names[0] ?? "",
-                                pattern_name: p.pattern_name,
+                                pattern_name: p.diagnosis_names[0] ?? "",
                                 use_count: p.use_count,
                                 source: "uke",
                                 is_active: true,
@@ -1443,20 +1466,39 @@ export default function SettingsPage() {
                               .single();
                             if (!inserted) continue;
                             patternId = inserted.id;
+                          }
 
-                            // clinic_pattern_itemsにfee_codeを保存（実データ）
-                            const items = p.fee_codes.map((code, idx) => ({
-                              pattern_id: patternId,
-                              item_type: "SS",
-                              fee_code: code,
-                              item_name: p.procedure_names[idx] ?? "",
-                              points: 0,
-                              kubun: "必須",
-                              display_order: idx + 1,
-                            }));
-                            if (items.length > 0) {
-                              await supabase.from("clinic_pattern_items").insert(items);
-                            }
+                          // clinic_pattern_itemsにvariant付きで保存
+                          const items: {
+                            pattern_id: string;
+                            item_type: string;
+                            fee_code: string;
+                            item_name: string;
+                            points: number;
+                            kubun: string;
+                            display_order: number;
+                            variant_name: string;
+                            variant_count: number;
+                          }[] = [];
+
+                          p.variants.forEach((v, vi) => {
+                            v.fee_codes.forEach((code, idx) => {
+                              items.push({
+                                pattern_id: patternId,
+                                item_type: "SS",
+                                fee_code: code,
+                                item_name: v.procedure_names[idx] ?? "",
+                                points: 0,
+                                kubun: "必須",
+                                display_order: vi * 100 + idx + 1,
+                                variant_name: v.variant_name,
+                                variant_count: v.variant_count,
+                              });
+                            });
+                          });
+
+                          if (items.length > 0) {
+                            await supabase.from("clinic_pattern_items").insert(items);
                           }
                         }
 
