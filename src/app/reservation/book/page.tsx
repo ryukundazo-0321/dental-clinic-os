@@ -45,6 +45,7 @@ export default function PatientBookingPage() {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [createdAppointmentId, setCreatedAppointmentId] = useState("");
+  const [createdPatientNumber, setCreatedPatientNumber] = useState("");
   const [bookedPatientId, setBookedPatientId] = useState<string | null>(null);
 
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -223,6 +224,7 @@ export default function PatientBookingPage() {
           : 0;
         const newPatientNumber = String(lastNum + 1).padStart(4, "0");
         await supabase.from("patients").update({ patient_number: newPatientNumber }).eq("id", newPatient.id);
+        setCreatedPatientNumber(newPatientNumber);
 
         // patient_insurancesにINSERT
         await supabase.from("patient_insurances").insert({
@@ -753,6 +755,13 @@ export default function PatientBookingPage() {
               </div>
             )}
 
+            {createdPatientNumber && (
+              <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 mb-4">
+                <p className="text-xs text-sky-600 font-bold mb-1">🪪 診察券番号</p>
+                <p className="text-3xl font-black text-sky-700 text-center tracking-widest">{createdPatientNumber}</p>
+                <p className="text-xs text-sky-500 text-center mt-1">チェックイン時にこの番号が必要です</p>
+              </div>
+            )}
             <p className="text-gray-500 text-sm mb-8">ご来院をお待ちしております。</p>
           </div>
         )}
