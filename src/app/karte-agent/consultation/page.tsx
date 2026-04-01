@@ -419,11 +419,27 @@ export default function ConsultationPage() {
         setShowRevisitPopup(true);
       }
 
-      // 初診料・再診料の自動追加
+      // 初診料・再診料の自動追加（点数はm_feesから取得・保険改定対応）
       if (mr && (mr.structured_procedures || []).length === 0) {
-        const feeProc: StructuredProcedure = isFirst
-          ? { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", fee_code: "301000110", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }
-          : { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", fee_code: "301001610", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+        const feeCode = isFirst ? "301000110" : "301001610";
+        const feeName = isFirst ? "歯科初診料" : "歯科再診料";
+        const diagName = isFirst ? "初診" : "再診";
+        const { data: feeData } = await supabase
+          .from("m_fees")
+          .select("name, points")
+          .eq("sub_code", feeCode)
+          .maybeSingle();
+        const feeProc: StructuredProcedure = {
+          id: `fee-${Date.now()}`,
+          diagnosis_code: "",
+          diagnosis_name: diagName,
+          procedure_name: feeData?.name || feeName,
+          fee_code: feeCode,
+          points: feeData?.points || 0,
+          tooth: "",
+          category: "basic",
+          timestamp: new Date().toISOString(),
+        };
         const updated = [feeProc];
         await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", mr.id);
         setMedicalRecord((prev) => prev ? { ...prev, structured_procedures: updated } : prev);
@@ -719,7 +735,20 @@ export default function ConsultationPage() {
           display_order: number; variant_name: string; variant_count: number;
         }[] || []);
 
-        // variant_nameでグループ化
+        // fee_codeでm_feesから最新点数を一括取得（保険改定対応）
+        const feeCodes = [...new Set(items.map(i => i.fee_code).filter(Boolean))];
+        const feePointMap = new Map<string, number>();
+        if (feeCodes.length > 0) {
+          const { data: feeData } = await supabase
+            .from("m_fees")
+            .select("sub_code, points")
+            .in("sub_code", feeCodes);
+          for (const f of feeData || []) {
+            feePointMap.set(f.sub_code, f.points || 0);
+          }
+        }
+
+        // variant_nameでグループ化（点数はm_feesから取得・DBのpointsは使わない）
         const variantMap = new Map<string, { fee_codes: string[]; procedure_names: string[]; points: number; variant_count: number }>();
         for (const item of items) {
           const vname = item.variant_name || "標準";
@@ -729,7 +758,8 @@ export default function ConsultationPage() {
           const v = variantMap.get(vname)!;
           v.fee_codes.push(item.fee_code);
           v.procedure_names.push(item.item_name);
-          v.points += item.points || 0;
+          // m_feesから最新点数を取得（保険改定後も自動反映）
+          v.points += feePointMap.get(item.fee_code) || 0;
         }
 
         // variant_count降順でソート
@@ -2102,8 +2132,24 @@ export default function ConsultationPage() {
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-medium text-gray-700">📋 処置記録</h3>
                 <div className="flex items-center gap-2">
-                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: "歯科初診料", fee_code: "301000110", points: 267, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科初診料（267点）を追加"); }} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded hover:bg-green-100">＋初診料</button>
-                  <button onClick={async () => { if (!medicalRecord) return; const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: "歯科再診料", fee_code: "301001610", points: 58, tooth: "", category: "basic", timestamp: new Date().toISOString() }; const updated = [...(medicalRecord.structured_procedures || []), fee]; await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id); setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev); addLog("💰 歯科再診料（58点）を追加"); }} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded hover:bg-gray-100">＋再診料</button>
+                  <button onClick={async () => {
+                    if (!medicalRecord) return;
+                    const { data: feeData } = await supabase.from("m_fees").select("name, points").eq("sub_code", "301000110").maybeSingle();
+                    const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "初診", procedure_name: feeData?.name || "歯科初診料", fee_code: "301000110", points: feeData?.points || 0, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+                    const updated = [...(medicalRecord.structured_procedures || []), fee];
+                    await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
+                    setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev);
+                    addLog(`💰 ${fee.procedure_name}（${fee.points}点）を追加`);
+                  }} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded hover:bg-green-100">＋初診料</button>
+                  <button onClick={async () => {
+                    if (!medicalRecord) return;
+                    const { data: feeData } = await supabase.from("m_fees").select("name, points").eq("sub_code", "301001610").maybeSingle();
+                    const fee: StructuredProcedure = { id: `fee-${Date.now()}`, diagnosis_code: "", diagnosis_name: "再診", procedure_name: feeData?.name || "歯科再診料", fee_code: "301001610", points: feeData?.points || 0, tooth: "", category: "basic", timestamp: new Date().toISOString() };
+                    const updated = [...(medicalRecord.structured_procedures || []), fee];
+                    await supabase.from("medical_records").update({ structured_procedures: updated }).eq("id", medicalRecord.id);
+                    setMedicalRecord(prev => prev ? { ...prev, structured_procedures: updated } : prev);
+                    addLog(`💰 ${fee.procedure_name}（${fee.points}点）を追加`);
+                  }} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded hover:bg-gray-100">＋再診料</button>
                   <button onClick={() => setPopup("diagnosis")} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100">+ 傷病名追加</button>
                 </div>
               </div>

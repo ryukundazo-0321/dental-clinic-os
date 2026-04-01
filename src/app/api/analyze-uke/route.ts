@@ -25,6 +25,8 @@ export interface PatternVariant {
   variant_name: string;   // m_feesの正式名称を「・」で結合（ハルシネーションなし）
   fee_codes: string[];
   procedure_names: string[];
+  points_per_item: number[];  // 各処置の点数（m_feesから取得済み）
+  total_points: number;       // バリエーション合計点数
   variant_count: number;
 }
 
@@ -48,16 +50,21 @@ function groupPatterns(patients: MatchedPatientReceipt[]): GroupedPattern[] {
   for (const p of patients) {
     const diagCodes = p.hs.map(h => h.diagnosis_code).filter(Boolean).sort();
     const diagNames = p.hs.map(h => h.diagnosis_name).filter(Boolean);
-    const feeCodes  = p.ss.map(s => s.fee_code).filter(c => c && c.length === 9).sort();
-    const procNames = p.ss.map(s => s.procedure_name).filter(Boolean);
+
+    // fee_codeが9桁のSSレコードのみ対象（ソート前の順序を保持）
+    const ssItems   = p.ss.filter(s => s.fee_code && s.fee_code.length === 9);
+    const feeCodes  = ssItems.map(s => s.fee_code);
+    const procNames = ssItems.map(s => s.procedure_name || s.fee_code);
+    const pointsArr = ssItems.map(s => s.points || 0);
+    const totalPts  = pointsArr.reduce((sum, pt) => sum + pt, 0);
 
     if (feeCodes.length === 0) continue;
 
     // 傷病名コードの組み合わせをキーに
     const diagKey = diagCodes.join("|");
-    // 処置の組み合わせをvariantキーに
+    // 処置の組み合わせをvariantキーに（出現順を保持）
     const variantKey = feeCodes.join("|");
-    // variant_name = m_feesの正式名称を「・」で結合
+    // variant_name = m_feesの正式名称を「・」で結合（ハルシネーションなし）
     const variantName = procNames.join("・");
 
     if (!diagMap.has(diagKey)) {
@@ -83,6 +90,8 @@ function groupPatterns(patients: MatchedPatientReceipt[]): GroupedPattern[] {
         variant_name: variantName,
         fee_codes: feeCodes,
         procedure_names: procNames,
+        points_per_item: pointsArr,
+        total_points: totalPts,
         variant_count: 1,
       });
     }
