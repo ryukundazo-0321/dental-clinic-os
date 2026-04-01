@@ -88,12 +88,15 @@ export default function SelfCheckinPage() {
 
     const todayStr = getJSTDateStr();
 
-    let inputId = patientId.trim().toUpperCase();
+    // 4桁数字に正規化（0001形式）
+    let inputId = patientId.trim();
+    // 数字のみ → 4桁にゼロ埋め
     if (/^\d+$/.test(inputId)) {
       inputId = inputId.padStart(4, "0");
     }
-    if (/^P\d+$/.test(inputId)) {
-      inputId = inputId.padStart(4, "0");
+    // P-00001やP0001形式 → 数字部分を取り出して4桁に
+    if (/^P[-]?\d+$/i.test(inputId)) {
+      inputId = inputId.replace(/^P[-]?/i, "").padStart(4, "0");
     }
 
     const { data: patient } = await supabase
@@ -113,8 +116,8 @@ export default function SelfCheckinPage() {
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
       .eq("patient_id", patient.id)
-      .gte("scheduled_at", `${todayStr}T00:00:00`)
-      .lte("scheduled_at", `${todayStr}T23:59:59`)
+      .gte("scheduled_at", `${todayStr}T00:00:00+09:00`)
+      .lte("scheduled_at", `${todayStr}T23:59:59+09:00`)
       .in("status", ["reserved"])
       .order("created_at", { ascending: false })
       .limit(1);
@@ -124,8 +127,8 @@ export default function SelfCheckinPage() {
         .from("appointments")
         .select("id")
         .eq("patient_id", patient.id)
-        .gte("scheduled_at", `${todayStr}T00:00:00`)
-        .lte("scheduled_at", `${todayStr}T23:59:59`)
+        .gte("scheduled_at", `${todayStr}T00:00:00+09:00`)
+        .lte("scheduled_at", `${todayStr}T23:59:59+09:00`)
         .in("status", ["checked_in", "in_consultation", "completed", "billing_done"])
         .limit(1);
 
