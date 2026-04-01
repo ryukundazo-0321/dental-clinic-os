@@ -18,8 +18,11 @@ type MatchedAppointment = {
 
 function getJSTDateStr() {
   const now = new Date();
-  const jst = new Date(now.getTime() + (9 * 60 + now.getTimezoneOffset()) * 60000);
-  return jst.toISOString().split("T")[0];
+  const jst = new Date(now.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }));
+  const y = jst.getFullYear();
+  const m = String(jst.getMonth() + 1).padStart(2, "0");
+  const d = String(jst.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export default function SelfCheckinPage() {
@@ -99,22 +102,20 @@ export default function SelfCheckinPage() {
       inputId = inputId.replace(/^P[-]?/i, "").padStart(4, "0");
     }
 
-    console.log("照合:", { inputId, dob });
-    const { data: patient, error: patientError } = await supabase
+    const { data: patient } = await supabase
       .from("patients")
       .select("id, name_kanji")
       .eq("patient_number", inputId)
       .eq("date_of_birth", dob)
       .single();
 
-    console.log("患者照合結果:", { patient, patientError });
     if (!patient) {
       setStep("not_found");
       setLoading(false);
       return;
     }
 
-    const { data: appointments, error: aptError } = await supabase
+    const { data: appointments } = await supabase
       .from("appointments")
       .select("id, scheduled_at, patient_type, status, doctor_id")
       .eq("patient_id", patient.id)
@@ -123,7 +124,6 @@ export default function SelfCheckinPage() {
       .in("status", ["reserved"])
       .order("created_at", { ascending: false })
       .limit(1);
-    console.log("予約検索:", { todayStr, patientId: patient.id, appointments, aptError });
 
     if (!appointments || appointments.length === 0) {
       const { data: checkedIn } = await supabase
