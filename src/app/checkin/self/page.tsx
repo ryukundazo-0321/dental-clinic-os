@@ -99,13 +99,15 @@ export default function SelfCheckinPage() {
       inputId = inputId.replace(/^P[-]?/i, "").padStart(4, "0");
     }
 
-    const { data: patient } = await supabase
+    console.log("照合:", { inputId, dob });
+    const { data: patient, error: patientError } = await supabase
       .from("patients")
       .select("id, name_kanji")
       .eq("patient_number", inputId)
       .eq("date_of_birth", dob)
       .single();
 
+    console.log("患者照合結果:", { patient, patientError });
     if (!patient) {
       setStep("not_found");
       setLoading(false);
