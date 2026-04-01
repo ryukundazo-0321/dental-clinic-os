@@ -91,6 +91,7 @@ interface StructuredProcedure {
   diagnosis_code: string;
   diagnosis_name: string;
   procedure_name: string;
+  fee_code: string;
   points: number;
   category: string;
   timestamp: string;
@@ -148,6 +149,7 @@ interface ProcedurePattern {
   procedure_name: string;
   category: string;
   points: number;
+  fee_code: string;
   fee_items: string[];
   applicable_diagnoses: string[];
 }
@@ -703,30 +705,86 @@ export default function ConsultationPage() {
 
   async function fetchTreatmentPatterns(diagnosisCode: string) {
     try {
-      const res = await fetch("/api/suggest-treatment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ diagnosis_code: diagnosisCode, diagnosis_short: diagnosisCode }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const treatments = data.treatments || [];
-        const converted: ProcedurePattern[] = treatments.map((t: { procedure_id: string; procedure_name: string; category: string; fee_items: { code: string; name: string; points: number; count: number }[]; total_points: number }) => ({
-          id: t.procedure_id, procedure_name: t.procedure_name, category: t.category,
-          points: t.total_points, fee_items: t.fee_items.map((f) => f.name), applicable_diagnoses: [diagnosisCode],
-        }));
+      // === 1. clinic_patternsからdiagnosis_codeで検索（UKEアップロード済みパターン）===
+      const { data: patterns } = await supabase
+        .from("clinic_patterns")
+        .select("id, pattern_name, diagnosis_name, use_count, clinic_pattern_items(fee_code, item_name, points, display_order)")
+        .eq("diagnosis_code", diagnosisCode)
+        .eq("is_active", true)
+        .order("use_count", { ascending: false });
+
+      if (patterns && patterns.length > 0) {
+        const converted: ProcedurePattern[] = patterns.map((p, i) => {
+          const items = (p.clinic_pattern_items as { fee_code: string; item_name: string; points: number; display_order: number }[] || [])
+            .sort((a, b) => a.display_order - b.display_order);
+          const totalPoints = items.reduce((sum, item) => sum + (item.points || 0), 0);
+          const topItem = items[0];
+          return {
+            id: p.id,
+            procedure_name: i === 0 ? `★ ${p.pattern_name}（${p.use_count}回）` : `${p.pattern_name}（${p.use_count}回）`,
+            category: "pattern",
+            points: totalPoints,
+            fee_code: topItem?.fee_code || "",
+            fee_items: items.map(item => item.item_name),
+            applicable_diagnoses: [diagnosisCode],
+          };
+        });
         setSuggestedTreatments(converted);
-        addLog(`💊 治療パターン${converted.length}件を提案`);
+        addLog(`治療パターン${converted.length}件を提案`);
+        return;
       }
-    } catch (err) {}
+
+      // === 2. clinic_patternsになければclinic_pattern_suggestionsからステップ誘導 ===
+      const { data: diagData } = await supabase
+        .from("m_diagnoses")
+        .select("category")
+        .eq("diagnosis_code", diagnosisCode)
+        .maybeSingle();
+
+      const category = diagData?.category || "その他";
+
+      const { data: suggestions } = await supabase
+        .from("clinic_pattern_suggestions")
+        .select("step_name, fee_code, step_no, display_order")
+        .eq("diagnosis_category", category)
+        .order("display_order");
+
+      if (suggestions && suggestions.length > 0) {
+        const feeCodes = suggestions.map((s: { fee_code: string }) => s.fee_code).filter(Boolean);
+        const { data: fees } = await supabase
+          .from("m_fees")
+          .select("sub_code, name, points")
+          .in("sub_code", feeCodes);
+
+        const feeMap = new Map((fees || []).map((f: { sub_code: string; name: string; points: number }) => [f.sub_code, { name: f.name, points: f.points }]));
+
+        const converted: ProcedurePattern[] = suggestions.map((s: { step_no: number; step_name: string; fee_code: string }) => {
+          const fee = feeMap.get(s.fee_code);
+          return {
+            id: `suggestion-${s.fee_code}`,
+            procedure_name: `${s.step_no}. ${s.step_name}`,
+            category,
+            points: fee?.points || 0,
+            fee_code: s.fee_code,
+            fee_items: [fee?.name || s.step_name],
+            applicable_diagnoses: [diagnosisCode],
+          };
+        });
+        setSuggestedTreatments(converted);
+        addLog(`${category}のステップ誘導${converted.length}件を提案`);
+      }
+    } catch (err) {
+      addLog("治療パターン取得に失敗しました");
+    }
   }
 
-  async function selectTreatment(proc: ProcedurePattern) {
+
+    async function selectTreatment(proc: ProcedurePattern) {
     if (!medicalRecord || !confirmedDiagnosis) return;
     const newProc: StructuredProcedure = {
       id: crypto.randomUUID(), tooth: confirmedDiagnosis.tooth || "",
       diagnosis_code: confirmedDiagnosis.code, diagnosis_name: confirmedDiagnosis.name,
-      procedure_name: proc.procedure_name, points: proc.points, category: proc.category,
+      procedure_name: proc.procedure_name, fee_code: proc.fee_code || "", points: proc.points, category: proc.category,
       timestamp: new Date().toISOString(),
     };
     const updated = [...(medicalRecord.structured_procedures || []), newProc];
@@ -1049,6 +1107,24 @@ export default function ConsultationPage() {
         total_points: totalPoints,
         status: "pending",
       });
+
+      // CP-9: receipt_proceduresにfee_code（9桁）で正規化保存
+      const procedureInserts = procs
+        .filter((p: StructuredProcedure) => p.fee_code && p.fee_code.length === 9)
+        .map((p: StructuredProcedure) => ({
+          medical_record_id: medicalRecord.id,
+          patient_id: appointment.patient_id,
+          fee_code: p.fee_code,
+          fee_name: p.procedure_name,
+          points: p.points,
+          count: 1,
+          shinryo_shikibetsu: "",
+          futan_kubun: "",
+          performed_at: new Date().toISOString(),
+        }));
+      if (procedureInserts.length > 0) {
+        await supabase.from("receipt_procedures").insert(procedureInserts);
+      }
 
       await supabase.from("appointments").update({ status: "completed" }).eq("id", appointment.id);
       await supabase.from("patients").update({ current_tooth_chart: toothChartDraft }).eq("id", appointment.patient_id);
