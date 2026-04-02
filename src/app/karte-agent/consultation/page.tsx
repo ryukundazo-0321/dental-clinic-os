@@ -455,7 +455,7 @@ export default function ConsultationPage() {
                 reason: d.reason,
                 tooth: "",
               }));
-              setPredictedDiagnoses(preds);
+              setDetectedDiagnoses(preds);
             }
             addLog("✅ プロファイル・傷病名分析完了");
           }
