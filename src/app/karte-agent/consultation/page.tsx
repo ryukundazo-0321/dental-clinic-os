@@ -417,8 +417,6 @@ export default function ConsultationPage() {
         .from("questionnaire_responses")
         .select("has_new_symptom, chief_complaint, profile_answers, medical_answers, diagnosis_tree_answers")
         .eq("appointment_id", appointmentId)
-        .order("submitted_at", { ascending: false })
-        .limit(1)
         .maybeSingle();
 
       // 問診票データがある場合、analyze-personalityを呼び出す
