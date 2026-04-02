@@ -1493,6 +1493,31 @@ export default function SettingsPage() {
                           if (items.length > 0) {
                             await supabase.from("clinic_pattern_items").insert(items);
                           }
+
+                          // diagnosis_mappingにUPSERT
+                          if (currentClinicId) {
+                            const diagName = p.diagnosis_names[0] ?? "";
+
+                            const { data: mDiag } = await supabase
+                              .from("m_diagnoses")
+                              .select("diagnosis_code, diagnosis_name")
+                              .ilike("diagnosis_name", `%${diagName}%`)
+                              .eq("is_active", true)
+                              .limit(1)
+                              .maybeSingle();
+
+                            if (mDiag) {
+                              await supabase.from("diagnosis_mapping").upsert({
+                                m_diagnosis_code: mDiag.diagnosis_code,
+                                m_diagnosis_name: mDiag.diagnosis_name,
+                                clinic_pattern_id: patternId,
+                                clinic_pattern_name: diagName,
+                                clinic_id: currentClinicId,
+                              }, {
+                                onConflict: "m_diagnosis_code,clinic_id",
+                              });
+                            }
+                          }
                         }
 
                         // ダッシュボード再取得
