@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from("staff")
         .select("id, name, role, email, color")
         .eq("auth_user_id", authUserId)
-        .single();
+        .maybeSingle();
       if (data) setStaff(data);
       if (error) console.error("スタッフ情報取得エラー:", error.message);
     } catch (e) {

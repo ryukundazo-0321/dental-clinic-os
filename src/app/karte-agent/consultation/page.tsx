@@ -1301,7 +1301,7 @@ export default function ConsultationPage() {
     );
   }
 
-  const age = calcAge(patient.birth_date);
+  const age = calcAge(patient.date_of_birth);
   const isFirstVisit = appointment.visit_type === "initial" || pastRecords.length === 0;
   const profile = patient.personality_profile;
 
@@ -1854,7 +1854,7 @@ export default function ConsultationPage() {
         <div className="flex items-center gap-3">
           <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">←</button>
           <div>
-            <span className="font-bold text-lg">{patient.name}</span>
+            <span className="font-bold text-lg">{patient.name_kanji}</span>
             <span className="ml-2 text-sm text-gray-500">{age}歳</span>
             <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{patient.patient_insurances?.[0]?.insurance_type || "社保"}</span>
             <span className={`ml-2 text-sm px-2 py-0.5 rounded ${isFirstVisit ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>{isFirstVisit ? "初診" : "再診"}</span>
@@ -2059,7 +2059,7 @@ export default function ConsultationPage() {
           {/* 患者基本情報 */}
           <div className="px-4 py-3 border-b">
             <div className="text-xs text-gray-400 mb-1">患者情報</div>
-            <div className="font-bold text-gray-800">{patient.name}</div>
+            <div className="font-bold text-gray-800">{patient.name_kanji}</div>
             <div className="text-xs text-gray-500">{age}歳 / {appointment.appointment_date?.slice(0, 10)}</div>
             <div className="text-xs text-gray-500 mt-1">
               {isFirstVisit ? "🟢 初診" : "🔵 再診"}
