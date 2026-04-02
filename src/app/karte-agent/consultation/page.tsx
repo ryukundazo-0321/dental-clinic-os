@@ -422,14 +422,14 @@ export default function ConsultationPage() {
         .maybeSingle();
 
       // 問診票データがある場合、analyze-personalityを呼び出す
-      if (qr && (!patient.personality_profile)) {
+      if (qr && pt && (!pt.personality_profile)) {
         try {
           addLog("🧠 問診票からプロファイル・傷病名を分析中...");
           const res = await fetch("/api/analyze-personality", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              patient_id: patient.id,
+              patient_id: pt.id,
               profile_answers: (qr as Record<string, unknown>).profile_answers || {},
               medical_answers: (qr as Record<string, unknown>).medical_answers || {},
               diagnosis_tree_answers: (qr as Record<string, unknown>).diagnosis_tree_answers || {},
