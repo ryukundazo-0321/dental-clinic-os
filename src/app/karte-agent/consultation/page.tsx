@@ -415,15 +415,56 @@ export default function ConsultationPage() {
       const isFirst = appt.visit_type === "initial" || (past || []).length === 0;
       const { data: qr } = await supabase
         .from("questionnaire_responses")
-        .select("has_new_symptom, chief_complaint")
+        .select("has_new_symptom, chief_complaint, profile_answers, medical_answers, diagnosis_tree_answers")
         .eq("appointment_id", appointmentId)
         .order("submitted_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      // 主訴をSOAP-Sに反映
-      if (qr?.chief_complaint && mr && !mr.soap_s) {
-        const soapS = `【主訴】${qr.chief_complaint}`;
+      // 問診票データがある場合、analyze-personalityを呼び出す
+      if (qr && (!patient.personality_profile)) {
+        try {
+          addLog("🧠 問診票からプロファイル・傷病名を分析中...");
+          const res = await fetch("/api/analyze-personality", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              patient_id: patient.id,
+              profile_answers: (qr as Record<string, unknown>).profile_answers || {},
+              medical_answers: (qr as Record<string, unknown>).medical_answers || {},
+              diagnosis_tree_answers: (qr as Record<string, unknown>).diagnosis_tree_answers || {},
+              chief_complaint: qr.chief_complaint || "",
+            }),
+          });
+          if (res.ok) {
+            const profile = await res.json();
+            // 患者プロファイルを更新
+            setPatient(prev => prev ? { ...prev, personality_profile: profile } : prev);
+            // 日本語主訴文をSOAP-Sに反映
+            if (profile.soap_s_text && mr && !mr.soap_s) {
+              await supabase.from("medical_records").update({ soap_s: profile.soap_s_text }).eq("id", mr.id);
+              setMedicalRecord(prev => prev ? { ...prev, soap_s: profile.soap_s_text } : prev);
+            }
+            // 傷病名候補をpredicted_diagnosesに反映
+            if (profile.predicted_diagnoses && profile.predicted_diagnoses.length > 0) {
+              const preds = profile.predicted_diagnoses.map((d: { name: string; confidence: string; reason: string }) => ({
+                name: d.name,
+                code: "",
+                short: d.name,
+                confidence: d.confidence === "高" ? 0.9 : d.confidence === "中" ? 0.6 : 0.3,
+                reason: d.reason,
+                tooth: "",
+              }));
+              setPredictedDiagnoses(preds);
+            }
+            addLog("✅ プロファイル・傷病名分析完了");
+          }
+        } catch (e) {
+          console.error("analyze-personality error:", e);
+        }
+      } else if (qr?.chief_complaint && mr && !mr.soap_s) {
+        // personality_profileが既にある場合は主訴文のみ反映
+        const soapS = qr.chief_complaint;
         await supabase.from("medical_records").update({ soap_s: soapS }).eq("id", mr.id);
         setMedicalRecord(prev => prev ? { ...prev, soap_s: soapS } : prev);
         addLog(`📋 問診票から主訴を取得: ${qr.chief_complaint}`);

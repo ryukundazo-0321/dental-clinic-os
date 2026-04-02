@@ -51,6 +51,8 @@ export interface PersonalityProfile {
   analyzed_at: string;
   raw_profile_answers: ProfileAnswers;
   raw_medical_answers: MedicalAnswers;
+  soap_s_text?: string;
+  predicted_diagnoses?: { name: string; confidence: string; reason: string }[];
 }
 
 // ─── 医療安全アラート：コードで確定生成（AIに依存しない） ─────────────────
@@ -127,10 +129,12 @@ function buildProfileSummary(p: ProfileAnswers, m: MedicalAnswers): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { patient_id, profile_answers, medical_answers }: {
+    const { patient_id, profile_answers, medical_answers, diagnosis_tree_answers, chief_complaint }: {
       patient_id?: string;
       profile_answers: ProfileAnswers;
       medical_answers: MedicalAnswers;
+      diagnosis_tree_answers?: Record<string, unknown>;
+      chief_complaint?: string;
     } = body;
 
     if (!profile_answers) {
@@ -144,6 +148,11 @@ export async function POST(req: NextRequest) {
 
     const profileSummary = buildProfileSummary(profile_answers, medical);
 
+    const diagnosisInfo = diagnosis_tree_answers
+      ? `\n\n【症状詳細】\n${JSON.stringify(diagnosis_tree_answers, null, 2)}`
+      : "";
+    const chiefInfo = chief_complaint ? `\n主訴: ${chief_complaint}` : "";
+
     const systemPrompt = `あなたは歯科クリニックのスタッフ向けに患者プロファイルを分析するAIです。
 患者の問診回答から、診察前にスタッフが把握すべき患者特性をJSONで出力してください。
 
@@ -156,7 +165,11 @@ export async function POST(req: NextRequest) {
   "comm_style": "detail" または "simple" または "quick",
   "comm_label": "コミュニケーションスタイルのラベル",
   "action_tips": ["推奨アクション1（20字以内）", "推奨アクション2（20字以内）", "推奨アクション3（20字以内）"],
-  "one_line": "患者の特徴を端的に表す一言（40字以内）"
+  "one_line": "患者の特徴を端的に表す一言（40字以内）",
+  "soap_s_text": "日本語で自然な主訴文（例：上顎左側臼歯部に冷水・ブラッシング時のしみる感覚あり。自発痛・夜間痛もあり症状は悪化傾向。）",
+  "predicted_diagnoses": [
+    {"name": "傷病名（日本語）", "confidence": "高または中または低", "reason": "根拠（20字以内）"}
+  ]
 }
 
 判断基準:
@@ -164,7 +177,9 @@ export async function POST(req: NextRequest) {
 - anxiety_level low: 緊張度3以下 かつ 苦手ではない/普通 かつ 痛み不安なし/あまりない
 - jishu_potential high: 投資意識が「良い治療なら検討」以上 かつ 予算10万円以上
 - jishu_potential low: 投資意識が「必要最低限」または 予算〜3万円以下
-- action_tipsは「〜してください」形式の具体的なスタッフ行動を3つ`;
+- action_tipsは「〜してください」形式の具体的なスタッフ行動を3つ
+- soap_s_textは症状詳細から自然な日本語主訴文を生成（英語不可・専門用語可）
+- predicted_diagnosesは症状から可能性の高い傷病名を1〜3個`;
 
     // GPT-4oでパーソナリティー分析（fetchで直接呼び出し）
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -179,7 +194,7 @@ export async function POST(req: NextRequest) {
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `以下の患者プロファイルを分析してください:\n\n${profileSummary}` },
+          { role: "user", content: `以下の患者プロファイルを分析してください:\n\n${profileSummary}${chiefInfo}${diagnosisInfo}` },
         ],
       }),
     });
