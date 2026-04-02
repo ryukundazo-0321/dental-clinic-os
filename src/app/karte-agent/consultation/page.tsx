@@ -411,16 +411,25 @@ export default function ConsultationPage() {
         }
       }
 
-      // 再診の場合：問診票のhas_new_symptomを確認
+      // 問診票データを取得（初診・再診共通）
       const isFirst = appt.visit_type === "initial" || (past || []).length === 0;
+      const { data: qr } = await supabase
+        .from("questionnaire_responses")
+        .select("has_new_symptom, chief_complaint")
+        .eq("appointment_id", appointmentId)
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // 主訴をSOAP-Sに反映
+      if (qr?.chief_complaint && mr && !mr.soap_s) {
+        const soapS = `【主訴】${qr.chief_complaint}`;
+        await supabase.from("medical_records").update({ soap_s: soapS }).eq("id", mr.id);
+        setMedicalRecord(prev => prev ? { ...prev, soap_s: soapS } : prev);
+        addLog(`📋 問診票から主訴を取得: ${qr.chief_complaint}`);
+      }
+
       if (!isFirst) {
-        const { data: qr } = await supabase
-          .from("questionnaire_responses")
-          .select("has_new_symptom")
-          .eq("appointment_id", appointmentId)
-          .order("submitted_at", { ascending: false })
-          .limit(1)
-          .single();
         const newSymptom = qr?.has_new_symptom || false;
         setHasNewSymptom(newSymptom);
         // 再診ポップアップを表示
