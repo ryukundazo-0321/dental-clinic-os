@@ -422,7 +422,7 @@ export default function ConsultationPage() {
         .maybeSingle();
 
       // 問診票データがある場合、analyze-personalityを呼び出す
-      if (qr && pt && (!pt.personality_profile)) {
+      if (qr && pt && (!mr?.soap_s)) {
         try {
           addLog("🧠 問診票からプロファイル・傷病名を分析中...");
           const res = await fetch("/api/analyze-personality", {
