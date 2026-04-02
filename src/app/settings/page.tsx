@@ -1495,7 +1495,7 @@ export default function SettingsPage() {
                           }
 
                           // diagnosis_mappingにUPSERT
-                          if (currentClinicId) {
+                          if (clinicId) {
                             const diagName = p.diagnosis_names[0] ?? "";
 
                             const { data: mDiag } = await supabase
@@ -1512,7 +1512,7 @@ export default function SettingsPage() {
                                 m_diagnosis_name: mDiag.diagnosis_name,
                                 clinic_pattern_id: patternId,
                                 clinic_pattern_name: diagName,
-                                clinic_id: currentClinicId,
+                                clinic_id: clinicId,
                               }, {
                                 onConflict: "m_diagnosis_code,clinic_id",
                               });
