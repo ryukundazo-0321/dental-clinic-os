@@ -15,7 +15,11 @@ const supabase = createClient(
 interface Patient {
   id: string;
   name: string;
+  name_kanji: string;
+  name_kana?: string;
   birth_date: string;
+  date_of_birth: string;
+  sex?: string;
   patient_insurances?: { insurance_type: string | null; burden_ratio: number | null; is_current: boolean }[];
   current_tooth_chart: Record<string, ToothStatus> | null;
   personality_profile?: PersonalityProfile | null;
