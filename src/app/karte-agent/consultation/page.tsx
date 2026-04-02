@@ -771,19 +771,26 @@ export default function ConsultationPage() {
       });
     }
     setFocusStep("treatment");
-    await fetchTreatmentPatterns(diag.code);
+    await fetchTreatmentPatterns(diag.code, diag.name);
     setDetectedDiagnoses([]);
   }
 
-  async function fetchTreatmentPatterns(diagnosisCode: string) {
+  async function fetchTreatmentPatterns(diagnosisCode: string, diagnosisName?: string) {
     try {
-      // === 1. clinic_patternsからdiagnosis_codeで検索（UKEアップロード済みパターン）===
-      const { data: patterns } = await supabase
+      // === 1. clinic_patternsからdiagnosis_nameで検索（UKEアップロード済みパターン）===
+      // diagnosis_codeはコード体系が異なるためdiagnosis_nameで照合する
+      let patternsQuery = supabase
         .from("clinic_patterns")
         .select("id, diagnosis_name, use_count, clinic_pattern_items(fee_code, item_name, points, display_order, variant_name, variant_count)")
-        .eq("diagnosis_code", diagnosisCode)
         .eq("is_active", true)
-        .maybeSingle();
+        .order("use_count", { ascending: false });
+
+      if (diagnosisName) {
+        patternsQuery = patternsQuery.ilike("diagnosis_name", `%${diagnosisName}%`);
+      }
+
+      const { data: patternsList } = await patternsQuery.limit(5);
+      const patterns = patternsList?.[0] || null;
 
       if (patterns) {
         const items = (patterns.clinic_pattern_items as {
@@ -2312,7 +2319,7 @@ export default function ConsultationPage() {
                         <p className="text-xs text-gray-500 mb-2">今日治療する歯をタップして治療パターンを選択してください：</p>
                         <div className="flex flex-wrap gap-2">
                           {confirmedDiagnosesList.filter(d => todayTeeth.includes(d.tooth)).map((d, i) => (
-                            <button key={i} onClick={async () => { setConfirmedDiagnosis(d as DetectedDiagnosis); await fetchTreatmentPatterns(d.code); addLog(`🦷 ${d.tooth}番 ${d.name} の治療パターンを表示`); }} className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-sm flex items-center gap-2">
+                            <button key={i} onClick={async () => { setConfirmedDiagnosis(d as DetectedDiagnosis); await fetchTreatmentPatterns(d.code, d.name); addLog(`🦷 ${d.tooth}番 ${d.name} の治療パターンを表示`); }} className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-indigo-700 shadow-sm flex items-center gap-2">
                               <span className="font-bold">{d.tooth}番</span>
                               <span>{d.name}</span>
                               <span className="text-indigo-200 text-xs">→ 治療パターン</span>
