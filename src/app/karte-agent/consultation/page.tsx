@@ -369,7 +369,7 @@ export default function ConsultationPage() {
 
       if (mr) {
         const { data: currentDiags } = await supabase
-          .from("patient_diagnoses").select("*").eq("medical_record_id", mr.id).order("created_at");
+          .from("patient_diagnoses").select("*").eq("medical_record_id", mr.id);
         if (currentDiags && currentDiags.length > 0) {
           setPatientDiagnoses(currentDiags);
           setConfirmedDiagnosesList(currentDiags.map((d: PatientDiagnosis) => ({
