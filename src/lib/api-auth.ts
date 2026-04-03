@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export async function verifyAuth(req: NextRequest): Promise
-  { user: { id: string }; error: null } |
-  { user: null; error: NextResponse }
-> {
+type AuthResult =
+  | { user: { id: string }; error: null }
+  | { user: null; error: NextResponse };
+
+export async function verifyAuth(req: NextRequest): Promise<AuthResult> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return { user: null, error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
