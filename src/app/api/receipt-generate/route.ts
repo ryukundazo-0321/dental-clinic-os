@@ -45,7 +45,7 @@ function toYMD(d: string): string {
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
   try {
-    const { user, error: authError } = await verifyAuth(req);
+    const { user, error: authError } = await verifyAuth(request);
     if (authError) return authError;
 
     const { yearMonth, format } = await request.json();

@@ -93,7 +93,7 @@ function calcAge(dob: string | null, refDate: string): number | null {
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
   try {
-    const { user, error: authError } = await verifyAuth(req);
+    const { user, error: authError } = await verifyAuth(request);
     if (authError) return authError;
 
     const body = await request.json();
