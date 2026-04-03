@@ -1,3 +1,4 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -24,6 +25,9 @@ export async function POST(req: NextRequest) {
   );
 
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const { transcript, medical_record_id, field_key, patient_id } = await req.json();
 
     if (!transcript) {

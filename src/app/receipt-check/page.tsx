@@ -106,6 +106,7 @@ export default function ReceiptCheckPage() {
     setResults(prev => prev.map(r => ({ ...r, status: "checking" as const })));
 
     try {
+      const { data: { session: _src } } = await supabase.auth.getSession();
       const res = await fetch("/api/receipt-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

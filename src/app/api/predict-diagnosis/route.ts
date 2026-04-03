@@ -1,3 +1,4 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -85,6 +86,9 @@ function buildSymptomSummary(
 // ─── API ──────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const body = await request.json();
 

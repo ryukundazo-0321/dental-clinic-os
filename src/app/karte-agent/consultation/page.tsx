@@ -423,6 +423,7 @@ export default function ConsultationPage() {
       if (qr && pt && (!mr?.soap_s)) {
         try {
           addLog("🧠 問診票からプロファイル・傷病名を分析中...");
+          const { data: { session: _sp } } = await supabase.auth.getSession();
           const res = await fetch("/api/analyze-personality", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -559,7 +560,8 @@ export default function ConsultationPage() {
     try {
       const formData = new FormData();
       formData.append("file", blob, "recording.webm");
-      const whisperRes = await fetch("/api/karte-agent/whisper", { method: "POST", body: formData });
+      const { data: { session: _sw } } = await supabase.auth.getSession();
+      const whisperRes = await fetch("/api/karte-agent/whisper", { method: "POST", body: formData, headers: { Authorization: `Bearer ${_sw?.access_token}` } });
       let transcribedText = "";
       if (whisperRes.ok) {
         const wData = await whisperRes.json();
@@ -571,6 +573,7 @@ export default function ConsultationPage() {
       setTranscript(transcribedText);
       addLog(`📝 文字起こし: "${transcribedText.slice(0, 30)}..."`);
 
+      const { data: { session: _sc } } = await supabase.auth.getSession();
       const classifyRes = await fetch("/api/karte-agent/classify-and-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -637,6 +640,7 @@ export default function ConsultationPage() {
       const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
       const base64 = dataUrl.split(",")[1];
 
+      const { data: { session: _sx } } = await supabase.auth.getSession();
       const res = await fetch("/api/xray-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

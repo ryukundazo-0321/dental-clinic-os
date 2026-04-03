@@ -1,7 +1,11 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 

@@ -1076,7 +1076,8 @@ export default function SettingsPage() {
                       try {
                         const fd = new FormData();
                         fd.append("file", ukeFile);
-                        const res = await fetch("/api/analyze-uke?step=parse", { method: "POST", body: fd });
+                        const { data: { session: _s1 } } = await supabase.auth.getSession();
+                        const res = await fetch("/api/analyze-uke?step=parse", { method: "POST", body: fd, headers: { Authorization: `Bearer ${_s1?.access_token}` } });
                         const json = await res.json();
                         if (!json.success) throw new Error(json.error || "パース失敗");
                         setUkePatients(json.matched_patients);
@@ -1205,6 +1206,7 @@ export default function SettingsPage() {
                       setUkeNaming(true);
                       setUkeSaveMsg("");
                       try {
+                        const { data: { session: _s2 } } = await supabase.auth.getSession();
                         const res = await fetch("/api/analyze-uke?step=name", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },

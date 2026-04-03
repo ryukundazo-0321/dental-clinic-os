@@ -1,3 +1,4 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -128,6 +129,9 @@ function buildProfileSummary(p: ProfileAnswers, m: MedicalAnswers): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const body = await req.json();
     const { patient_id, profile_answers, medical_answers, diagnosis_tree_answers, chief_complaint }: {
       patient_id?: string;

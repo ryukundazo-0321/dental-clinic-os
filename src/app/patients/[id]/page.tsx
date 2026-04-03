@@ -885,7 +885,8 @@ export default function PatientDetailPage() {
                             setAiAnalyzing(true);
                             const imgRes = await fetch(pubUrl); const blob = await imgRes.blob();
                             const b64: string = await new Promise(res => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(blob); });
-                            const resp = await fetch("/api/xray-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64, patient_id: pid }) });
+                            const { data: { session: _sxa } } = await supabase.auth.getSession();
+                            const resp = await fetch("/api/xray-analyze", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${_sxa?.access_token}` }, body: JSON.stringify({ image_base64: b64, patient_id: pid }) });
                             const data = await resp.json();
                             if (data.success) { await supabase.from("patient_images").update({ ai_analysis: data.analysis }).eq("id", img.id); await fetchData(); alert("AI分析完了: " + (data.summary||"")); }
                             else alert("分析失敗: " + data.error);
@@ -1267,7 +1268,8 @@ export default function PatientDetailPage() {
                             const reader = new FileReader();
                             reader.onload = async () => {
                               const b64 = (reader.result as string).split(",")[1];
-                              const res = await fetch("/api/insurance-ocr", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_base64: b64 }) });
+                              const { data: { session: _sio } } = await supabase.auth.getSession();
+                              const res = await fetch("/api/insurance-ocr", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${_sio?.access_token}` }, body: JSON.stringify({ image_base64: b64 }) });
                               const data = await res.json();
                               if (data.success && data.ocr) {
                                 const o = data.ocr; const updates: Record<string, string | boolean | null> = {};

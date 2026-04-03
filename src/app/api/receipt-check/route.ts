@@ -1,3 +1,4 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -92,6 +93,9 @@ function calcAge(dob: string | null, refDate: string): number | null {
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const body = await request.json();
     const { yearMonth, billing_ids } = body;
     if (!yearMonth) {

@@ -1,3 +1,4 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { parseUKEBuffer } from "@/lib/uke-parser";
 import { matchUKE } from "@/lib/uke-matcher";
@@ -111,6 +112,9 @@ function groupPatterns(patients: MatchedPatientReceipt[]): GroupedPattern[] {
 // ============================================================
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const { searchParams } = new URL(req.url);
     const step = searchParams.get("step") || "parse";
 

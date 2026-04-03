@@ -1,3 +1,4 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as iconv from "iconv-lite";
@@ -44,6 +45,9 @@ function toYMD(d: string): string {
 export async function POST(request: NextRequest) {
   const supabase = createClient(supabaseUrl, supabaseKey);
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const { yearMonth, format } = await request.json();
     if (!yearMonth || yearMonth.length !== 6) {
       return NextResponse.json(

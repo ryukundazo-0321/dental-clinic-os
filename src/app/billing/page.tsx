@@ -243,7 +243,8 @@ table{border-collapse:collapse;width:100%;}
     setGenerating(true); setReceiptStatus("");
     try {
       const ym = receiptMonth.replace("-", "");
-      const res = await fetch("/api/receipt-generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ yearMonth: ym, format: "uke" }) });
+      const { data: { session: _srg } } = await supabase.auth.getSession();
+      const res = await fetch("/api/receipt-generate", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${_srg?.access_token}` }, body: JSON.stringify({ yearMonth: ym, format: "uke" }) });
       if (!res.ok) { const data = await res.json(); setReceiptStatus(`❌ ${data.error}`); setGenerating(false); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

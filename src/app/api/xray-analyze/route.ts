@@ -1,7 +1,11 @@
+import { verifyAuth } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) return authError;
+
     const body = await req.json();
     const { image_base64, image_url, media_type, image_hint } = body;
     const resolvedMediaType = media_type || "image/jpeg";
