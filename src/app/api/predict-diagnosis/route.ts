@@ -86,7 +86,7 @@ function buildSymptomSummary(
 // ─── API ──────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const { user, error: authError } = await verifyAuth(req);
+    const { user, error: authError } = await verifyAuth(request);
     if (authError) return authError;
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
